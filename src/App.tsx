@@ -278,6 +278,60 @@ export default function App() {
     setTargets((prev) => prev.map((t) => t.id === targetId ? { ...t, currentSaved: t.currentSaved + amount, contributions: [{ id: crypto.randomUUID(), amount, date, note }, ...t.contributions] } : t))
   }
 
+	  const createTarget = () => {
+    const name = targetForm.name.trim()
+    const goalAmount = Number(targetForm.goalAmount) || 0
+    const currentSaved = Number(targetForm.currentSaved) || 0
+    const deadline = targetForm.deadline
+
+    if (!name || goalAmount <= 0 || !deadline) return
+
+    const existing = targets.find(
+      (t) => t.name.trim().toLowerCase() === name.toLowerCase() && t.deadline === deadline
+    )
+
+    if (existing) {
+      const choice = window.prompt(
+        'This target name and deadline already exist. Type: combine, re-enter, or keep separate',
+        'combine'
+      )?.trim().toLowerCase()
+
+      if (choice === 're-enter' || !choice) return
+
+      if (choice === 'combine') {
+        setTargets((prev) =>
+          prev.map((t) =>
+            t.id === existing.id
+              ? {
+                  ...t,
+                  goalAmount: t.goalAmount + goalAmount,
+                  currentSaved: t.currentSaved + currentSaved,
+                }
+              : t
+          )
+        )
+        setTargetForm({ name: '', goalAmount: '', currentSaved: '0', deadline: '' })
+        setTimeout(() => targetNameRef.current?.focus(), 0)
+        return
+      }
+    }
+
+    setTargets((prev) => [
+      {
+        id: crypto.randomUUID(),
+        name,
+        goalAmount,
+        currentSaved,
+        deadline,
+        type: 'savings',
+        contributions: [],
+      },
+      ...prev,
+    ])
+
+    setTargetForm({ name: '', goalAmount: '', currentSaved: '0', deadline: '' })
+    setTimeout(() => targetNameRef.current?.focus(), 0)
+  }
   return <div className="min-h-screen bg-slate-900 text-slate-100"><div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
     <header className="rounded-2xl border border-slate-700 bg-slate-800/80 shadow-xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4"><div><h1 className="text-3xl font-bold tracking-tight">Flow</h1><p className="text-slate-400">Personal Finance Dashboard</p></div><div className="flex flex-wrap gap-2">{(['Dashboard','Income','Budget','Scenarios','Targets'] as Tab[]).map(t => <button title={tabTips[t]} key={t} onClick={() => setTab(t)} className={`px-4 py-2 rounded-lg transition-all duration-200 hover:-translate-y-0.5 ${tab===t?'bg-blue-600 text-white':'bg-slate-700 hover:bg-slate-600'}`}>{t}</button>)}</div></header>
 
