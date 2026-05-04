@@ -105,7 +105,7 @@ export default function App() {
   const [targets, setTargets] = useState<Target[]>([])
   const [savedTargetSets, setSavedTargetSets] = useState<SavedTargetSet[]>([])
   const [targetSetName, setTargetSetName] = useState('')
-  const [targetForm, setTargetForm] = useState({ name: 'Bike', goalAmount: '', currentSaved: '0', deadline: '' })
+  const [targetForm, setTargetForm] = useState({ name: '', goalAmount: '', currentSaved: '0', deadline: '' })
   const [targetLogForm, setTargetLogForm] = useState<Record<string, { date: string; amount: string; note: string }>>({})
   const [dashboardQuickDate, setDashboardQuickDate] = useState('2026-05-29')
   const [dashboardQuickTargetId, setDashboardQuickTargetId] = useState('')
