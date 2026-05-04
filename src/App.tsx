@@ -129,6 +129,11 @@ export default function App() {
   const bumpThresholds = [20000, 40000, 60000, 80000, 150000, 300000, 500000]
   const nextThreshold = bumpThresholds[baseBumpsAchieved]
   const inc = useMemo(() => income(gp, adjustedSalary), [gp, adjustedSalary])
+	useEffect(() => {
+  if (gp < 20000 && baseBumpsAchieved > 0) {
+    setBaseBumpsAchieved(0)
+  }
+}, [gp, baseBumpsAchieved])
 
   useEffect(() => {
     const c = localStorage.getItem('v42-cats'); if (c) setCategories(JSON.parse(c))
@@ -136,14 +141,12 @@ export default function App() {
     const s = localStorage.getItem('v42-scenarios'); if (s) setSavedScenarios(JSON.parse(s))
     const t = localStorage.getItem('v42-targets'); if (t) setTargets(JSON.parse(t))
     const ts = localStorage.getItem('v42-target-sets'); if (ts) setSavedTargetSets(JSON.parse(ts))
-    const bb = localStorage.getItem('v42-base-bumps'); if (bb) setBaseBumpsAchieved(JSON.parse(bb))
   }, [])
   useEffect(() => localStorage.setItem('v42-cats', JSON.stringify(categories)), [categories])
   useEffect(() => localStorage.setItem('v42-budgets', JSON.stringify(savedBudgets)), [savedBudgets])
   useEffect(() => localStorage.setItem('v42-scenarios', JSON.stringify(savedScenarios)), [savedScenarios])
   useEffect(() => localStorage.setItem('v42-targets', JSON.stringify(targets)), [targets])
   useEffect(() => localStorage.setItem('v42-target-sets', JSON.stringify(savedTargetSets)), [savedTargetSets])
-  useEffect(() => localStorage.setItem('v42-base-bumps', JSON.stringify(baseBumpsAchieved)), [baseBumpsAchieved])
 
   useEffect(() => {
     if (tab === 'Income') incomeRef.current?.focus()
@@ -268,13 +271,27 @@ export default function App() {
     budgetNameRef.current?.focus()
   }
   const requiredForTarget = (t: Target) => {
-    const remaining = Math.max(0, t.goalAmount - t.currentSaved)
-    const today = new Date()
-    const deadline = t.deadline ? new Date(t.deadline) : today
-    const ms = Math.max(0, deadline.getTime() - today.getTime())
-    const days = Math.max(1, Math.ceil(ms / 86400000))
-    return { remaining, days, weekly: remaining / (days / 7), biWeekly: remaining / (days / 14), monthly: remaining / (days / 30.4375), yearly: remaining / Math.max(1, days / 365), payPeriods: Math.max(1, Math.ceil(days / 14)) }
+  const remaining = Math.max(0, t.goalAmount - t.currentSaved)
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const deadline = t.deadline ? new Date(t.deadline + 'T00:00:00') : today
+  deadline.setHours(0, 0, 0, 0)
+
+  const diffMs = deadline.getTime() - today.getTime()
+  const days = Math.max(1, Math.ceil(diffMs / 86400000))
+
+  return {
+    remaining,
+    days,
+    weekly: remaining / (days / 7),
+    biWeekly: remaining / (days / 14),
+    monthly: remaining / (days / 30.4375),
+    yearly: remaining / Math.max(1, days / 365),
+    payPeriods: Math.max(1, Math.ceil(days / 14)),
   }
+}
   const addTargetContribution = (targetId: string, amount: number, date: string, note: string) => {
     if (amount <= 0) return
     setTargets((prev) => prev.map((t) => t.id === targetId ? { ...t, currentSaved: t.currentSaved + amount, contributions: [{ id: crypto.randomUUID(), amount, date, note }, ...t.contributions] } : t))
@@ -338,12 +355,12 @@ export default function App() {
     <header className="rounded-2xl border border-slate-700 bg-slate-800/80 shadow-xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4"><div><h1 className="text-3xl font-bold tracking-tight">Flow</h1><p className="text-slate-400">Personal Finance Dashboard</p></div><div className="flex flex-wrap gap-2">{(['Dashboard','Income','Budget','Scenarios','Targets'] as Tab[]).map(t => <button title={tabTips[t]} key={t} onClick={() => setTab(t)} className={`px-4 py-2 rounded-lg transition-all duration-200 hover:-translate-y-0.5 ${tab===t?'bg-blue-600 text-white':'bg-slate-700 hover:bg-slate-600'}`}>{t}</button>)}</div></header>
 
     {tab === 'Dashboard' && <section className="space-y-4 transition-all duration-300"><Card title="Welcome back"><p className="text-slate-200">{welcome}</p></Card><Card title="Dashboard Summary"><div className="flex gap-2 mb-4">{periods.map(p => <Pill key={p} active={period===p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div><p className="mb-4">Monthly Gross Profit Reference: <span className={gp>10000?'text-green-400 font-semibold underline':'font-semibold underline'}>{currency(gp)}</span></p><div className="grid md:grid-cols-3 gap-3"><Metric title="Base Gross Income (salary only)" value={currency(convertFromMonthly(inc.baseGrossMonthly, period))} /><Metric title="Base Net Income (salary take-home)" value={currency(baseNetByPeriod)} /><Metric title="Commission Income (net)" value={currency(convertFromMonthly(inc.cMonthly, period))} /><Metric title="Total Net Income (salary + commission take-home)" value={currency(convertFromMonthly(inc.totalMonthly, period))} featured /><Metric title="Total Budget" value={currency(convertFromMonthly(monthlyBudget, period))} tone={totalBudgetTone} /><Metric title="Remaining After Budget" value={currency(selectedPeriodRemaining)} tone={remainingTone} glow={selectedPeriodRemaining < 0} /></div></Card><Card title="Financial Intelligence"><div className="grid md:grid-cols-3 gap-3"><Info title="Biggest Expense" value={top[0]?`${top[0].name} (${currency(convertFromMonthly(top[0].amount, period))} ${labelPeriod(period)})`:'None'} tone={biggestExpenseTone} /><Info title="Fixed Bills Ratio" value={`${fixedRatio.toFixed(1)}%`} /><Info title="Savings Rate" value={`${savingsRate.toFixed(1)}%`} tone={savingsTone} /><Info title="Commission Dependency" value={`${dep.toFixed(1)}%`} className={depColor} /><Info title="Remaining Cushion" value={`${remainingCushionPct.toFixed(1)}%`} tone={cushionTone} /><Info title="Budget Status / Health Tier" value={statusLabel} tone={statusTone} glow={selectedPeriodRemaining < 0} /></div></Card></section>}
-    {tab === 'Dashboard' && targets.length > 0 && period === 'bi-weekly' && <Card title="Log Savings From This Paycheck"><div className="grid md:grid-cols-4 gap-2"><input type="date" className="p-2 rounded bg-slate-800 border border-slate-600" value={dashboardQuickDate} onChange={(e)=>setDashboardQuickDate(e.target.value)} /><select className="p-2 rounded bg-slate-800 border border-slate-600" value={dashboardQuickTargetId} onChange={(e)=>setDashboardQuickTargetId(e.target.value)}><option value="">Select target</option>{targets.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select><input type="number" min={0} step={25} className="p-2 rounded bg-slate-800 border border-slate-600" value={dashboardQuickAmount} onChange={(e)=>setDashboardQuickAmount(e.target.value)} placeholder="Amount" /><button className="rounded bg-blue-600" onClick={()=>{ if(!dashboardQuickTargetId) return; addTargetContribution(dashboardQuickTargetId, Number(dashboardQuickAmount)||0, dashboardQuickDate, 'Paycheck quick add'); setDashboardQuickAmount('') }}>Add Contribution</button></div></Card>}
+    {tab === 'Dashboard' && targets.length > 0 && period === 'bi-weekly' && <Card title="Log Savings From This Paycheck"><div className="grid md:grid-cols-4 gap-2"><input type="date" className="p-2 rounded bg-slate-800 border border-slate-600" value={dashboardQuickDate} onChange={(e)=>setDashboardQuickDate(e.target.value)} /><select className="p-2 rounded bg-slate-800 border border-slate-600" value={dashboardQuickTargetId} onChange={(e)=>setDashboardQuickTargetId(e.target.value)}><option value="">Select target</option>{targets.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select><input type="number" min={0} step={25} className="p-2 rounded bg-slate-800 border border-slate-600" value={dashboardQuickAmount} onChange={(e)=>setDashboardQuickAmount(e.target.value)}  onWheel={(e) => e.currentTarget.blur()} placeholder="Amount" /><button className="rounded bg-blue-600" onClick={()=>{ if(!dashboardQuickTargetId) return; addTargetContribution(dashboardQuickTargetId, Number(dashboardQuickAmount)||0, dashboardQuickDate, 'Paycheck quick add'); setDashboardQuickAmount('') }}>Add Contribution</button></div></Card>}
 
-	    {tab === 'Income' && <section className="space-y-4 transition-all duration-300"><Card title="Income Input"><label className="text-sm">Monthly Gross Profit</label><div className="relative mt-2"><span className="absolute left-3 top-2.5 text-slate-400">$</span><input ref={incomeRef} type="number" min={0} step={100} value={gpInput} onChange={e => setGpInput(String(Math.max(0, Number(e.target.value)||0)))} className="w-full pl-7 p-2 rounded-lg bg-slate-800 border border-slate-600" /></div><p className="text-xs text-slate-400 mt-1">{currency(gp)}</p><div className="mt-2 text-xs text-slate-400">Current base salary: <span className="font-semibold text-slate-200">{currency(adjustedSalary)}</span></div>{typeof nextThreshold !== 'undefined' && gp < nextThreshold && <p className="text-xs text-slate-400 mt-1">Next base bump unlocks at {currency(nextThreshold)} GP</p>}{typeof nextThreshold !== 'undefined' && gp >= nextThreshold && <label className="mt-2 inline-flex items-center gap-2 text-xs text-slate-300"><input type="checkbox" className="accent-blue-500" onChange={(e)=>{ if (e.target.checked) setBaseBumpsAchieved((prev)=>prev+1) }} />Base bump achieved</label>}{typeof nextThreshold === 'undefined' && <p className="text-xs text-slate-400 mt-1">All configured base bumps achieved.</p>}{typeof nextThreshold !== 'undefined' && baseBumpsAchieved > 0 && gp < nextThreshold && <p className="text-xs text-slate-500 mt-1">Base salary updated to {currency(adjustedSalary)}.</p>}</Card><div className="grid md:grid-cols-2 gap-4"><Card title="Base Income"><Row l="Weekly Net" v={currency(inc.baseWeekly)} /><Row l="Bi-weekly Net" v={currency(inc.baseBiWeekly)} /><Row l="Monthly Net" v={currency(inc.baseMonthly)} /></Card><Card title="Commission Income"><Row l="Weekly Commission" v={currency(inc.cWeekly)} /><Row l="Bi-weekly Commission" v={currency(inc.cBiWeekly)} /><Row l="Monthly Commission" v={currency(inc.cMonthly)} /></Card><Card title="Total Income"><Row l="Weekly Net" v={currency(inc.totalWeekly)} /><Row l="Bi-weekly Net" v={currency(inc.totalBiWeekly)} /><Row l="Monthly Net" v={currency(inc.totalMonthly)} /></Card><Card title="Efficiency Metrics"><Row l="Effective hourly net rate" v={currency(inc.totalWeekly / HOURS_PER_WEEK)} /><Row l="Commission as % of total" v={`${dep.toFixed(1)}%`} /><Row l="Commission per hour" v={currency(inc.cWeekly / HOURS_PER_WEEK)} /></Card></div></section>}
+	    {tab === 'Income' && <section className="space-y-4 transition-all duration-300"><Card title="Income Input"><label className="text-sm">Monthly Gross Profit</label><div className="relative mt-2"><span className="absolute left-3 top-2.5 text-slate-400">$</span><input ref={incomeRef} type="number" min={0} step={100} value={gpInput} onChange={e => setGpInput(String(Math.max(0, Number(e.target.value)||0)))}  onWheel={(e) => e.currentTarget.blur()} className="w-full pl-7 p-2 rounded-lg bg-slate-800 border border-slate-600" /></div><p className="text-xs text-slate-400 mt-1">{currency(gp)}</p><div className="mt-2 text-xs text-slate-400">Current base salary: <span className="font-semibold text-slate-200">{currency(adjustedSalary)}</span></div></Card><div className="grid md:grid-cols-2 gap-4"><Card title="Base Income"><Row l="Weekly Net" v={currency(inc.baseWeekly)} /><Row l="Bi-weekly Net" v={currency(inc.baseBiWeekly)} /><Row l="Monthly Net" v={currency(inc.baseMonthly)} /></Card><Card title="Commission Income"><Row l="Weekly Commission" v={currency(inc.cWeekly)} /><Row l="Bi-weekly Commission" v={currency(inc.cBiWeekly)} /><Row l="Monthly Commission" v={currency(inc.cMonthly)} /></Card><Card title="Total Income"><Row l="Weekly Net" v={currency(inc.totalWeekly)} /><Row l="Bi-weekly Net" v={currency(inc.totalBiWeekly)} /><Row l="Monthly Net" v={currency(inc.totalMonthly)} /></Card><Card title="Efficiency Metrics"><Row l="Effective hourly net rate" v={currency(inc.totalWeekly / HOURS_PER_WEEK) + ' /hr'} /><Row l="Commission as % of total" v={`${dep.toFixed(1)}%`} /><Row l="Commission per hour" v={currency(inc.cWeekly / HOURS_PER_WEEK)} /></Card></div></section>}
 
     {tab === 'Budget' && <section className="space-y-4 transition-all duration-300"><Card title="Budget Summary"><div className="flex gap-2 flex-wrap mb-4">{periods.map(p => <Pill key={p} active={period===p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div><div className="grid md:grid-cols-4 gap-3"><Metric title="Total available income" value={currency(selectedPeriodTotalNet)} /><Metric title="Total planned expenses" value={currency(convertFromMonthly(monthlyBudget,period))} /><Metric title="Remaining amount" value={currency(selectedPeriodRemaining)} tone={remainingTone} glow={selectedPeriodRemaining < 0} /><Metric title="Budget status" value={statusLabel} tone={statusTone} glow={selectedPeriodRemaining < 0} /></div></Card>
-    <Card title="Budget Categories"><div className="grid md:grid-cols-4 gap-2"><div ref={autocompleteWrapRef} className="relative"><input ref={budgetNameRef} className="w-full p-2 rounded-lg bg-slate-800 border border-slate-600" placeholder="Category name" value={form.name} onFocus={() => setShowSuggestions(true)} onBlur={commitFormCheckpoint} onChange={e => { setForm(v=>({...v,name:e.target.value})); setSIndex(-1); setShowSuggestions(true); setBudgetFormHint('') }} onKeyDown={e => { if (!suggestionList.length) { if (e.key==='Enter') { commitFormCheckpoint(); budgetAmountRef.current?.focus() }; return } if (e.key==='ArrowDown') { e.preventDefault(); setSIndex(v => Math.min(v+1, suggestionList.length-1)) } if (e.key==='ArrowUp') { e.preventDefault(); setSIndex(v => Math.max(v-1,0)) } if (e.key==='Enter') { e.preventDefault(); if (sIndex>=0) { const selected = suggestionList[sIndex]; setForm(v=>({...v,name:selected, type: presetTypeMap[selected] ?? v.type })); setShowSuggestions(false); commitFormCheckpoint(); budgetAmountRef.current?.focus() } else { commitFormCheckpoint(); budgetAmountRef.current?.focus() } } }} />{showSuggestions && suggestionList.length>0 && <div className="absolute z-10 w-full mt-1 max-h-56 overflow-y-auto bg-slate-800 border border-slate-600 rounded-lg">{suggestionList.map((x,i)=><button key={x} className={`w-full text-left px-2 py-1 ${i===sIndex?'bg-slate-700':'hover:bg-slate-700'}`} onClick={()=>{setForm(v=>({...v,name:x, type: presetTypeMap[x] ?? v.type })); setShowSuggestions(false); setBudgetFormHint(''); commitFormCheckpoint(); budgetAmountRef.current?.focus()}}>{x}</button>)}</div>}</div><input ref={budgetAmountRef} type="number" min={0} step={25} placeholder={`${labelPeriod(period)} Amount`} className="p-2 rounded-lg bg-slate-800 border border-slate-600" value={form.amount} onBlur={commitFormCheckpoint} onChange={e=>{ setForm(v=>({...v,amount:e.target.value})); setBudgetFormHint('') }} onKeyDown={e=>{if(e.key==='Enter'){ commitFormCheckpoint(); budgetTypeRef.current?.focus() }}} /><select ref={budgetTypeRef} className="p-2 rounded-lg bg-slate-800 border border-slate-600" value={form.type} onKeyDown={e=>{ if(['1','2','3','4'].includes(e.key)){ const m={'1':'fixed bill','2':'variable spending','3':'savings','4':'investing'} as const; setForm(v=>({...v,type:m[e.key as keyof typeof m]})) } if(e.key==='Enter'){e.preventDefault(); commitFormCheckpoint(); upsert()}}} onChange={e=>{ setForm(v=>({...v,type:e.target.value as CategoryType})); commitFormCheckpoint() }}><option value="fixed bill">1 - Fixed Bill</option><option value="variable spending">2 - Variable Spending</option><option value="savings">3 - Savings</option><option value="investing">4 - Investing</option></select><button onClick={upsert} className="rounded-lg bg-blue-600 hover:bg-blue-500">{editId?'Save Changes':'Add'}</button></div>
+    <Card title="Budget Categories"><div className="grid md:grid-cols-4 gap-2"><div ref={autocompleteWrapRef} className="relative"><input ref={budgetNameRef} className="w-full p-2 rounded-lg bg-slate-800 border border-slate-600" placeholder="Category name" value={form.name} onFocus={() => setShowSuggestions(true)} onBlur={commitFormCheckpoint} onChange={e => { setForm(v=>({...v,name:e.target.value})); setSIndex(-1); setShowSuggestions(true); setBudgetFormHint('') }} onKeyDown={e => { if (!suggestionList.length) { if (e.key==='Enter') { commitFormCheckpoint(); budgetAmountRef.current?.focus() }; return } if (e.key==='ArrowDown') { e.preventDefault(); setSIndex(v => Math.min(v+1, suggestionList.length-1)) } if (e.key==='ArrowUp') { e.preventDefault(); setSIndex(v => Math.max(v-1,0)) } if (e.key==='Enter') { e.preventDefault(); if (sIndex>=0) { const selected = suggestionList[sIndex]; setForm(v=>({...v,name:selected, type: presetTypeMap[selected] ?? v.type })); setShowSuggestions(false); commitFormCheckpoint(); budgetAmountRef.current?.focus() } else { commitFormCheckpoint(); budgetAmountRef.current?.focus() } } }} />{showSuggestions && suggestionList.length>0 && <div className="absolute z-10 w-full mt-1 max-h-56 overflow-y-auto bg-slate-800 border border-slate-600 rounded-lg">{suggestionList.map((x,i)=><button key={x} className={`w-full text-left px-2 py-1 ${i===sIndex?'bg-slate-700':'hover:bg-slate-700'}`} onClick={()=>{setForm(v=>({...v,name:x, type: presetTypeMap[x] ?? v.type })); setShowSuggestions(false); setBudgetFormHint(''); commitFormCheckpoint(); budgetAmountRef.current?.focus()}}>{x}</button>)}</div>}</div><input ref={budgetAmountRef} type="number" min={0} step={25} placeholder={`${labelPeriod(period)} Amount`} className="p-2 rounded-lg bg-slate-800 border border-slate-600" value={form.amount} onBlur={commitFormCheckpoint} onChange={e=>{ setForm(v=>({...v,amount:e.target.value})); setBudgetFormHint('') }}  onWheel={(e) => e.currentTarget.blur()} onKeyDown={e=>{if(e.key==='Enter'){ commitFormCheckpoint(); budgetTypeRef.current?.focus() }}} /><select ref={budgetTypeRef} className="p-2 rounded-lg bg-slate-800 border border-slate-600" value={form.type} onKeyDown={e=>{ if(['1','2','3','4'].includes(e.key)){ const m={'1':'fixed bill','2':'variable spending','3':'savings','4':'investing'} as const; setForm(v=>({...v,type:m[e.key as keyof typeof m]})) } if(e.key==='Enter'){e.preventDefault(); commitFormCheckpoint(); upsert()}}} onChange={e=>{ setForm(v=>({...v,type:e.target.value as CategoryType})); commitFormCheckpoint() }}><option value="fixed bill">1 - Fixed Bill</option><option value="variable spending">2 - Variable Spending</option><option value="savings">3 - Savings</option><option value="investing">4 - Investing</option></select><button onClick={upsert} className="rounded-lg bg-blue-600 hover:bg-blue-500">{editId?'Save Changes':'Add'}</button></div>
     <div className="mt-2 flex gap-2"><button onClick={undoBudget} disabled={!budgetHistory.length} className={`rounded-lg px-3 py-1.5 ${budgetHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button><button onClick={redoBudget} disabled={!budgetRedo.length} className={`rounded-lg px-3 py-1.5 ${budgetRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button><button onClick={() => { if (!categories.length) return; pushBudgetHistory(); setCategories([]) }} className="rounded-lg px-3 py-1.5 bg-slate-700 hover:bg-slate-600">Reset Budget</button></div>
     {budgetFormHint && <p className="mt-2 text-sm text-amber-300">{budgetFormHint}</p>}
     <div className="mt-3 grid md:grid-cols-3 gap-2"><input className="p-2 rounded-lg bg-slate-800 border border-slate-600" placeholder="Budget name" value={budgetTitle} onChange={e=>setBudgetTitle(e.target.value)} /><button className="rounded-lg bg-blue-600" onClick={()=>{const n=budgetTitle.trim(); if(!n) return; const ex=savedBudgets.find(x=>x.name.toLowerCase()===n.toLowerCase()); if(ex && !window.confirm('Overwrite existing budget?')) return; setSavedBudgets([{name:n,categories,savedAt:new Date().toISOString()},...savedBudgets.filter(x=>x.name.toLowerCase()!==n.toLowerCase())]); if(ex) setChangeSummary([`Monthly expenses change: ${currency(monthlyBudget-(ex.categories.reduce((s,c)=>s+c.amount,0)))}`])}}>Save Budget</button><div className="text-xs text-slate-400 self-center">Saved locally</div></div>
@@ -351,7 +368,7 @@ export default function App() {
     <div className="mt-2 space-y-2">{savedBudgets.map(b=><div key={b.name} className="rounded border border-slate-700 p-2 flex justify-between"><div><div>{b.name}</div><div className="text-xs text-slate-400">{new Date(b.savedAt).toLocaleString()}</div></div><div className="flex gap-2"><button className="text-blue-300" onClick={()=>setCategories(b.categories)}>Load</button><button className="text-amber-300" onClick={()=>{const nn=window.prompt('Rename budget', b.name); if(!nn) return; setSavedBudgets(prev=>prev.map(x=>x.name===b.name?{...x,name:nn}:x))}}>Rename</button><button className="text-red-300" onClick={()=>setSavedBudgets(prev=>prev.filter(x=>x.name!==b.name))}>Delete</button></div></div>)}</div>
     <table className="w-full text-sm mt-3"><thead><tr className="text-left text-slate-400 border-b border-slate-700"><th>Name</th><th>Type</th><th>Monthly</th><th>{labelPeriod(period)}</th><th/></tr></thead><tbody>{top.map(c=><tr key={c.id} className="border-b border-slate-800"><td>{c.name}</td><td>{c.type === 'fixed bill' ? 'Fixed Bill' : c.type === 'variable spending' ? 'Variable Spending' : c.type === 'savings' ? 'Savings' : 'Investing'}</td><td>{currency(c.amount)}</td><td>{currency(convertFromMonthly(c.amount,period))}</td><td className="space-x-2"><button className="text-blue-300" onClick={()=>{setForm({name:c.name,amount:String(convertFromMonthly(c.amount,period)),type:c.type}); setEditId(c.id); budgetNameRef.current?.focus()}}>Edit</button><button className="text-red-300" onClick={()=>{pushBudgetHistory(); setCategories(prev=>prev.filter(x=>x.id!==c.id))}}>Delete</button></td></tr>)}</tbody></table></Card></section>}
 
-	    {tab==='Scenarios' && <section className="space-y-4 transition-all duration-300"><Card title="Scenario Set Manager"><div className="flex gap-2 mb-3">{periods.map(p=><Pill key={p} active={period===p} onClick={()=>setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div><div className="grid md:grid-cols-4 gap-2">{(['Slow','Medium','Fast','Custom'] as ScenarioName[]).map(n=><div key={n}><label className="text-xs text-slate-400">{n}</label><input ref={n==='Slow'?scenarioSlowRef:undefined} type="number" min={0} step={100} value={scenario[n]} onChange={e=>setScenario(v=>({...v,[n]:Math.max(0,Number(e.target.value)||0)}))} className="w-full p-2 rounded bg-slate-800 border border-slate-600" /></div>)}</div><div className="grid md:grid-cols-3 gap-2 mt-3"><input className="p-2 rounded bg-slate-800 border border-slate-600" placeholder="Scenario set name" value={scenarioTitle} onChange={e=>setScenarioTitle(e.target.value)} /><button className="rounded bg-blue-600" onClick={()=>{const n=scenarioTitle.trim(); if(!n) return; const ex=savedScenarios.find(x=>x.name.toLowerCase()===n.toLowerCase()); if(ex && !window.confirm('Overwrite existing set?')) return; setSavedScenarios([{name:n,scenarios:scenario,period:period,savedAt:new Date().toISOString()},...savedScenarios.filter(x=>x.name.toLowerCase()!==n.toLowerCase())])}}>Save Scenario Set</button><div className="text-xs text-slate-400 self-center">Saved locally</div></div><div className="space-y-2 mt-2">{savedScenarios.map(s=><div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between"><div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div><div className="flex gap-2"><button className="text-blue-300" onClick={()=>{setScenario(s.scenarios); setPeriod(s.period)}}>Load</button><button className="text-red-300" onClick={()=>setSavedScenarios(prev=>prev.filter(x=>x.name!==s.name))}>Delete</button></div></div>)}</div></Card><div className="grid md:grid-cols-2 gap-3">{(['Slow','Medium','Fast','Custom'] as ScenarioName[]).map(n=>{const ii=income(scenario[n], adjustedSalary); const rem=convertFromMonthly(ii.totalMonthly-monthlyBudget,period); const tone=n==='Slow'?'border-yellow-500/60 text-yellow-200':n==='Medium'?'border-blue-500/60 text-blue-200':n==='Fast'?'border-green-500/60 text-green-200':'border-slate-300/60 text-slate-100'; const b = n === 'Slow' ? '#facc15' : n === 'Medium' ? '#60a5fa' : n === 'Fast' ? '#4ade80' : '#cbd5e1'; return <Card key={n} title={`${n} Scenario`} className={tone} style={{ borderColor: b, borderWidth: 2 }}><Row l="Monthly Gross Profit Input" v={currency(scenario[n])} /><Row l={`Converted Gross Profit (${labelPeriod(period)})`} v={currency(convertFromMonthly(scenario[n],period))} /><Row l="Commission" v={currency(convertFromMonthly(ii.cMonthly,period))} /><Row l="Base net income" v={currency(convertFromMonthly(ii.baseMonthly,period))} /><Row l="Total net income" v={currency(convertFromMonthly(ii.totalMonthly,period))} /><Row l="Effective hourly rate" v={currency(ii.totalWeekly/HOURS_PER_WEEK)} /><Row l="Remaining after budget" v={currency(rem)} valueClass={rem<0?'text-red-400':'text-green-400'} /></Card>})}</div></section>}
+	    {tab==='Scenarios' && <section className="space-y-4 transition-all duration-300"><Card title="Scenario Set Manager"><div className="flex gap-2 mb-3">{periods.map(p=><Pill key={p} active={period===p} onClick={()=>setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div><div className="grid md:grid-cols-4 gap-2">{(['Slow','Medium','Fast','Custom'] as ScenarioName[]).map(n=><div key={n}><label className="text-xs text-slate-400">{n}</label><input ref={n==='Slow'?scenarioSlowRef:undefined} type="number" min={0} step={100} value={scenario[n]} onChange={e=>setScenario(v=>({...v,[n]:Math.max(0,Number(e.target.value)||0)}))}  onWheel={(e) => e.currentTarget.blur()} className="w-full p-2 rounded bg-slate-800 border border-slate-600" /></div>)}</div><div className="grid md:grid-cols-3 gap-2 mt-3"><input className="p-2 rounded bg-slate-800 border border-slate-600" placeholder="Scenario set name" value={scenarioTitle} onChange={e=>setScenarioTitle(e.target.value)} /><button className="rounded bg-blue-600" onClick={()=>{const n=scenarioTitle.trim(); if(!n) return; const ex=savedScenarios.find(x=>x.name.toLowerCase()===n.toLowerCase()); if(ex && !window.confirm('Overwrite existing set?')) return; setSavedScenarios([{name:n,scenarios:scenario,period:period,savedAt:new Date().toISOString()},...savedScenarios.filter(x=>x.name.toLowerCase()!==n.toLowerCase())])}}>Save Scenario Set</button><div className="text-xs text-slate-400 self-center">Saved locally</div></div><div className="space-y-2 mt-2">{savedScenarios.map(s=><div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between"><div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div><div className="flex gap-2"><button className="text-blue-300" onClick={()=>{setScenario(s.scenarios); setPeriod(s.period)}}>Load</button><button className="text-red-300" onClick={()=>setSavedScenarios(prev=>prev.filter(x=>x.name!==s.name))}>Delete</button></div></div>)}</div></Card><div className="grid md:grid-cols-2 gap-3">{(['Slow','Medium','Fast','Custom'] as ScenarioName[]).map(n=>{const ii=income(scenario[n], adjustedSalary); const rem=convertFromMonthly(ii.totalMonthly-monthlyBudget,period); const tone=n==='Slow'?'border-yellow-500/60 text-yellow-200':n==='Medium'?'border-blue-500/60 text-blue-200':n==='Fast'?'border-green-500/60 text-green-200':'border-slate-300/60 text-slate-100'; const b = n === 'Slow' ? '#facc15' : n === 'Medium' ? '#60a5fa' : n === 'Fast' ? '#4ade80' : '#cbd5e1'; return <Card key={n} title={`${n} Scenario`} className={tone} style={{ borderColor: b, borderWidth: 2 }}><Row l="Monthly Gross Profit Input" v={currency(scenario[n])} /><Row l={`Converted Gross Profit (${labelPeriod(period)})`} v={currency(convertFromMonthly(scenario[n],period))} /><Row l="Commission" v={currency(convertFromMonthly(ii.cMonthly,period))} /><Row l="Base net income" v={currency(convertFromMonthly(ii.baseMonthly,period))} /><Row l="Total net income" v={currency(convertFromMonthly(ii.totalMonthly,period))} /><Row l="Effective hourly rate" v={currency(ii.totalWeekly/HOURS_PER_WEEK) + ' /hr'} /><Row l="Remaining after budget" v={currency(rem)} valueClass={rem<0?'text-red-400':'text-green-400'} /></Card>})}</div></section>}
     {tab === 'Targets' && <section className="space-y-4"><Card title="Create Target"><div className="grid md:grid-cols-5 gap-2"><div ref={targetAutocompleteWrapRef} className="relative"><input
   ref={targetNameRef}
   className="w-full p-2 rounded bg-slate-800 border border-slate-600"
@@ -417,7 +434,8 @@ export default function App() {
   className="p-2 rounded bg-slate-800 border border-slate-600"
   value={targetForm.goalAmount}
   onChange={(e) => setTargetForm((v) => ({ ...v, goalAmount: e.target.value }))}
-  onKeyDown={(e) => {
+  onWheel={(e) => e.currentTarget.blur()}
+	onKeyDown={(e) => {
     if (e.key === 'Enter') {
       e.preventDefault()
       targetSavedRef.current?.focus()
@@ -434,6 +452,7 @@ export default function App() {
   className="p-2 rounded bg-slate-800 border border-slate-600"
   value={targetForm.currentSaved}
   onChange={(e) => setTargetForm((v) => ({ ...v, currentSaved: e.target.value }))}
+	 onWheel={(e) => e.currentTarget.blur()}
   onKeyDown={(e) => {
     if (e.key === 'Enter') {
       e.preventDefault()
@@ -457,7 +476,18 @@ export default function App() {
   }}
 /><button className="rounded bg-blue-600" onClick={createTarget}>Create</button></div></Card>
       <Card title="Target Sets"><div className="grid md:grid-cols-3 gap-2"><input className="p-2 rounded bg-slate-800 border border-slate-600" value={targetSetName} onChange={(e)=>setTargetSetName(e.target.value)} placeholder="Target set name" /><button className="rounded bg-blue-600" onClick={()=>{const n=targetSetName.trim(); if(!n) return; setSavedTargetSets([{name:n,targets,savedAt:new Date().toISOString()}, ...savedTargetSets.filter(s=>s.name.toLowerCase()!==n.toLowerCase())])}}>Save</button><div className="text-xs text-slate-400 self-center">Saved locally</div></div><div className="space-y-2 mt-2">{savedTargetSets.map(s=><div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between"><div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div><div className="flex gap-2"><button className="text-blue-300" onClick={()=>setTargets(s.targets)}>Load</button><button className="text-red-300" onClick={()=>setSavedTargetSets(prev=>prev.filter(x=>x.name!==s.name))}>Delete</button></div></div>)}</div></Card>
-      <div className="grid md:grid-cols-2 gap-3">{targets.map((t)=>{const req=requiredForTarget(t); const progress=t.goalAmount>0?Math.min(100,(t.currentSaved/t.goalAmount)*100):0; const elapsed=Math.min(1, Math.max(0, (new Date().getTime() - new Date().setHours(0,0,0,0)) / Math.max(1, new Date(t.deadline).getTime() - new Date().setHours(0,0,0,0)))); const expected=t.goalAmount*elapsed; const status=t.currentSaved>expected*1.05?'Ahead':t.currentSaved<expected*0.95?'Behind':'On Track'; const log=targetLogForm[t.id] ?? { date: new Date().toISOString().slice(0,10), amount:'', note:'' }; return <Card key={t.id} title={t.name}><Row l="Goal amount" v={currency(t.goalAmount)} /><Row l="Current saved" v={currency(t.currentSaved)} /><Row l="Remaining amount" v={currency(req.remaining)} /><Row l="Progress" v={`${progress.toFixed(1)}%`} /><Row l="Status" v={status} /><Row l="Days remaining" v={`${req.days}`} /><Row l="Est. pay periods remaining" v={`${req.payPeriods}`} /><Row l="Weekly required" v={currency(req.weekly)} /><Row l="Bi-weekly required" v={currency(req.biWeekly)} /><Row l="Monthly required" v={currency(req.monthly)} /><Row l="Yearly required" v={currency(req.yearly)} /><div className="h-2 bg-slate-700 rounded mt-2"><div className="h-2 bg-blue-500 rounded" style={{width:`${progress}%`}} /></div><div className="mt-3 grid grid-cols-4 gap-2"><input type="date" className="p-2 rounded bg-slate-800 border border-slate-600" value={log.date} onChange={(e)=>setTargetLogForm(v=>({...v,[t.id]:{...log,date:e.target.value}}))} /><input type="number" min={0} step={25} className="p-2 rounded bg-slate-800 border border-slate-600" value={log.amount} onChange={(e)=>setTargetLogForm(v=>({...v,[t.id]:{...log,amount:e.target.value}}))} placeholder="Amount" /><input className="p-2 rounded bg-slate-800 border border-slate-600" value={log.note} onChange={(e)=>setTargetLogForm(v=>({...v,[t.id]:{...log,note:e.target.value}}))} placeholder="Note" /><button className="rounded bg-blue-600" onClick={()=>{ addTargetContribution(t.id, Number(log.amount)||0, log.date, log.note); setTargetLogForm(v=>({...v,[t.id]:{...log,amount:'',note:''}})) }}>Log Contribution</button></div><button
+      <div className="grid md:grid-cols-2 gap-3">{targets.map((t)=>{const req=requiredForTarget(t); const progress=t.goalAmount>0?Math.min(100,(t.currentSaved/t.goalAmount)*100):0; const elapsed=Math.min(1, Math.max(0, (new Date().getTime() - new Date().setHours(0,0,0,0)) / Math.max(1, new Date(t.deadline).getTime() - new Date().setHours(0,0,0,0)))); const expected=t.goalAmount*elapsed; const status=t.currentSaved>expected*1.05?'Ahead':t.currentSaved<expected*0.95?'Behind':'On Track'; const log=targetLogForm[t.id] ?? { date: new Date().toISOString().slice(0,10), amount:'', note:'' }; return <Card key={t.id} title={t.name}><Row l="Goal amount" v={currency(t.goalAmount)} /><Row l="Current saved" v={currency(t.currentSaved)} /><Row l="Remaining amount" v={currency(req.remaining)} /><Row l="Progress" v={`${progress.toFixed(1)}%`} />
+  <Row  
+  l="Status"
+  v={status}
+  valueClass={
+    status === 'Ahead'
+      ? 'text-green-400'
+      : status === 'Behind'
+      ? 'text-red-400'
+      : 'text-slate-100'
+  }
+/><Row l="Days remaining" v={`${req.days}`} /><Row l="Est. pay periods remaining" v={`${req.payPeriods}`} /><Row l="Weekly required" v={currency(req.weekly)} /><Row l="Bi-weekly required" v={currency(req.biWeekly)} /><Row l="Monthly required" v={currency(req.monthly)} /><Row l="Yearly required" v={currency(req.yearly)} /><div className="h-2 bg-slate-700 rounded mt-2"><div className="h-2 bg-blue-500 rounded" style={{width:`${progress}%`}} /></div><div className="mt-3 grid grid-cols-4 gap-2"><input type="date" className="p-2 rounded bg-slate-800 border border-slate-600" value={log.date} onChange={(e)=>setTargetLogForm(v=>({...v,[t.id]:{...log,date:e.target.value}}))} /><input type="number" min={0} step={25} className="p-2 rounded bg-slate-800 border border-slate-600" value={log.amount} onChange={(e)=>setTargetLogForm(v=>({...v,[t.id]:{...log,amount:e.target.value}}))}  onWheel={(e) => e.currentTarget.blur()} placeholder="Amount" /><input className="p-2 rounded bg-slate-800 border border-slate-600" value={log.note} onChange={(e)=>setTargetLogForm(v=>({...v,[t.id]:{...log,note:e.target.value}}))} placeholder="Note" /><button className="rounded bg-blue-600" onClick={()=>{ addTargetContribution(t.id, Number(log.amount)||0, log.date, log.note); setTargetLogForm(v=>({...v,[t.id]:{...log,amount:'',note:''}})) }}>Log Contribution</button></div><button
   className="mt-3 rounded bg-slate-700 px-3 py-1.5"
   onClick={() => {
     const amount =
@@ -480,7 +510,7 @@ export default function App() {
 
       if (i >= 0) {
         const cp = [...prev]
-        cp[i] = { ...cp[i], amount: monthlyAmt }
+        cp[i] = { ...cp[i], amount: cp[i].amount + monthlyAmt }
         return cp
       }
 
@@ -498,7 +528,58 @@ export default function App() {
 >
   Add to Current Budget
 </button>
-		  <details className="mt-3"><summary className="cursor-pointer text-sm text-slate-300">Contribution history ({t.contributions.length})</summary><div className="mt-2 space-y-1">{t.contributions.map(c=><div key={c.id} className="flex justify-between text-sm border-b border-slate-700 py-1"><span>{c.date} • {currency(c.amount)} {c.note?`• ${c.note}`:''}</span><button className="text-red-300" onClick={()=>setTargets(prev=>prev.map(x=>x.id===t.id?{...x,currentSaved:Math.max(0,x.currentSaved-c.amount), contributions:x.contributions.filter(k=>k.id!==c.id)}:x))}>Delete</button></div>)}</div></details></Card>})}</div></section>}
+		  <details className="mt-3"><summary className="cursor-pointer text-sm text-slate-300">Contribution history ({t.contributions.length})</summary><div className="mt-2 space-y-1">{t.contributions.map(c=><div key={c.id} className="flex justify-between text-sm border-b border-slate-700 py-1"><span>{c.date} • {currency(c.amount)} {c.note?`• ${c.note}`:''}</span><div className="flex gap-2">
+  <button
+    className="text-blue-300"
+    onClick={() => {
+      const newDate = window.prompt('Edit date', c.date)
+      if (!newDate) return
+
+      const newAmountText = window.prompt('Edit amount', String(c.amount))
+      if (!newAmountText) return
+
+      const newNote = window.prompt('Edit note', c.note)
+      const newAmount = Number(newAmountText) || 0
+
+      setTargets(prev =>
+        prev.map(x =>
+          x.id === t.id
+            ? {
+                ...x,
+                currentSaved: Math.max(0, x.currentSaved - c.amount + newAmount),
+                contributions: x.contributions.map(k =>
+                  k.id === c.id
+                    ? { ...k, date: newDate, amount: newAmount, note: newNote ?? '' }
+                    : k
+                ),
+              }
+            : x
+        )
+      )
+    }}
+  >
+    Edit
+  </button>
+
+  <button
+    className="text-red-300"
+    onClick={() =>
+      setTargets(prev =>
+        prev.map(x =>
+          x.id === t.id
+            ? {
+                ...x,
+                currentSaved: Math.max(0, x.currentSaved - c.amount),
+                contributions: x.contributions.filter(k => k.id !== c.id),
+              }
+            : x
+        )
+      )
+    }
+  >
+    Delete
+  </button>
+</div></div>)}</div></details></Card>})}</div></section>}
 
   </div></div>
 }
