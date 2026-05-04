@@ -92,8 +92,6 @@ export default function App() {
   const scenarioSlowRef = useRef<HTMLInputElement>(null)
   const targetNameRef = useRef<HTMLInputElement>(null)
   const targetGoalRef = useRef<HTMLInputElement>(null)
-  const targetSavedRef = useRef<HTMLInputElement>(null)
-  const targetDeadlineRef = useRef<HTMLInputElement>(null)
   const targetAutocompleteWrapRef = useRef<HTMLDivElement>(null)
   const [tab, setTab] = useState<Tab>('Dashboard')
   const [period, setPeriod] = useState<Period>('monthly')
