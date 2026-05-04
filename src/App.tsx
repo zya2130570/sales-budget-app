@@ -9,7 +9,7 @@ type SavedBudget = { name: string; categories: Category[]; savedAt: string }
 type SavedScenarioSet = { name: string; scenarios: Record<ScenarioName, number>; period: Period; savedAt: string }
 type BudgetSnapshot = { categories: Category[]; form: { name: string; amount: string; type: CategoryType }; editId: string | null }
 type Contribution = { id: string; date: string; amount: number; note: string }
-type Target = { id: string; name: string; goalAmount: number; currentSaved: number; deadline: string; createdAt?: string; type: 'savings'; contributions: Contribution[]; completed?: boolean }
+type Target = { id: string; name: string; goalAmount: number; currentSaved: number; startDate?: string; deadline: string; createdAt?: string; type: 'savings'; contributions: Contribution[]; completed?: boolean }
 type SavedTargetSet = { name: string; targets: Target[]; savedAt: string }
  
 const BASE_SALARY = 40000
@@ -98,39 +98,51 @@ function income(gp: number, adjustedSalary: number) {
 }
  
 function computeTargetStatus(t: Target): 'Complete' | 'Ahead' | 'On Track' | 'Behind' {
-  // Complete if goal is met
+  // Fully funded
   if (t.goalAmount > 0 && t.currentSaved >= t.goalAmount) return 'Complete'
+ 
+  const toMs = (dateStr: string) => {
+    const d = new Date(dateStr + 'T00:00:00')
+    if (isNaN(d.getTime())) return NaN
+    d.setHours(0, 0, 0, 0)
+    return d.getTime()
+  }
  
   const todayMs = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() })()
  
-  // Parse deadline safely — if missing or invalid, fall back to On Track
-  const deadlineMs = (() => {
-    if (!t.deadline) return NaN
-    const d = new Date(t.deadline + 'T00:00:00')
-    return isNaN(d.getTime()) ? NaN : (d.setHours(0, 0, 0, 0), d.getTime())
-  })()
-  if (isNaN(deadlineMs)) return 'On Track'
- 
-  // Parse creation date safely — fall back to today if missing/invalid
-  const createdMs = (() => {
-    if (!t.createdAt) return todayMs
-    const d = new Date(t.createdAt + 'T00:00:00')
-    return isNaN(d.getTime()) ? todayMs : (d.setHours(0, 0, 0, 0), d.getTime())
+  // Resolve start date: startDate field → createdAt → today
+  const startMs = (() => {
+    if (t.startDate) { const ms = toMs(t.startDate); if (!isNaN(ms)) return ms }
+    if (t.createdAt) { const ms = toMs(t.createdAt); if (!isNaN(ms)) return ms }
+    return todayMs
   })()
  
-  const totalDuration = deadlineMs - createdMs
-  // If total duration is zero or negative, no meaningful timeline — stay On Track
-  if (totalDuration <= 0) return 'On Track'
+  // Parse deadline
+  const deadlineMs = t.deadline ? toMs(t.deadline) : NaN
  
-  const elapsed = Math.min(1, Math.max(0, (todayMs - createdMs) / totalDuration))
-  const expectedSaved = t.goalAmount * elapsed
- 
-  // Avoid division issues when expectedSaved is 0 (very early in timeline)
-  // Use absolute saved vs expectedSaved comparison
-  if (expectedSaved <= 0) {
-    // Nothing expected yet; any positive savings is Ahead, zero is On Track
-    return t.currentSaved > 0 ? 'Ahead' : 'On Track'
+  // Funding-percentage fallback when deadline is missing/invalid or timeline is degenerate
+  const fundingPctFallback = (): 'Complete' | 'Ahead' | 'On Track' | 'Behind' => {
+    const pct = t.goalAmount > 0 ? t.currentSaved / t.goalAmount : 0
+    if (pct >= 1) return 'Complete'
+    if (pct >= 0.6) return 'Ahead'
+    if (pct >= 0.35) return 'On Track'
+    return 'Behind'
   }
+ 
+  if (isNaN(deadlineMs)) return fundingPctFallback()
+ 
+  const totalDays = (deadlineMs - startMs) / 86400000
+  if (totalDays <= 0) return fundingPctFallback()
+ 
+  // Clamp elapsedDays between 0 and totalDays
+  const rawElapsed = (todayMs - startMs) / 86400000
+  const elapsedDays = Math.min(totalDays, Math.max(0, rawElapsed))
+ 
+  const expectedProgress = elapsedDays / totalDays
+  const expectedSaved = t.goalAmount * expectedProgress
+ 
+  // Very beginning of timeline — nothing expected yet
+  if (expectedSaved <= 0) return t.currentSaved > 0 ? 'Ahead' : 'On Track'
  
   const ratio = t.currentSaved / expectedSaved
   if (ratio < 0.85) return 'Behind'
@@ -149,6 +161,7 @@ export default function App() {
   const targetGoalRef = useRef<HTMLInputElement>(null)
   const targetSavedRef = useRef<HTMLInputElement>(null)
   const targetDeadlineRef = useRef<HTMLInputElement>(null)
+  const targetStartDateRef = useRef<HTMLInputElement>(null)
   const targetAutocompleteWrapRef = useRef<HTMLDivElement>(null)
  
   const [tab, setTab] = useState<Tab>('Dashboard')
@@ -161,7 +174,7 @@ export default function App() {
   const [targets, setTargets] = useState<Target[]>([])
   const [savedTargetSets, setSavedTargetSets] = useState<SavedTargetSet[]>([])
   const [targetSetName, setTargetSetName] = useState('')
-  const [targetForm, setTargetForm] = useState({ name: '', goalAmount: '', currentSaved: '0', deadline: '' })
+  const [targetForm, setTargetForm] = useState({ name: '', goalAmount: '', currentSaved: '0', startDate: '', deadline: '' })
   const [targetLogForm, setTargetLogForm] = useState<Record<string, { date: string; amount: string; note: string }>>({})
   const [dashboardQuickDate, setDashboardQuickDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [dashboardQuickTargetId, setDashboardQuickTargetId] = useState('')
@@ -182,7 +195,7 @@ export default function App() {
  
   // Target edit state
   const [editTargetId, setEditTargetId] = useState<string | null>(null)
-  const [editTargetForm, setEditTargetForm] = useState({ name: '', goalAmount: '', currentSaved: '', deadline: '' })
+  const [editTargetForm, setEditTargetForm] = useState({ name: '', goalAmount: '', currentSaved: '', startDate: '', deadline: '' })
  
   // Contribution edit state
   const [editContributionId, setEditContributionId] = useState<string | null>(null)
@@ -427,6 +440,7 @@ export default function App() {
     const name = targetForm.name.trim()
     const goalAmount = Number(targetForm.goalAmount) || 0
     const currentSaved = Number(targetForm.currentSaved) || 0
+    const startDate = targetForm.startDate
     const deadline = targetForm.deadline
     if (!name || goalAmount <= 0 || !deadline) return
  
@@ -443,17 +457,17 @@ export default function App() {
             : t
         )
       )
-      setTargetForm({ name: '', goalAmount: '', currentSaved: '0', deadline: '' })
+      setTargetForm({ name: '', goalAmount: '', currentSaved: '0', startDate: '', deadline: '' })
       setTimeout(() => targetNameRef.current?.focus(), 0)
       return
     }
  
     const today = new Date().toISOString().slice(0, 10)
     setTargetsWithHistory(prev => [
-      { id: crypto.randomUUID(), name, goalAmount, currentSaved, deadline, createdAt: today, type: 'savings', contributions: [], completed: false },
+      { id: crypto.randomUUID(), name, goalAmount, currentSaved, startDate: startDate || today, deadline, createdAt: today, type: 'savings', contributions: [], completed: false },
       ...prev,
     ])
-    setTargetForm({ name: '', goalAmount: '', currentSaved: '0', deadline: '' })
+    setTargetForm({ name: '', goalAmount: '', currentSaved: '0', startDate: '', deadline: '' })
     setTimeout(() => targetNameRef.current?.focus(), 0)
   }
  
@@ -461,10 +475,11 @@ export default function App() {
     const name = editTargetForm.name.trim()
     const goalAmount = Number(editTargetForm.goalAmount) || 0
     const currentSaved = Number(editTargetForm.currentSaved) || 0
+    const startDate = editTargetForm.startDate
     const deadline = editTargetForm.deadline
     if (!name || goalAmount <= 0 || !deadline) return
     setTargetsWithHistory(prev => prev.map(t => t.id === targetId
-      ? { ...t, name, goalAmount, currentSaved, deadline }
+      ? { ...t, name, goalAmount, currentSaved, startDate, deadline }
       : t
     ))
     setEditTargetId(null)
@@ -541,6 +556,7 @@ export default function App() {
                     name: t.name,
                     goalAmount: String(t.goalAmount),
                     currentSaved: String(t.currentSaved),
+                    startDate: t.startDate ?? t.createdAt ?? '',
                     deadline: t.deadline,
                   })
                 }}
@@ -604,6 +620,15 @@ export default function App() {
                 onChange={e => setEditTargetForm(v => ({ ...v, deadline: e.target.value }))}
               />
             </div>
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">Start Date</label>
+              <input
+                type="date"
+                className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
+                value={editTargetForm.startDate}
+                onChange={e => setEditTargetForm(v => ({ ...v, startDate: e.target.value }))}
+              />
+            </div>
             <div className="flex gap-2 pt-1">
               <button
                 className="flex-1 rounded bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm transition-colors"
@@ -623,6 +648,8 @@ export default function App() {
           <>
             <Row l="Goal amount" v={currency(t.goalAmount)} />
             <Row l="Current saved" v={currency(t.currentSaved)} />
+            <Row l="Start date" v={t.startDate ?? t.createdAt ?? '—'} />
+            <Row l="Deadline" v={t.deadline ?? '—'} />
             <Row l="Remaining amount" v={currency(req.remaining)} />
             <Row l="Progress" v={`${progressPct.toFixed(1)}%`} />
             <Row
@@ -1095,7 +1122,7 @@ export default function App() {
         {tab === 'Targets' && (
           <section className="space-y-4">
             <Card title="Create Target">
-              <div className="grid md:grid-cols-5 gap-2">
+              <div className="grid md:grid-cols-6 gap-2">
                 <div ref={targetAutocompleteWrapRef} className="relative">
                   <input
                     ref={targetNameRef}
@@ -1164,8 +1191,17 @@ export default function App() {
                   className="p-2 rounded bg-slate-800 border border-slate-600"
                   value={targetForm.currentSaved}
                   onChange={(e) => setTargetForm((v) => ({ ...v, currentSaved: e.target.value }))}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); targetDeadlineRef.current?.focus() } }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); targetStartDateRef.current?.focus() } }}
                   placeholder="Current Saved"
+                />
+                <input
+                  ref={targetStartDateRef}
+                  type="date"
+                  className="p-2 rounded bg-slate-800 border border-slate-600"
+                  value={targetForm.startDate}
+                  onChange={(e) => setTargetForm((v) => ({ ...v, startDate: e.target.value }))}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); targetDeadlineRef.current?.focus() } }}
+                  placeholder="Start Date"
                 />
                 <input
                   ref={targetDeadlineRef}
@@ -1332,4 +1368,5 @@ function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; va
     </div>
   )
 }
+ 
  
