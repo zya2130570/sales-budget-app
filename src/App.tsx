@@ -1,6 +1,5 @@
- 
 import { useEffect, useMemo, useRef, useState } from 'react'
- 
+
 type Tab = 'Dashboard' | 'Income' | 'Budget' | 'Scenarios' | 'Targets'
 type Period = 'weekly' | 'bi-weekly' | 'monthly' | 'yearly'
 type CategoryType = 'fixed bill' | 'variable spending' | 'savings' | 'investing'
@@ -10,9 +9,9 @@ type SavedBudget = { name: string; categories: Category[]; savedAt: string }
 type SavedScenarioSet = { name: string; scenarios: Record<ScenarioName, number>; period: Period; savedAt: string }
 type BudgetSnapshot = { categories: Category[]; form: { name: string; amount: string; type: CategoryType }; editId: string | null }
 type Contribution = { id: string; date: string; amount: number; note: string }
-type Target = { id: string; name: string; goalAmount: number; currentSaved: number; deadline: string; createdAt?: string; type: 'savings'; contributions: Contribution[] }
+type Target = { id: string; name: string; goalAmount: number; currentSaved: number; deadline: string; createdAt?: string; type: 'savings'; contributions: Contribution[]; completed?: boolean }
 type SavedTargetSet = { name: string; targets: Target[]; savedAt: string }
- 
+
 const BASE_SALARY = 40000
 const TAKE_HOME_RATE = 0.8243
 const HOURS_PER_WEEK = 45
@@ -37,7 +36,7 @@ const categorySuggestions = Object.keys(presetTypeMap).sort((a, b) => a.localeCo
 const scenarioDefaults: Record<ScenarioName, number> = { Slow: 8000, Medium: 15000, Fast: 30000, Custom: 10000 }
 const commissionBrackets = [{ upTo: 5000, rate: 0.04 }, { upTo: 10000, rate: 0.06 }, { upTo: 20000, rate: 0.08 }, { upTo: 40000, rate: 0.1 }, { upTo: 60000, rate: 0.11 }, { upTo: 100000, rate: 0.12 }, { upTo: Infinity, rate: 0.14 }]
 const BUMP_THRESHOLDS = [20000, 40000, 60000, 80000, 150000, 300000, 500000]
- 
+
 const currency = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
 const labelPeriod = (p: Period) => p === 'bi-weekly' ? 'Bi-weekly' : p[0].toUpperCase() + p.slice(1)
 const periods: Period[] = ['weekly', 'bi-weekly', 'monthly', 'yearly']
@@ -49,7 +48,7 @@ const tabTips: Record<Tab, string> = {
   Scenarios: 'Compare different income levels like slow, medium, fast, or custom.',
   Targets: 'Set savings goals, deadlines, and track what you actually save.',
 }
- 
+
 const convertFromMonthly = (m: number, p: Period) => p === 'weekly' ? m / 4 : p === 'bi-weekly' ? m / 2 : p === 'yearly' ? m * 12 : m
 const convertToMonthly = (v: number, p: Period) => p === 'weekly' ? v * 4 : p === 'bi-weekly' ? v * 2 : p === 'yearly' ? v / 12 : v
 const remainingTierFromPeriodValue = (remaining: number, period: Period): { tone: 'good' | 'warn' | 'risk' | 'danger'; label: 'Healthy' | 'Moderate' | 'Risk' } => {
@@ -65,7 +64,7 @@ const remainingTierFromPeriodValue = (remaining: number, period: Period): { tone
   if (remaining < t.yellowMax) return { tone: 'warn', label: 'Moderate' }
   return { tone: 'good', label: 'Healthy' }
 }
- 
+
 function commission(gp: number) {
   let r = Math.max(0, gp), prev = 0, t = 0
   for (const b of commissionBrackets) {
@@ -77,7 +76,7 @@ function commission(gp: number) {
   }
   return t
 }
- 
+
 function income(gp: number, adjustedSalary: number) {
   const baseGrossMonthly = adjustedSalary / 12
   const baseMonthly = baseGrossMonthly * TAKE_HOME_RATE
@@ -97,7 +96,27 @@ function income(gp: number, adjustedSalary: number) {
     commissionPct: totalMonthly > 0 ? (c / totalMonthly) * 100 : 0,
   }
 }
- 
+
+function computeTargetStatus(t: Target): 'Complete' | 'Ahead' | 'On Track' | 'Behind' {
+  const progress = t.goalAmount > 0 ? t.currentSaved / t.goalAmount : 0
+  if (progress >= 1) return 'Complete'
+
+  const todayMs = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() })()
+  const deadlineMs = (() => { const d = new Date(t.deadline + 'T00:00:00'); d.setHours(0, 0, 0, 0); return d.getTime() })()
+  const createdMs = t.createdAt
+    ? (() => { const d = new Date(t.createdAt + 'T00:00:00'); d.setHours(0, 0, 0, 0); return d.getTime() })()
+    : todayMs
+  const totalDuration = Math.max(1, deadlineMs - createdMs)
+  const elapsed = Math.min(1, Math.max(0, (todayMs - createdMs) / totalDuration))
+  const expectedProgress = elapsed
+
+  const daysToDeadline = Math.ceil((deadlineMs - todayMs) / 86400000)
+  if (daysToDeadline <= 30 && progress < 0.5) return 'Behind'
+  if (progress < expectedProgress - 0.05) return 'Behind'
+  if (progress > expectedProgress + 0.05) return 'Ahead'
+  return 'On Track'
+}
+
 export default function App() {
   const incomeRef = useRef<HTMLInputElement>(null)
   const budgetNameRef = useRef<HTMLInputElement>(null)
@@ -110,7 +129,7 @@ export default function App() {
   const targetSavedRef = useRef<HTMLInputElement>(null)
   const targetDeadlineRef = useRef<HTMLInputElement>(null)
   const targetAutocompleteWrapRef = useRef<HTMLDivElement>(null)
- 
+
   const [tab, setTab] = useState<Tab>('Dashboard')
   const [period, setPeriod] = useState<Period>('monthly')
   const [gpInput, setGpInput] = useState('5000')
@@ -139,28 +158,36 @@ export default function App() {
   const [budgetHistory, setBudgetHistory] = useState<BudgetSnapshot[]>([])
   const [budgetRedo, setBudgetRedo] = useState<BudgetSnapshot[]>([])
   const [form, setForm] = useState({ name: '', amount: '', type: 'fixed bill' as CategoryType })
- 
+
   // Target edit state
   const [editTargetId, setEditTargetId] = useState<string | null>(null)
   const [editTargetForm, setEditTargetForm] = useState({ name: '', goalAmount: '', currentSaved: '', deadline: '' })
- 
+
   // Contribution edit state
   const [editContributionId, setEditContributionId] = useState<string | null>(null)
   const [editContributionTargetId, setEditContributionTargetId] = useState<string | null>(null)
   const [editContributionForm, setEditContributionForm] = useState({ date: '', amount: '', note: '' })
- 
+
+  // Target undo/redo
+  const [targetHistory, setTargetHistory] = useState<Target[][]>([])
+  const [targetRedo, setTargetRedo] = useState<Target[][]>([])
+
+  // Collapsible sections for Fully Funded and Completed
+  const [fullyFundedOpen, setFullyFundedOpen] = useState(true)
+  const [completedOpen, setCompletedOpen] = useState(true)
+
   const gp = Math.max(0, Number(gpInput) || 0)
   const adjustedSalary = BASE_SALARY + (baseBumpsAchieved * 5000)
   const eligibleBumps = BUMP_THRESHOLDS.filter(t => gp >= t).length
   const nextUnreachedThreshold = BUMP_THRESHOLDS[eligibleBumps]
   const inc = useMemo(() => income(gp, adjustedSalary), [gp, adjustedSalary])
   const grossSalary = adjustedSalary + (inc.cMonthly * 12)
- 
+
   // Reset base bumps if GP drops below 20000
   useEffect(() => {
     if (gp < 20000 && baseBumpsAchieved > 0) setBaseBumpsAchieved(0)
   }, [gp, baseBumpsAchieved])
- 
+
   // Prevent scroll-wheel from changing number input values
   useEffect(() => {
     const handler = (e: WheelEvent) => {
@@ -172,8 +199,8 @@ export default function App() {
     document.addEventListener('wheel', handler, { passive: false })
     return () => document.removeEventListener('wheel', handler)
   }, [])
- 
-  // localStorage (no persistence for baseBumpsAchieved)
+
+  // localStorage
   useEffect(() => {
     const c = localStorage.getItem('v42-cats'); if (c) setCategories(JSON.parse(c))
     const b = localStorage.getItem('v42-budgets'); if (b) setSavedBudgets(JSON.parse(b))
@@ -186,7 +213,7 @@ export default function App() {
   useEffect(() => localStorage.setItem('v42-scenarios', JSON.stringify(savedScenarios)), [savedScenarios])
   useEffect(() => localStorage.setItem('v42-targets', JSON.stringify(targets)), [targets])
   useEffect(() => localStorage.setItem('v42-target-sets', JSON.stringify(savedTargetSets)), [savedTargetSets])
- 
+
   // Tab focus
   useEffect(() => {
     if (tab === 'Income') incomeRef.current?.focus()
@@ -194,7 +221,7 @@ export default function App() {
     if (tab === 'Scenarios') scenarioSlowRef.current?.focus()
     if (tab === 'Targets') { targetNameRef.current?.focus(); setShowTargetSuggestions(true) }
   }, [tab])
- 
+
   // Close autocomplete on outside click
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
@@ -204,14 +231,14 @@ export default function App() {
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [])
- 
+
   const byType = useMemo(() => ({
     fixed: categories.filter(x => x.type === 'fixed bill').reduce((s, x) => s + x.amount, 0),
     variable: categories.filter(x => x.type === 'variable spending').reduce((s, x) => s + x.amount, 0),
     savings: categories.filter(x => x.type === 'savings').reduce((s, x) => s + x.amount, 0),
     investing: categories.filter(x => x.type === 'investing').reduce((s, x) => s + x.amount, 0),
   }), [categories])
- 
+
   const monthlyBudget = byType.fixed + byType.variable + byType.savings + byType.investing
   const monthlyLeft = inc.totalMonthly - monthlyBudget
   const fixedRatio = inc.totalMonthly > 0 ? (byType.fixed / inc.totalMonthly) * 100 : 0
@@ -219,11 +246,11 @@ export default function App() {
   const dep = inc.commissionPct
   const depColor = dep <= 35 ? 'text-green-400' : dep <= 55 ? 'text-yellow-300' : 'text-red-400'
   const baseNetByPeriod = period === 'weekly' ? inc.baseWeekly : period === 'bi-weekly' ? inc.baseBiWeekly : period === 'yearly' ? inc.baseMonthly * 12 : inc.baseMonthly
- 
+
   const top = [...categories].sort((a, b) => b.amount - a.amount)
   const suggestionList = form.name.trim() ? categorySuggestions.filter(s => s.toLowerCase().includes(form.name.toLowerCase())) : categorySuggestions
   const targetSuggestionList = targetForm.name.trim() ? targetPresets.filter(s => s.toLowerCase().includes(targetForm.name.toLowerCase())) : targetPresets
- 
+
   const hasBudgetData = monthlyBudget > 0
   const selectedPeriodRemaining = convertFromMonthly(monthlyLeft, period)
   const selectedPeriodTotalNet = convertFromMonthly(inc.totalMonthly, period)
@@ -251,7 +278,7 @@ export default function App() {
   const biggestExpenseTone: 'neutral' | 'good' | 'warn' | 'danger' = top[0] && selectedPeriodTotalNet > 0 && convertFromMonthly(top[0].amount, period) > selectedPeriodTotalNet * 0.5 ? 'danger' : 'neutral'
   const totalBudgetRatio = selectedPeriodTotalNet > 0 ? convertFromMonthly(monthlyBudget, period) / selectedPeriodTotalNet : 0
   const totalBudgetTone: 'neutral' | 'warn' | 'danger' = totalBudgetRatio > 0.9 ? 'danger' : totalBudgetRatio > 0.7 ? 'warn' : 'neutral'
- 
+
   const createSnapshot = (): BudgetSnapshot => ({ categories: categories.map((c) => ({ ...c })), form: { ...form }, editId })
   const pushBudgetHistory = () => { setBudgetHistory((prev) => [...prev.slice(-19), createSnapshot()]); setBudgetRedo([]) }
   const commitFormCheckpoint = () => {
@@ -262,6 +289,7 @@ export default function App() {
       return [...prev.slice(-19), snap]
     })
   }
+
   const undoBudget = () => {
     setBudgetHistory((prev) => {
       if (!prev.length) return prev
@@ -286,7 +314,41 @@ export default function App() {
       return next
     })
   }
- 
+
+  // Target undo/redo helpers
+  const pushTargetHistory = (prev: Target[]) => {
+    setTargetHistory(h => [...h.slice(-19), prev])
+    setTargetRedo([])
+  }
+  const undoTarget = () => {
+    setTargetHistory(h => {
+      if (!h.length) return h
+      const next = [...h]
+      const prior = next.pop()!
+      setTargetRedo(r => [...r.slice(-19), targets])
+      setTargets(prior)
+      return next
+    })
+  }
+  const redoTarget = () => {
+    setTargetRedo(r => {
+      if (!r.length) return r
+      const next = [...r]
+      const snapshot = next.pop()!
+      setTargetHistory(h => [...h.slice(-19), targets])
+      setTargets(snapshot)
+      return next
+    })
+  }
+
+  const setTargetsWithHistory = (updater: (prev: Target[]) => Target[]) => {
+    setTargets(prev => {
+      const next = updater(prev)
+      pushTargetHistory(prev)
+      return next
+    })
+  }
+
   const upsert = () => {
     const amt = Math.max(0, Number(form.amount) || 0)
     const monthlyAmt = convertToMonthly(amt, period)
@@ -312,7 +374,7 @@ export default function App() {
     setForm({ name: '', amount: '', type: 'fixed bill' })
     budgetNameRef.current?.focus()
   }
- 
+
   const requiredForTarget = (t: Target) => {
     const remaining = Math.max(0, t.goalAmount - t.currentSaved)
     const today = new Date()
@@ -331,81 +393,72 @@ export default function App() {
       payPeriods: Math.max(1, Math.ceil(days / 14)),
     }
   }
- 
+
   const addTargetContribution = (targetId: string, amount: number, date: string, note: string) => {
     if (amount <= 0) return
-    setTargets((prev) => prev.map((t) => t.id === targetId
+    setTargetsWithHistory(prev => prev.map((t) => t.id === targetId
       ? { ...t, currentSaved: t.currentSaved + amount, contributions: [{ id: crypto.randomUUID(), amount, date, note }, ...t.contributions] }
       : t
     ))
   }
- 
+
   const createTarget = () => {
     const name = targetForm.name.trim()
     const goalAmount = Number(targetForm.goalAmount) || 0
     const currentSaved = Number(targetForm.currentSaved) || 0
     const deadline = targetForm.deadline
     if (!name || goalAmount <= 0 || !deadline) return
- 
+
     const existing = targets.find(
       (t) => t.name.trim().toLowerCase() === name.toLowerCase() && t.deadline === deadline
     )
- 
+
     if (existing) {
-      const choice = window.prompt(
-        'This target name and deadline already exist.\nType: combine, re-enter, or keep separate',
-        'combine'
-      )?.trim().toLowerCase()
- 
-      if (!choice || choice === 're-enter') return
- 
-      if (choice === 'combine') {
-        setTargets((prev) =>
-          prev.map((t) =>
-            t.id === existing.id
-              ? { ...t, goalAmount: t.goalAmount + goalAmount, currentSaved: t.currentSaved + currentSaved }
-              : t
-          )
+      // Combine silently without browser prompt
+      setTargetsWithHistory(prev =>
+        prev.map((t) =>
+          t.id === existing.id
+            ? { ...t, goalAmount: t.goalAmount + goalAmount, currentSaved: t.currentSaved + currentSaved }
+            : t
         )
-        setTargetForm({ name: '', goalAmount: '', currentSaved: '0', deadline: '' })
-        setTimeout(() => targetNameRef.current?.focus(), 0)
-        return
-      }
-      // 'keep separate' falls through to create new
+      )
+      setTargetForm({ name: '', goalAmount: '', currentSaved: '0', deadline: '' })
+      setTimeout(() => targetNameRef.current?.focus(), 0)
+      return
     }
- 
+
     const today = new Date().toISOString().slice(0, 10)
-    setTargets((prev) => [
-      { id: crypto.randomUUID(), name, goalAmount, currentSaved, deadline, createdAt: today, type: 'savings', contributions: [] },
+    setTargetsWithHistory(prev => [
+      { id: crypto.randomUUID(), name, goalAmount, currentSaved, deadline, createdAt: today, type: 'savings', contributions: [], completed: false },
       ...prev,
     ])
     setTargetForm({ name: '', goalAmount: '', currentSaved: '0', deadline: '' })
     setTimeout(() => targetNameRef.current?.focus(), 0)
   }
- 
+
   const saveEditTarget = (targetId: string) => {
     const name = editTargetForm.name.trim()
     const goalAmount = Number(editTargetForm.goalAmount) || 0
     const currentSaved = Number(editTargetForm.currentSaved) || 0
     const deadline = editTargetForm.deadline
     if (!name || goalAmount <= 0 || !deadline) return
-    setTargets(prev => prev.map(t => t.id === targetId
+    setTargetsWithHistory(prev => prev.map(t => t.id === targetId
       ? { ...t, name, goalAmount, currentSaved, deadline }
       : t
     ))
     setEditTargetId(null)
   }
- 
+
   const startEditContribution = (targetId: string, c: Contribution) => {
     setEditContributionId(c.id)
     setEditContributionTargetId(targetId)
     setEditContributionForm({ date: c.date, amount: String(c.amount), note: c.note })
   }
- 
+
   const saveEditContribution = () => {
     if (!editContributionId || !editContributionTargetId) return
     const newAmount = Number(editContributionForm.amount) || 0
-    setTargets(prev => prev.map(x => {
+    setTargetsWithHistory(prev => prev.map(x => {
       if (x.id !== editContributionTargetId) return x
       const oldContrib = x.contributions.find(k => k.id === editContributionId)
       const oldAmount = oldContrib ? oldContrib.amount : 0
@@ -422,22 +475,282 @@ export default function App() {
     setEditContributionTargetId(null)
     setEditContributionForm({ date: '', amount: '', note: '' })
   }
- 
+
   const cancelEditContribution = () => {
     setEditContributionId(null)
     setEditContributionTargetId(null)
     setEditContributionForm({ date: '', amount: '', note: '' })
   }
- 
+
   const goToIncomeAndFocus = () => {
     setTab('Income')
     setTimeout(() => incomeRef.current?.focus(), 80)
   }
- 
+
+  // Target sections
+  const activeTargets = targets.filter(t => !t.completed && (t.goalAmount <= 0 || t.currentSaved < t.goalAmount))
+  const fullyFundedTargets = targets.filter(t => !t.completed && t.goalAmount > 0 && t.currentSaved >= t.goalAmount)
+  const completedTargets = targets.filter(t => t.completed)
+
+  const renderTargetCard = (t: Target) => {
+    const req = requiredForTarget(t)
+    const progressPct = t.goalAmount > 0 ? Math.min(100, (t.currentSaved / t.goalAmount) * 100) : 0
+    const status = computeTargetStatus(t)
+    const log = targetLogForm[t.id] ?? { date: new Date().toISOString().slice(0, 10), amount: '', note: '' }
+    const isEditingTarget = editTargetId === t.id
+
+    const statusColor = status === 'Complete' || status === 'Ahead'
+      ? 'text-green-400'
+      : status === 'Behind'
+        ? 'text-red-400'
+        : 'text-slate-100'
+
+    return (
+      <Card
+        key={t.id}
+        title={isEditingTarget ? `Editing: ${t.name}` : t.name}
+        headerAction={
+          <div className="flex gap-2">
+            {!isEditingTarget && (
+              <button
+                className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
+                onClick={() => {
+                  setEditTargetId(t.id)
+                  setEditTargetForm({
+                    name: t.name,
+                    goalAmount: String(t.goalAmount),
+                    currentSaved: String(t.currentSaved),
+                    deadline: t.deadline,
+                  })
+                }}
+              >
+                Edit
+              </button>
+            )}
+            <button
+              className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
+              onClick={() => {
+                if (isEditingTarget) setEditTargetId(null)
+                setTargetsWithHistory(prev => prev.filter(x => x.id !== t.id))
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        }
+      >
+        {isEditingTarget ? (
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">Target Name</label>
+              <input
+                className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
+                value={editTargetForm.name}
+                onChange={e => setEditTargetForm(v => ({ ...v, name: e.target.value }))}
+                placeholder="Target name"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">Goal Amount</label>
+              <input
+                type="number"
+                min={0}
+                step={25}
+                className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
+                value={editTargetForm.goalAmount}
+                onChange={e => setEditTargetForm(v => ({ ...v, goalAmount: e.target.value }))}
+                placeholder="Goal amount"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">Current Saved</label>
+              <input
+                type="number"
+                min={0}
+                step={25}
+                className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
+                value={editTargetForm.currentSaved}
+                onChange={e => setEditTargetForm(v => ({ ...v, currentSaved: e.target.value }))}
+                placeholder="Current saved"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">Deadline</label>
+              <input
+                type="date"
+                className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
+                value={editTargetForm.deadline}
+                onChange={e => setEditTargetForm(v => ({ ...v, deadline: e.target.value }))}
+              />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                className="flex-1 rounded bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm transition-colors"
+                onClick={() => saveEditTarget(t.id)}
+              >
+                Save Changes
+              </button>
+              <button
+                className="flex-1 rounded bg-slate-700 hover:bg-slate-600 px-3 py-2 text-sm transition-colors"
+                onClick={() => setEditTargetId(null)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <Row l="Goal amount" v={currency(t.goalAmount)} />
+            <Row l="Current saved" v={currency(t.currentSaved)} />
+            <Row l="Remaining amount" v={currency(req.remaining)} />
+            <Row l="Progress" v={`${progressPct.toFixed(1)}%`} />
+            <Row
+              l="Status"
+              v={status}
+              valueClass={statusColor}
+            />
+            <Row l="Days remaining" v={`${req.days}`} />
+            <Row l="Est. pay periods remaining" v={`${req.payPeriods}`} />
+            <Row l="Weekly required" v={currency(req.weekly)} />
+            <Row l="Bi-weekly required" v={currency(req.biWeekly)} />
+            <Row l="Monthly required" v={currency(req.monthly)} />
+            <Row l="Yearly required" v={currency(req.yearly)} />
+            <div className="h-2 bg-slate-700 rounded mt-2">
+              <div className="h-2 bg-blue-500 rounded" style={{ width: `${progressPct}%` }} />
+            </div>
+            {!t.completed && (
+              <>
+                <div className="mt-3 grid grid-cols-4 gap-2">
+                  <input type="date" className="p-2 rounded bg-slate-800 border border-slate-600" value={log.date} onChange={(e) => setTargetLogForm(v => ({ ...v, [t.id]: { ...log, date: e.target.value } }))} />
+                  <input type="number" min={0} step={25} className="p-2 rounded bg-slate-800 border border-slate-600" value={log.amount} onChange={(e) => setTargetLogForm(v => ({ ...v, [t.id]: { ...log, amount: e.target.value } }))} placeholder="Amount" />
+                  <input className="p-2 rounded bg-slate-800 border border-slate-600" value={log.note} onChange={(e) => setTargetLogForm(v => ({ ...v, [t.id]: { ...log, note: e.target.value } }))} placeholder="Note" />
+                  <button className="rounded bg-blue-600" onClick={() => { addTargetContribution(t.id, Number(log.amount) || 0, log.date, log.note); setTargetLogForm(v => ({ ...v, [t.id]: { ...log, amount: '', note: '' } })) }}>Log Contribution</button>
+                </div>
+                <button
+                  className="mt-3 rounded bg-slate-700 hover:bg-slate-600 px-3 py-1.5 text-sm transition-colors"
+                  onClick={() => {
+                    const amount = period === 'weekly' ? req.weekly : period === 'bi-weekly' ? req.biWeekly : period === 'yearly' ? req.yearly : req.monthly
+                    const monthlyAmt = convertToMonthly(amount, period)
+                    setCategories(prev => {
+                      const i = prev.findIndex(c => c.name.trim().toLowerCase() === t.name.trim().toLowerCase() && c.type === 'savings')
+                      if (i >= 0) { const cp = [...prev]; cp[i] = { ...cp[i], amount: monthlyAmt }; return cp }
+                      return [...prev, { id: crypto.randomUUID(), name: t.name, amount: monthlyAmt, type: 'savings' }]
+                    })
+                  }}
+                >
+                  Add to Current Budget
+                </button>
+                <button
+                  className="mt-2 rounded bg-green-700 hover:bg-green-600 px-3 py-1.5 text-sm transition-colors ml-2"
+                  onClick={() => {
+                    setTargetsWithHistory(prev => prev.map(x => x.id === t.id ? { ...x, completed: true } : x))
+                  }}
+                >
+                  Move to Completed
+                </button>
+              </>
+            )}
+            {t.completed && (
+              <button
+                className="mt-3 rounded bg-slate-700 hover:bg-slate-600 px-3 py-1.5 text-sm transition-colors"
+                onClick={() => {
+                  setTargetsWithHistory(prev => prev.map(x => x.id === t.id ? { ...x, completed: false } : x))
+                }}
+              >
+                Move Back to Active
+              </button>
+            )}
+            <details className="mt-3">
+              <summary className="cursor-pointer text-sm text-slate-300">Contribution history ({t.contributions.length})</summary>
+              <div className="mt-2 space-y-1">
+                {t.contributions.map(c => {
+                  const isEditingThis = editContributionId === c.id && editContributionTargetId === t.id
+                  if (isEditingThis) {
+                    return (
+                      <div key={c.id} className="border border-slate-600 rounded p-2 space-y-2 bg-slate-700/50">
+                        <div className="grid grid-cols-3 gap-2">
+                          <div>
+                            <label className="text-xs text-slate-400 block mb-0.5">Date</label>
+                            <input
+                              type="date"
+                              className="w-full p-1.5 rounded bg-slate-800 border border-slate-600 text-sm"
+                              value={editContributionForm.date}
+                              onChange={e => setEditContributionForm(v => ({ ...v, date: e.target.value }))}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-slate-400 block mb-0.5">Amount</label>
+                            <input
+                              type="number"
+                              min={0}
+                              step={25}
+                              className="w-full p-1.5 rounded bg-slate-800 border border-slate-600 text-sm"
+                              value={editContributionForm.amount}
+                              onChange={e => setEditContributionForm(v => ({ ...v, amount: e.target.value }))}
+                            />
+                          </div>
+                          <div>
+                            <label className="text-xs text-slate-400 block mb-0.5">Note</label>
+                            <input
+                              className="w-full p-1.5 rounded bg-slate-800 border border-slate-600 text-sm"
+                              value={editContributionForm.note}
+                              onChange={e => setEditContributionForm(v => ({ ...v, note: e.target.value }))}
+                              placeholder="Note"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            className="rounded bg-blue-600 hover:bg-blue-500 px-3 py-1 text-xs transition-colors"
+                            onClick={saveEditContribution}
+                          >
+                            Save
+                          </button>
+                          <button
+                            className="rounded bg-slate-600 hover:bg-slate-500 px-3 py-1 text-xs transition-colors"
+                            onClick={cancelEditContribution}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  }
+                  return (
+                    <div key={c.id} className="flex justify-between text-sm border-b border-slate-700 py-1">
+                      <span>{c.date} • {currency(c.amount)}{c.note ? ` • ${c.note}` : ''}</span>
+                      <div className="flex gap-2">
+                        <button
+                          className="text-blue-300 hover:text-blue-200"
+                          onClick={() => startEditContribution(t.id, c)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="text-red-300 hover:text-red-200"
+                          onClick={() => setTargetsWithHistory(prev => prev.map(x => x.id === t.id
+                            ? { ...x, currentSaved: Math.max(0, x.currentSaved - c.amount), contributions: x.contributions.filter(k => k.id !== c.id) }
+                            : x
+                          ))}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </details>
+          </>
+        )}
+      </Card>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
       <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
- 
+
         <header className="rounded-2xl border border-slate-700 bg-slate-800/80 shadow-xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Flow</h1>
@@ -456,7 +769,7 @@ export default function App() {
             ))}
           </div>
         </header>
- 
+
         {/* ── DASHBOARD ── */}
         {tab === 'Dashboard' && (
           <section className="space-y-4 transition-all duration-300">
@@ -494,7 +807,7 @@ export default function App() {
             </Card>
           </section>
         )}
- 
+
         {tab === 'Dashboard' && targets.length > 0 && period === 'bi-weekly' && (
           <Card title="Log Savings From This Paycheck">
             <div className="grid md:grid-cols-4 gap-2">
@@ -508,7 +821,7 @@ export default function App() {
             </div>
           </Card>
         )}
- 
+
         {/* ── INCOME ── */}
         {tab === 'Income' && (
           <section className="space-y-4 transition-all duration-300">
@@ -575,7 +888,7 @@ export default function App() {
             </div>
           </section>
         )}
- 
+
         {/* ── BUDGET ── */}
         {tab === 'Budget' && (
           <section className="space-y-4 transition-all duration-300">
@@ -671,15 +984,28 @@ export default function App() {
                   </div>
                 ))}
               </div>
+              {/* Budget table with correct column order per period */}
               <table className="w-full text-sm mt-3">
-                <thead><tr className="text-left text-slate-400 border-b border-slate-700"><th>Name</th><th>Type</th><th>Monthly</th><th>{labelPeriod(period)}</th><th /></tr></thead>
+                <thead>
+                  <tr className="text-left text-slate-400 border-b border-slate-700">
+                    <th>Name</th>
+                    <th>Type</th>
+                    {period === 'weekly' && <><th>Weekly</th><th>Monthly</th></>}
+                    {period === 'bi-weekly' && <><th>Bi-weekly</th><th>Monthly</th></>}
+                    {period === 'monthly' && <th>Monthly</th>}
+                    {period === 'yearly' && <><th>Monthly</th><th>Yearly</th></>}
+                    <th />
+                  </tr>
+                </thead>
                 <tbody>
                   {top.map(c => (
                     <tr key={c.id} className="border-b border-slate-800">
                       <td>{c.name}</td>
                       <td>{c.type === 'fixed bill' ? 'Fixed Bill' : c.type === 'variable spending' ? 'Variable Spending' : c.type === 'savings' ? 'Savings' : 'Investing'}</td>
-                      <td>{currency(c.amount)}</td>
-                      <td>{currency(convertFromMonthly(c.amount, period))}</td>
+                      {period === 'weekly' && <><td>{currency(convertFromMonthly(c.amount, 'weekly'))}</td><td>{currency(c.amount)}</td></>}
+                      {period === 'bi-weekly' && <><td>{currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td><td>{currency(c.amount)}</td></>}
+                      {period === 'monthly' && <td>{currency(c.amount)}</td>}
+                      {period === 'yearly' && <><td>{currency(c.amount)}</td><td>{currency(convertFromMonthly(c.amount, 'yearly'))}</td></>}
                       <td className="space-x-2">
                         <button className="text-blue-300" onClick={() => { setForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type }); setEditId(c.id); budgetNameRef.current?.focus() }}>Edit</button>
                         <button className="text-red-300" onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
@@ -691,7 +1017,7 @@ export default function App() {
             </Card>
           </section>
         )}
- 
+
         {/* ── SCENARIOS ── */}
         {tab === 'Scenarios' && (
           <section className="space-y-4 transition-all duration-300">
@@ -743,7 +1069,7 @@ export default function App() {
             </div>
           </section>
         )}
- 
+
         {/* ── TARGETS ── */}
         {tab === 'Targets' && (
           <section className="space-y-4">
@@ -831,7 +1157,31 @@ export default function App() {
                 <button className="rounded bg-blue-600" onClick={createTarget}>Create</button>
               </div>
             </Card>
- 
+
+            {/* Target Undo / Redo / Clear row */}
+            <div className="flex gap-2 items-center">
+              <button
+                onClick={undoTarget}
+                disabled={!targetHistory.length}
+                className={`rounded-lg px-3 py-1.5 text-sm ${targetHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+              >
+                Undo
+              </button>
+              <button
+                onClick={redoTarget}
+                disabled={!targetRedo.length}
+                className={`rounded-lg px-3 py-1.5 text-sm ${targetRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+              >
+                Redo
+              </button>
+              <button
+                onClick={() => { if (!targets.length) return; setTargetsWithHistory(() => []) }}
+                className="rounded-lg px-3 py-1.5 text-sm bg-red-900 hover:bg-red-800 text-red-200"
+              >
+                Clear Targets
+              </button>
+            </div>
+
             <Card title="Target Sets">
               <div className="grid md:grid-cols-3 gap-2">
                 <input className="p-2 rounded bg-slate-800 border border-slate-600" value={targetSetName} onChange={(e) => setTargetSetName(e.target.value)} placeholder="Target set name" />
@@ -850,253 +1200,64 @@ export default function App() {
                 ))}
               </div>
             </Card>
- 
-            <div className="grid md:grid-cols-2 gap-3">
-              {targets.map((t) => {
-                const req = requiredForTarget(t)
-                const progress = t.goalAmount > 0 ? Math.min(100, (t.currentSaved / t.goalAmount) * 100) : 0
- 
-                const todayMs = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() })()
-                const deadlineMs = (() => { const d = new Date(t.deadline + 'T00:00:00'); d.setHours(0, 0, 0, 0); return d.getTime() })()
-                const createdMs = t.createdAt
-                  ? (() => { const d = new Date(t.createdAt + 'T00:00:00'); d.setHours(0, 0, 0, 0); return d.getTime() })()
-                  : todayMs
-                const totalDuration = Math.max(1, deadlineMs - createdMs)
-                const elapsed = Math.min(1, Math.max(0, (todayMs - createdMs) / totalDuration))
-                const expected = t.goalAmount * elapsed
-                const status = t.currentSaved > expected * 1.05 ? 'Ahead' : t.currentSaved < expected * 0.95 ? 'Behind' : 'On Track'
- 
-                const log = targetLogForm[t.id] ?? { date: new Date().toISOString().slice(0, 10), amount: '', note: '' }
-                const isEditingTarget = editTargetId === t.id
- 
-                return (
-                  <Card
-                    key={t.id}
-                    title={isEditingTarget ? `Editing: ${t.name}` : t.name}
-                    headerAction={
-                      <div className="flex gap-2">
-                        {!isEditingTarget && (
-                          <button
-                            className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
-                            onClick={() => {
-                              setEditTargetId(t.id)
-                              setEditTargetForm({
-                                name: t.name,
-                                goalAmount: String(t.goalAmount),
-                                currentSaved: String(t.currentSaved),
-                                deadline: t.deadline,
-                              })
-                            }}
-                          >
-                            Edit
-                          </button>
-                        )}
-                        <button
-                          className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
-                          onClick={() => {
-                            if (isEditingTarget) setEditTargetId(null)
-                            setTargets(prev => prev.filter(x => x.id !== t.id))
-                          }}
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    }
-                  >
-                    {isEditingTarget ? (
-                      <div className="space-y-3">
-                        <div>
-                          <label className="text-xs text-slate-400 mb-1 block">Target Name</label>
-                          <input
-                            className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
-                            value={editTargetForm.name}
-                            onChange={e => setEditTargetForm(v => ({ ...v, name: e.target.value }))}
-                            placeholder="Target name"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-slate-400 mb-1 block">Goal Amount</label>
-                          <input
-                            type="number"
-                            min={0}
-                            step={25}
-                            className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
-                            value={editTargetForm.goalAmount}
-                            onChange={e => setEditTargetForm(v => ({ ...v, goalAmount: e.target.value }))}
-                            placeholder="Goal amount"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-slate-400 mb-1 block">Current Saved</label>
-                          <input
-                            type="number"
-                            min={0}
-                            step={25}
-                            className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
-                            value={editTargetForm.currentSaved}
-                            onChange={e => setEditTargetForm(v => ({ ...v, currentSaved: e.target.value }))}
-                            placeholder="Current saved"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-xs text-slate-400 mb-1 block">Deadline</label>
-                          <input
-                            type="date"
-                            className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
-                            value={editTargetForm.deadline}
-                            onChange={e => setEditTargetForm(v => ({ ...v, deadline: e.target.value }))}
-                          />
-                        </div>
-                        <div className="flex gap-2 pt-1">
-                          <button
-                            className="flex-1 rounded bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm transition-colors"
-                            onClick={() => saveEditTarget(t.id)}
-                          >
-                            Save Changes
-                          </button>
-                          <button
-                            className="flex-1 rounded bg-slate-700 hover:bg-slate-600 px-3 py-2 text-sm transition-colors"
-                            onClick={() => setEditTargetId(null)}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <Row l="Goal amount" v={currency(t.goalAmount)} />
-                        <Row l="Current saved" v={currency(t.currentSaved)} />
-                        <Row l="Remaining amount" v={currency(req.remaining)} />
-                        <Row l="Progress" v={`${progress.toFixed(1)}%`} />
-                        <Row
-                          l="Status"
-                          v={status}
-                          valueClass={status === 'Ahead' ? 'text-green-400' : status === 'Behind' ? 'text-red-400' : 'text-slate-100'}
-                        />
-                        <Row l="Days remaining" v={`${req.days}`} />
-                        <Row l="Est. pay periods remaining" v={`${req.payPeriods}`} />
-                        <Row l="Weekly required" v={currency(req.weekly)} />
-                        <Row l="Bi-weekly required" v={currency(req.biWeekly)} />
-                        <Row l="Monthly required" v={currency(req.monthly)} />
-                        <Row l="Yearly required" v={currency(req.yearly)} />
-                        <div className="h-2 bg-slate-700 rounded mt-2">
-                          <div className="h-2 bg-blue-500 rounded" style={{ width: `${progress}%` }} />
-                        </div>
-                        <div className="mt-3 grid grid-cols-4 gap-2">
-                          <input type="date" className="p-2 rounded bg-slate-800 border border-slate-600" value={log.date} onChange={(e) => setTargetLogForm(v => ({ ...v, [t.id]: { ...log, date: e.target.value } }))} />
-                          <input type="number" min={0} step={25} className="p-2 rounded bg-slate-800 border border-slate-600" value={log.amount} onChange={(e) => setTargetLogForm(v => ({ ...v, [t.id]: { ...log, amount: e.target.value } }))} placeholder="Amount" />
-                          <input className="p-2 rounded bg-slate-800 border border-slate-600" value={log.note} onChange={(e) => setTargetLogForm(v => ({ ...v, [t.id]: { ...log, note: e.target.value } }))} placeholder="Note" />
-                          <button className="rounded bg-blue-600" onClick={() => { addTargetContribution(t.id, Number(log.amount) || 0, log.date, log.note); setTargetLogForm(v => ({ ...v, [t.id]: { ...log, amount: '', note: '' } })) }}>Log Contribution</button>
-                        </div>
-                        <button
-                          className="mt-3 rounded bg-slate-700 hover:bg-slate-600 px-3 py-1.5 text-sm transition-colors"
-                          onClick={() => {
-                            const amount = period === 'weekly' ? req.weekly : period === 'bi-weekly' ? req.biWeekly : period === 'yearly' ? req.yearly : req.monthly
-                            const monthlyAmt = convertToMonthly(amount, period)
-                            setCategories(prev => {
-                              const i = prev.findIndex(c => c.name.trim().toLowerCase() === t.name.trim().toLowerCase() && c.type === 'savings')
-                              if (i >= 0) { const cp = [...prev]; cp[i] = { ...cp[i], amount: monthlyAmt }; return cp }
-                              return [...prev, { id: crypto.randomUUID(), name: t.name, amount: monthlyAmt, type: 'savings' }]
-                            })
-                          }}
-                        >
-                          Add to Current Budget
-                        </button>
-                        <details className="mt-3">
-                          <summary className="cursor-pointer text-sm text-slate-300">Contribution history ({t.contributions.length})</summary>
-                          <div className="mt-2 space-y-1">
-                            {t.contributions.map(c => {
-                              const isEditingThis = editContributionId === c.id && editContributionTargetId === t.id
-                              if (isEditingThis) {
-                                return (
-                                  <div key={c.id} className="border border-slate-600 rounded p-2 space-y-2 bg-slate-700/50">
-                                    <div className="grid grid-cols-3 gap-2">
-                                      <div>
-                                        <label className="text-xs text-slate-400 block mb-0.5">Date</label>
-                                        <input
-                                          type="date"
-                                          className="w-full p-1.5 rounded bg-slate-800 border border-slate-600 text-sm"
-                                          value={editContributionForm.date}
-                                          onChange={e => setEditContributionForm(v => ({ ...v, date: e.target.value }))}
-                                        />
-                                      </div>
-                                      <div>
-                                        <label className="text-xs text-slate-400 block mb-0.5">Amount</label>
-                                        <input
-                                          type="number"
-                                          min={0}
-                                          step={25}
-                                          className="w-full p-1.5 rounded bg-slate-800 border border-slate-600 text-sm"
-                                          value={editContributionForm.amount}
-                                          onChange={e => setEditContributionForm(v => ({ ...v, amount: e.target.value }))}
-                                        />
-                                      </div>
-                                      <div>
-                                        <label className="text-xs text-slate-400 block mb-0.5">Note</label>
-                                        <input
-                                          className="w-full p-1.5 rounded bg-slate-800 border border-slate-600 text-sm"
-                                          value={editContributionForm.note}
-                                          onChange={e => setEditContributionForm(v => ({ ...v, note: e.target.value }))}
-                                          placeholder="Note"
-                                        />
-                                      </div>
-                                    </div>
-                                    <div className="flex gap-2">
-                                      <button
-                                        className="rounded bg-blue-600 hover:bg-blue-500 px-3 py-1 text-xs transition-colors"
-                                        onClick={saveEditContribution}
-                                      >
-                                        Save
-                                      </button>
-                                      <button
-                                        className="rounded bg-slate-600 hover:bg-slate-500 px-3 py-1 text-xs transition-colors"
-                                        onClick={cancelEditContribution}
-                                      >
-                                        Cancel
-                                      </button>
-                                    </div>
-                                  </div>
-                                )
-                              }
-                              return (
-                                <div key={c.id} className="flex justify-between text-sm border-b border-slate-700 py-1">
-                                  <span>{c.date} • {currency(c.amount)}{c.note ? ` • ${c.note}` : ''}</span>
-                                  <div className="flex gap-2">
-                                    <button
-                                      className="text-blue-300 hover:text-blue-200"
-                                      onClick={() => startEditContribution(t.id, c)}
-                                    >
-                                      Edit
-                                    </button>
-                                    <button
-                                      className="text-red-300 hover:text-red-200"
-                                      onClick={() => setTargets(prev => prev.map(x => x.id === t.id
-                                        ? { ...x, currentSaved: Math.max(0, x.currentSaved - c.amount), contributions: x.contributions.filter(k => k.id !== c.id) }
-                                        : x
-                                      ))}
-                                    >
-                                      Delete
-                                    </button>
-                                  </div>
-                                </div>
-                              )
-                            })}
-                          </div>
-                        </details>
-                      </>
-                    )}
-                  </Card>
-                )
-              })}
-            </div>
+
+            {/* Active Targets */}
+            {activeTargets.length > 0 && (
+              <section className="space-y-3">
+                <h3 className="text-base font-semibold text-slate-200">Active ({activeTargets.length})</h3>
+                <div className="grid md:grid-cols-2 gap-3">
+                  {activeTargets.map(t => renderTargetCard(t))}
+                </div>
+              </section>
+            )}
+
+            {/* Fully Funded Targets */}
+            {fullyFundedTargets.length > 0 && (
+              <section className="space-y-3">
+                <button
+                  className="flex items-center gap-2 text-base font-semibold text-green-300 hover:text-green-200 transition-colors"
+                  onClick={() => setFullyFundedOpen(v => !v)}
+                >
+                  <span>{fullyFundedOpen ? '▾' : '▸'}</span>
+                  <span>Fully Funded ({fullyFundedTargets.length})</span>
+                </button>
+                {fullyFundedOpen && (
+                  <div className="grid md:grid-cols-2 gap-3">
+                    {fullyFundedTargets.map(t => renderTargetCard(t))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Completed Targets */}
+            {completedTargets.length > 0 && (
+              <section className="space-y-3">
+                <button
+                  className="flex items-center gap-2 text-base font-semibold text-slate-400 hover:text-slate-300 transition-colors"
+                  onClick={() => setCompletedOpen(v => !v)}
+                >
+                  <span>{completedOpen ? '▾' : '▸'}</span>
+                  <span>Completed ({completedTargets.length})</span>
+                </button>
+                {completedOpen && (
+                  <div className="grid md:grid-cols-2 gap-3">
+                    {completedTargets.map(t => renderTargetCard(t))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {targets.length === 0 && (
+              <p className="text-slate-400 text-sm">No targets yet. Create one above.</p>
+            )}
           </section>
         )}
- 
+
       </div>
     </div>
   )
 }
- 
+
 function Card({ title, children, className = '', style, headerAction }: { title: string; children: React.ReactNode; className?: string; style?: React.CSSProperties; headerAction?: React.ReactNode }) {
   return (
     <div style={style} className={`rounded-2xl border border-slate-700 bg-slate-800/80 shadow-lg p-4 md:p-5 transition-all duration-200 hover:-translate-y-0.5 ${className}`}>
@@ -1108,11 +1269,11 @@ function Card({ title, children, className = '', style, headerAction }: { title:
     </div>
   )
 }
- 
+
 function Pill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return <button onClick={onClick} className={`px-3 py-1.5 rounded text-sm ${active ? 'bg-blue-600' : 'bg-slate-700 hover:bg-slate-600'} transition`}>{children}</button>
 }
- 
+
 function Metric({ title, value, tone = 'neutral', featured = false, glow = false }: { title: string; value: string; tone?: 'neutral' | 'good' | 'warn' | 'risk' | 'danger'; featured?: boolean; glow?: boolean }) {
   const c = tone === 'good' ? 'text-green-400' : tone === 'warn' ? 'text-yellow-300' : tone === 'risk' ? 'text-orange-300' : tone === 'danger' ? 'text-red-300' : 'text-slate-100'
   return (
@@ -1128,7 +1289,7 @@ function Metric({ title, value, tone = 'neutral', featured = false, glow = false
     </div>
   )
 }
- 
+
 function Info({ title, value, className = '', tone = 'neutral', glow = false }: { title: string; value: string; className?: string; tone?: 'neutral' | 'good' | 'warn' | 'risk' | 'danger'; glow?: boolean }) {
   const tc = tone === 'good' ? 'text-green-400' : tone === 'warn' ? 'text-yellow-300' : tone === 'risk' ? 'text-orange-300' : tone === 'danger' ? 'text-red-300' : 'text-slate-100'
   return (
@@ -1141,7 +1302,7 @@ function Info({ title, value, className = '', tone = 'neutral', glow = false }: 
     </div>
   )
 }
- 
+
 function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; valueClass?: string }) {
   return (
     <div className="py-1.5 border-b border-slate-700 last:border-b-0 flex justify-between text-sm">
@@ -1150,4 +1311,3 @@ function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; va
     </div>
   )
 }
- 
