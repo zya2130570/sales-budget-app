@@ -120,7 +120,7 @@ function computeTargetStatus(t: Target): 'Complete' | 'Ahead' | 'On Track' | 'Be
   // Parse deadline
   const deadlineMs = t.deadline ? toMs(t.deadline) : NaN
  
-  // Funding-percentage fallback when deadline is missing/invalid or timeline is degenerate
+  // Funding-percentage fallback: used when deadline is missing/invalid or timeline is degenerate
   const fundingPctFallback = (): 'Complete' | 'Ahead' | 'On Track' | 'Behind' => {
     const pct = t.goalAmount > 0 ? t.currentSaved / t.goalAmount : 0
     if (pct >= 1) return 'Complete'
@@ -138,15 +138,26 @@ function computeTargetStatus(t: Target): 'Complete' | 'Ahead' | 'On Track' | 'Be
   const rawElapsed = (todayMs - startMs) / 86400000
   const elapsedDays = Math.min(totalDays, Math.max(0, rawElapsed))
  
+  const fundedPercent = t.goalAmount > 0 ? (t.currentSaved / t.goalAmount) * 100 : 0
+ 
+  // Early-stage protection: first 7 days, use funded-percent tiers only
+  // This prevents brand-new targets from showing Ahead just because expectedSaved ≈ 0
+  if (elapsedDays < 7) {
+    if (fundedPercent >= 75) return 'Ahead'
+    // Below 75% funded in first week is On Track — not Ahead
+    return 'On Track'
+  }
+ 
+  // Normal time-based rule after 7 days with wider 70%–125% buffer
   const expectedProgress = elapsedDays / totalDays
   const expectedSaved = t.goalAmount * expectedProgress
  
-  // Very beginning of timeline — nothing expected yet
-  if (expectedSaved <= 0) return t.currentSaved > 0 ? 'Ahead' : 'On Track'
+  // If nothing is expected yet (shouldn't reach here after the elapsedDays < 7 guard, but be safe)
+  if (expectedSaved <= 0) return 'On Track'
  
   const ratio = t.currentSaved / expectedSaved
-  if (ratio < 0.85) return 'Behind'
-  if (ratio > 1.15) return 'Ahead'
+  if (ratio < 0.70) return 'Behind'
+  if (ratio > 1.25) return 'Ahead'
   return 'On Track'
 }
  
@@ -210,6 +221,9 @@ export default function App() {
   const [fullyFundedOpen, setFullyFundedOpen] = useState(true)
   const [completedOpen, setCompletedOpen] = useState(true)
  
+  // Track which targets have already been shown the deadline-passed popup
+  const [deadlinePassedPrompted, setDeadlinePassedPrompted] = useState<Set<string>>(new Set())
+ 
   const gp = Math.max(0, Number(gpInput) || 0)
   const adjustedSalary = BASE_SALARY + (baseBumpsAchieved * 5000)
   const eligibleBumps = BUMP_THRESHOLDS.filter(t => gp >= t).length
@@ -247,6 +261,33 @@ export default function App() {
   useEffect(() => localStorage.setItem('v42-scenarios', JSON.stringify(savedScenarios)), [savedScenarios])
   useEffect(() => localStorage.setItem('v42-targets', JSON.stringify(targets)), [targets])
   useEffect(() => localStorage.setItem('v42-target-sets', JSON.stringify(savedTargetSets)), [savedTargetSets])
+ 
+  // Deadline-passed detection: show a one-time prompt per target when today is past the deadline
+  // and the target is still active (not completed, not fully funded).
+  useEffect(() => {
+    const todayMs = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() })()
+    const overdue = targets.filter(t => {
+      if (t.completed) return false
+      if (t.goalAmount > 0 && t.currentSaved >= t.goalAmount) return false
+      if (!t.deadline) return false
+      const dl = new Date(t.deadline + 'T00:00:00')
+      if (isNaN(dl.getTime())) return false
+      dl.setHours(0, 0, 0, 0)
+      return dl.getTime() < todayMs && !deadlinePassedPrompted.has(t.id)
+    })
+    if (!overdue.length) return
+    // Process one at a time so multiple prompts don't stack confusingly
+    const t = overdue[0]
+    setDeadlinePassedPrompted(prev => new Set([...prev, t.id]))
+    const choice = window.confirm(
+      `The deadline for "${t.name}" has passed.\n\nChoose OK to move it to Completed, or Cancel to keep it Active.`
+    )
+    if (choice) {
+      setTargetsWithHistory(prev => prev.map(x => x.id === t.id ? { ...x, completed: true } : x))
+    }
+    // If user cancels, target stays active; prompt won't show again this session
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targets])
  
   // Tab focus
   useEffect(() => {
@@ -1368,5 +1409,6 @@ function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; va
     </div>
   )
 }
+ 
  
  
