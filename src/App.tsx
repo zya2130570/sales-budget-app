@@ -127,6 +127,7 @@ export default function App() {
   const gp = Math.max(0, Number(gpInput) || 0)
   const adjustedSalary = BASE_SALARY + (baseBumpsAchieved * 5000)
   const bumpThresholds = [20000, 40000, 60000, 80000, 150000, 300000, 500000]
+	const nextThreshold = bumpThresholds[baseBumpsAchieved]
   const inc = useMemo(() => income(gp, adjustedSalary), [gp, adjustedSalary])
 	useEffect(() => {
   if (gp < 20000 && baseBumpsAchieved > 0) {
