@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-
+ 
 type Tab = 'Dashboard' | 'Income' | 'Budget' | 'Scenarios' | 'Targets'
 type Period = 'weekly' | 'bi-weekly' | 'monthly' | 'yearly'
 type CategoryType = 'fixed bill' | 'variable spending' | 'savings' | 'investing'
@@ -11,7 +11,7 @@ type BudgetSnapshot = { categories: Category[]; form: { name: string; amount: st
 type Contribution = { id: string; date: string; amount: number; note: string }
 type Target = { id: string; name: string; goalAmount: number; currentSaved: number; deadline: string; createdAt?: string; type: 'savings'; contributions: Contribution[]; completed?: boolean }
 type SavedTargetSet = { name: string; targets: Target[]; savedAt: string }
-
+ 
 const BASE_SALARY = 40000
 const TAKE_HOME_RATE = 0.8243
 const HOURS_PER_WEEK = 45
@@ -36,7 +36,7 @@ const categorySuggestions = Object.keys(presetTypeMap).sort((a, b) => a.localeCo
 const scenarioDefaults: Record<ScenarioName, number> = { Slow: 8000, Medium: 15000, Fast: 30000, Custom: 10000 }
 const commissionBrackets = [{ upTo: 5000, rate: 0.04 }, { upTo: 10000, rate: 0.06 }, { upTo: 20000, rate: 0.08 }, { upTo: 40000, rate: 0.1 }, { upTo: 60000, rate: 0.11 }, { upTo: 100000, rate: 0.12 }, { upTo: Infinity, rate: 0.14 }]
 const BUMP_THRESHOLDS = [20000, 40000, 60000, 80000, 150000, 300000, 500000]
-
+ 
 const currency = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
 const labelPeriod = (p: Period) => p === 'bi-weekly' ? 'Bi-weekly' : p[0].toUpperCase() + p.slice(1)
 const periods: Period[] = ['weekly', 'bi-weekly', 'monthly', 'yearly']
@@ -48,7 +48,7 @@ const tabTips: Record<Tab, string> = {
   Scenarios: 'Compare different income levels like slow, medium, fast, or custom.',
   Targets: 'Set savings goals, deadlines, and track what you actually save.',
 }
-
+ 
 const convertFromMonthly = (m: number, p: Period) => p === 'weekly' ? m / 4 : p === 'bi-weekly' ? m / 2 : p === 'yearly' ? m * 12 : m
 const convertToMonthly = (v: number, p: Period) => p === 'weekly' ? v * 4 : p === 'bi-weekly' ? v * 2 : p === 'yearly' ? v / 12 : v
 const remainingTierFromPeriodValue = (remaining: number, period: Period): { tone: 'good' | 'warn' | 'risk' | 'danger'; label: 'Healthy' | 'Moderate' | 'Risk' } => {
@@ -64,7 +64,7 @@ const remainingTierFromPeriodValue = (remaining: number, period: Period): { tone
   if (remaining < t.yellowMax) return { tone: 'warn', label: 'Moderate' }
   return { tone: 'good', label: 'Healthy' }
 }
-
+ 
 function commission(gp: number) {
   let r = Math.max(0, gp), prev = 0, t = 0
   for (const b of commissionBrackets) {
@@ -76,7 +76,7 @@ function commission(gp: number) {
   }
   return t
 }
-
+ 
 function income(gp: number, adjustedSalary: number) {
   const baseGrossMonthly = adjustedSalary / 12
   const baseMonthly = baseGrossMonthly * TAKE_HOME_RATE
@@ -96,27 +96,48 @@ function income(gp: number, adjustedSalary: number) {
     commissionPct: totalMonthly > 0 ? (c / totalMonthly) * 100 : 0,
   }
 }
-
+ 
 function computeTargetStatus(t: Target): 'Complete' | 'Ahead' | 'On Track' | 'Behind' {
-  const progress = t.goalAmount > 0 ? t.currentSaved / t.goalAmount : 0
-  if (progress >= 1) return 'Complete'
-
+  // Complete if goal is met
+  if (t.goalAmount > 0 && t.currentSaved >= t.goalAmount) return 'Complete'
+ 
   const todayMs = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() })()
-  const deadlineMs = (() => { const d = new Date(t.deadline + 'T00:00:00'); d.setHours(0, 0, 0, 0); return d.getTime() })()
-  const createdMs = t.createdAt
-    ? (() => { const d = new Date(t.createdAt + 'T00:00:00'); d.setHours(0, 0, 0, 0); return d.getTime() })()
-    : todayMs
-  const totalDuration = Math.max(1, deadlineMs - createdMs)
+ 
+  // Parse deadline safely — if missing or invalid, fall back to On Track
+  const deadlineMs = (() => {
+    if (!t.deadline) return NaN
+    const d = new Date(t.deadline + 'T00:00:00')
+    return isNaN(d.getTime()) ? NaN : (d.setHours(0, 0, 0, 0), d.getTime())
+  })()
+  if (isNaN(deadlineMs)) return 'On Track'
+ 
+  // Parse creation date safely — fall back to today if missing/invalid
+  const createdMs = (() => {
+    if (!t.createdAt) return todayMs
+    const d = new Date(t.createdAt + 'T00:00:00')
+    return isNaN(d.getTime()) ? todayMs : (d.setHours(0, 0, 0, 0), d.getTime())
+  })()
+ 
+  const totalDuration = deadlineMs - createdMs
+  // If total duration is zero or negative, no meaningful timeline — stay On Track
+  if (totalDuration <= 0) return 'On Track'
+ 
   const elapsed = Math.min(1, Math.max(0, (todayMs - createdMs) / totalDuration))
-  const expectedProgress = elapsed
-
-  const daysToDeadline = Math.ceil((deadlineMs - todayMs) / 86400000)
-  if (daysToDeadline <= 30 && progress < 0.5) return 'Behind'
-  if (progress < expectedProgress - 0.05) return 'Behind'
-  if (progress > expectedProgress + 0.05) return 'Ahead'
+  const expectedSaved = t.goalAmount * elapsed
+ 
+  // Avoid division issues when expectedSaved is 0 (very early in timeline)
+  // Use absolute saved vs expectedSaved comparison
+  if (expectedSaved <= 0) {
+    // Nothing expected yet; any positive savings is Ahead, zero is On Track
+    return t.currentSaved > 0 ? 'Ahead' : 'On Track'
+  }
+ 
+  const ratio = t.currentSaved / expectedSaved
+  if (ratio < 0.85) return 'Behind'
+  if (ratio > 1.15) return 'Ahead'
   return 'On Track'
 }
-
+ 
 export default function App() {
   const incomeRef = useRef<HTMLInputElement>(null)
   const budgetNameRef = useRef<HTMLInputElement>(null)
@@ -129,7 +150,7 @@ export default function App() {
   const targetSavedRef = useRef<HTMLInputElement>(null)
   const targetDeadlineRef = useRef<HTMLInputElement>(null)
   const targetAutocompleteWrapRef = useRef<HTMLDivElement>(null)
-
+ 
   const [tab, setTab] = useState<Tab>('Dashboard')
   const [period, setPeriod] = useState<Period>('monthly')
   const [gpInput, setGpInput] = useState('5000')
@@ -158,36 +179,36 @@ export default function App() {
   const [budgetHistory, setBudgetHistory] = useState<BudgetSnapshot[]>([])
   const [budgetRedo, setBudgetRedo] = useState<BudgetSnapshot[]>([])
   const [form, setForm] = useState({ name: '', amount: '', type: 'fixed bill' as CategoryType })
-
+ 
   // Target edit state
   const [editTargetId, setEditTargetId] = useState<string | null>(null)
   const [editTargetForm, setEditTargetForm] = useState({ name: '', goalAmount: '', currentSaved: '', deadline: '' })
-
+ 
   // Contribution edit state
   const [editContributionId, setEditContributionId] = useState<string | null>(null)
   const [editContributionTargetId, setEditContributionTargetId] = useState<string | null>(null)
   const [editContributionForm, setEditContributionForm] = useState({ date: '', amount: '', note: '' })
-
+ 
   // Target undo/redo
   const [targetHistory, setTargetHistory] = useState<Target[][]>([])
   const [targetRedo, setTargetRedo] = useState<Target[][]>([])
-
+ 
   // Collapsible sections for Fully Funded and Completed
   const [fullyFundedOpen, setFullyFundedOpen] = useState(true)
   const [completedOpen, setCompletedOpen] = useState(true)
-
+ 
   const gp = Math.max(0, Number(gpInput) || 0)
   const adjustedSalary = BASE_SALARY + (baseBumpsAchieved * 5000)
   const eligibleBumps = BUMP_THRESHOLDS.filter(t => gp >= t).length
   const nextUnreachedThreshold = BUMP_THRESHOLDS[eligibleBumps]
   const inc = useMemo(() => income(gp, adjustedSalary), [gp, adjustedSalary])
   const grossSalary = adjustedSalary + (inc.cMonthly * 12)
-
+ 
   // Reset base bumps if GP drops below 20000
   useEffect(() => {
     if (gp < 20000 && baseBumpsAchieved > 0) setBaseBumpsAchieved(0)
   }, [gp, baseBumpsAchieved])
-
+ 
   // Prevent scroll-wheel from changing number input values
   useEffect(() => {
     const handler = (e: WheelEvent) => {
@@ -199,7 +220,7 @@ export default function App() {
     document.addEventListener('wheel', handler, { passive: false })
     return () => document.removeEventListener('wheel', handler)
   }, [])
-
+ 
   // localStorage
   useEffect(() => {
     const c = localStorage.getItem('v42-cats'); if (c) setCategories(JSON.parse(c))
@@ -213,7 +234,7 @@ export default function App() {
   useEffect(() => localStorage.setItem('v42-scenarios', JSON.stringify(savedScenarios)), [savedScenarios])
   useEffect(() => localStorage.setItem('v42-targets', JSON.stringify(targets)), [targets])
   useEffect(() => localStorage.setItem('v42-target-sets', JSON.stringify(savedTargetSets)), [savedTargetSets])
-
+ 
   // Tab focus
   useEffect(() => {
     if (tab === 'Income') incomeRef.current?.focus()
@@ -221,7 +242,7 @@ export default function App() {
     if (tab === 'Scenarios') scenarioSlowRef.current?.focus()
     if (tab === 'Targets') { targetNameRef.current?.focus(); setShowTargetSuggestions(true) }
   }, [tab])
-
+ 
   // Close autocomplete on outside click
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
@@ -231,14 +252,14 @@ export default function App() {
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [])
-
+ 
   const byType = useMemo(() => ({
     fixed: categories.filter(x => x.type === 'fixed bill').reduce((s, x) => s + x.amount, 0),
     variable: categories.filter(x => x.type === 'variable spending').reduce((s, x) => s + x.amount, 0),
     savings: categories.filter(x => x.type === 'savings').reduce((s, x) => s + x.amount, 0),
     investing: categories.filter(x => x.type === 'investing').reduce((s, x) => s + x.amount, 0),
   }), [categories])
-
+ 
   const monthlyBudget = byType.fixed + byType.variable + byType.savings + byType.investing
   const monthlyLeft = inc.totalMonthly - monthlyBudget
   const fixedRatio = inc.totalMonthly > 0 ? (byType.fixed / inc.totalMonthly) * 100 : 0
@@ -246,11 +267,11 @@ export default function App() {
   const dep = inc.commissionPct
   const depColor = dep <= 35 ? 'text-green-400' : dep <= 55 ? 'text-yellow-300' : 'text-red-400'
   const baseNetByPeriod = period === 'weekly' ? inc.baseWeekly : period === 'bi-weekly' ? inc.baseBiWeekly : period === 'yearly' ? inc.baseMonthly * 12 : inc.baseMonthly
-
+ 
   const top = [...categories].sort((a, b) => b.amount - a.amount)
   const suggestionList = form.name.trim() ? categorySuggestions.filter(s => s.toLowerCase().includes(form.name.toLowerCase())) : categorySuggestions
   const targetSuggestionList = targetForm.name.trim() ? targetPresets.filter(s => s.toLowerCase().includes(targetForm.name.toLowerCase())) : targetPresets
-
+ 
   const hasBudgetData = monthlyBudget > 0
   const selectedPeriodRemaining = convertFromMonthly(monthlyLeft, period)
   const selectedPeriodTotalNet = convertFromMonthly(inc.totalMonthly, period)
@@ -278,7 +299,7 @@ export default function App() {
   const biggestExpenseTone: 'neutral' | 'good' | 'warn' | 'danger' = top[0] && selectedPeriodTotalNet > 0 && convertFromMonthly(top[0].amount, period) > selectedPeriodTotalNet * 0.5 ? 'danger' : 'neutral'
   const totalBudgetRatio = selectedPeriodTotalNet > 0 ? convertFromMonthly(monthlyBudget, period) / selectedPeriodTotalNet : 0
   const totalBudgetTone: 'neutral' | 'warn' | 'danger' = totalBudgetRatio > 0.9 ? 'danger' : totalBudgetRatio > 0.7 ? 'warn' : 'neutral'
-
+ 
   const createSnapshot = (): BudgetSnapshot => ({ categories: categories.map((c) => ({ ...c })), form: { ...form }, editId })
   const pushBudgetHistory = () => { setBudgetHistory((prev) => [...prev.slice(-19), createSnapshot()]); setBudgetRedo([]) }
   const commitFormCheckpoint = () => {
@@ -289,7 +310,7 @@ export default function App() {
       return [...prev.slice(-19), snap]
     })
   }
-
+ 
   const undoBudget = () => {
     setBudgetHistory((prev) => {
       if (!prev.length) return prev
@@ -314,7 +335,7 @@ export default function App() {
       return next
     })
   }
-
+ 
   // Target undo/redo helpers
   const pushTargetHistory = (prev: Target[]) => {
     setTargetHistory(h => [...h.slice(-19), prev])
@@ -340,7 +361,7 @@ export default function App() {
       return next
     })
   }
-
+ 
   const setTargetsWithHistory = (updater: (prev: Target[]) => Target[]) => {
     setTargets(prev => {
       const next = updater(prev)
@@ -348,7 +369,7 @@ export default function App() {
       return next
     })
   }
-
+ 
   const upsert = () => {
     const amt = Math.max(0, Number(form.amount) || 0)
     const monthlyAmt = convertToMonthly(amt, period)
@@ -374,7 +395,7 @@ export default function App() {
     setForm({ name: '', amount: '', type: 'fixed bill' })
     budgetNameRef.current?.focus()
   }
-
+ 
   const requiredForTarget = (t: Target) => {
     const remaining = Math.max(0, t.goalAmount - t.currentSaved)
     const today = new Date()
@@ -393,7 +414,7 @@ export default function App() {
       payPeriods: Math.max(1, Math.ceil(days / 14)),
     }
   }
-
+ 
   const addTargetContribution = (targetId: string, amount: number, date: string, note: string) => {
     if (amount <= 0) return
     setTargetsWithHistory(prev => prev.map((t) => t.id === targetId
@@ -401,18 +422,18 @@ export default function App() {
       : t
     ))
   }
-
+ 
   const createTarget = () => {
     const name = targetForm.name.trim()
     const goalAmount = Number(targetForm.goalAmount) || 0
     const currentSaved = Number(targetForm.currentSaved) || 0
     const deadline = targetForm.deadline
     if (!name || goalAmount <= 0 || !deadline) return
-
+ 
     const existing = targets.find(
       (t) => t.name.trim().toLowerCase() === name.toLowerCase() && t.deadline === deadline
     )
-
+ 
     if (existing) {
       // Combine silently without browser prompt
       setTargetsWithHistory(prev =>
@@ -426,7 +447,7 @@ export default function App() {
       setTimeout(() => targetNameRef.current?.focus(), 0)
       return
     }
-
+ 
     const today = new Date().toISOString().slice(0, 10)
     setTargetsWithHistory(prev => [
       { id: crypto.randomUUID(), name, goalAmount, currentSaved, deadline, createdAt: today, type: 'savings', contributions: [], completed: false },
@@ -435,7 +456,7 @@ export default function App() {
     setTargetForm({ name: '', goalAmount: '', currentSaved: '0', deadline: '' })
     setTimeout(() => targetNameRef.current?.focus(), 0)
   }
-
+ 
   const saveEditTarget = (targetId: string) => {
     const name = editTargetForm.name.trim()
     const goalAmount = Number(editTargetForm.goalAmount) || 0
@@ -448,13 +469,13 @@ export default function App() {
     ))
     setEditTargetId(null)
   }
-
+ 
   const startEditContribution = (targetId: string, c: Contribution) => {
     setEditContributionId(c.id)
     setEditContributionTargetId(targetId)
     setEditContributionForm({ date: c.date, amount: String(c.amount), note: c.note })
   }
-
+ 
   const saveEditContribution = () => {
     if (!editContributionId || !editContributionTargetId) return
     const newAmount = Number(editContributionForm.amount) || 0
@@ -475,36 +496,36 @@ export default function App() {
     setEditContributionTargetId(null)
     setEditContributionForm({ date: '', amount: '', note: '' })
   }
-
+ 
   const cancelEditContribution = () => {
     setEditContributionId(null)
     setEditContributionTargetId(null)
     setEditContributionForm({ date: '', amount: '', note: '' })
   }
-
+ 
   const goToIncomeAndFocus = () => {
     setTab('Income')
     setTimeout(() => incomeRef.current?.focus(), 80)
   }
-
+ 
   // Target sections
   const activeTargets = targets.filter(t => !t.completed && (t.goalAmount <= 0 || t.currentSaved < t.goalAmount))
   const fullyFundedTargets = targets.filter(t => !t.completed && t.goalAmount > 0 && t.currentSaved >= t.goalAmount)
   const completedTargets = targets.filter(t => t.completed)
-
+ 
   const renderTargetCard = (t: Target) => {
     const req = requiredForTarget(t)
     const progressPct = t.goalAmount > 0 ? Math.min(100, (t.currentSaved / t.goalAmount) * 100) : 0
     const status = computeTargetStatus(t)
     const log = targetLogForm[t.id] ?? { date: new Date().toISOString().slice(0, 10), amount: '', note: '' }
     const isEditingTarget = editTargetId === t.id
-
+ 
     const statusColor = status === 'Complete' || status === 'Ahead'
       ? 'text-green-400'
       : status === 'Behind'
         ? 'text-red-400'
         : 'text-slate-100'
-
+ 
     return (
       <Card
         key={t.id}
@@ -746,11 +767,11 @@ export default function App() {
       </Card>
     )
   }
-
+ 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
       <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
-
+ 
         <header className="rounded-2xl border border-slate-700 bg-slate-800/80 shadow-xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Flow</h1>
@@ -769,7 +790,7 @@ export default function App() {
             ))}
           </div>
         </header>
-
+ 
         {/* ── DASHBOARD ── */}
         {tab === 'Dashboard' && (
           <section className="space-y-4 transition-all duration-300">
@@ -807,7 +828,7 @@ export default function App() {
             </Card>
           </section>
         )}
-
+ 
         {tab === 'Dashboard' && targets.length > 0 && period === 'bi-weekly' && (
           <Card title="Log Savings From This Paycheck">
             <div className="grid md:grid-cols-4 gap-2">
@@ -821,7 +842,7 @@ export default function App() {
             </div>
           </Card>
         )}
-
+ 
         {/* ── INCOME ── */}
         {tab === 'Income' && (
           <section className="space-y-4 transition-all duration-300">
@@ -888,7 +909,7 @@ export default function App() {
             </div>
           </section>
         )}
-
+ 
         {/* ── BUDGET ── */}
         {tab === 'Budget' && (
           <section className="space-y-4 transition-all duration-300">
@@ -1017,7 +1038,7 @@ export default function App() {
             </Card>
           </section>
         )}
-
+ 
         {/* ── SCENARIOS ── */}
         {tab === 'Scenarios' && (
           <section className="space-y-4 transition-all duration-300">
@@ -1069,7 +1090,7 @@ export default function App() {
             </div>
           </section>
         )}
-
+ 
         {/* ── TARGETS ── */}
         {tab === 'Targets' && (
           <section className="space-y-4">
@@ -1157,7 +1178,7 @@ export default function App() {
                 <button className="rounded bg-blue-600" onClick={createTarget}>Create</button>
               </div>
             </Card>
-
+ 
             {/* Target Undo / Redo / Clear row */}
             <div className="flex gap-2 items-center">
               <button
@@ -1181,7 +1202,7 @@ export default function App() {
                 Clear Targets
               </button>
             </div>
-
+ 
             <Card title="Target Sets">
               <div className="grid md:grid-cols-3 gap-2">
                 <input className="p-2 rounded bg-slate-800 border border-slate-600" value={targetSetName} onChange={(e) => setTargetSetName(e.target.value)} placeholder="Target set name" />
@@ -1200,7 +1221,7 @@ export default function App() {
                 ))}
               </div>
             </Card>
-
+ 
             {/* Active Targets */}
             {activeTargets.length > 0 && (
               <section className="space-y-3">
@@ -1210,7 +1231,7 @@ export default function App() {
                 </div>
               </section>
             )}
-
+ 
             {/* Fully Funded Targets */}
             {fullyFundedTargets.length > 0 && (
               <section className="space-y-3">
@@ -1228,7 +1249,7 @@ export default function App() {
                 )}
               </section>
             )}
-
+ 
             {/* Completed Targets */}
             {completedTargets.length > 0 && (
               <section className="space-y-3">
@@ -1246,18 +1267,18 @@ export default function App() {
                 )}
               </section>
             )}
-
+ 
             {targets.length === 0 && (
               <p className="text-slate-400 text-sm">No targets yet. Create one above.</p>
             )}
           </section>
         )}
-
+ 
       </div>
     </div>
   )
 }
-
+ 
 function Card({ title, children, className = '', style, headerAction }: { title: string; children: React.ReactNode; className?: string; style?: React.CSSProperties; headerAction?: React.ReactNode }) {
   return (
     <div style={style} className={`rounded-2xl border border-slate-700 bg-slate-800/80 shadow-lg p-4 md:p-5 transition-all duration-200 hover:-translate-y-0.5 ${className}`}>
@@ -1269,11 +1290,11 @@ function Card({ title, children, className = '', style, headerAction }: { title:
     </div>
   )
 }
-
+ 
 function Pill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return <button onClick={onClick} className={`px-3 py-1.5 rounded text-sm ${active ? 'bg-blue-600' : 'bg-slate-700 hover:bg-slate-600'} transition`}>{children}</button>
 }
-
+ 
 function Metric({ title, value, tone = 'neutral', featured = false, glow = false }: { title: string; value: string; tone?: 'neutral' | 'good' | 'warn' | 'risk' | 'danger'; featured?: boolean; glow?: boolean }) {
   const c = tone === 'good' ? 'text-green-400' : tone === 'warn' ? 'text-yellow-300' : tone === 'risk' ? 'text-orange-300' : tone === 'danger' ? 'text-red-300' : 'text-slate-100'
   return (
@@ -1289,7 +1310,7 @@ function Metric({ title, value, tone = 'neutral', featured = false, glow = false
     </div>
   )
 }
-
+ 
 function Info({ title, value, className = '', tone = 'neutral', glow = false }: { title: string; value: string; className?: string; tone?: 'neutral' | 'good' | 'warn' | 'risk' | 'danger'; glow?: boolean }) {
   const tc = tone === 'good' ? 'text-green-400' : tone === 'warn' ? 'text-yellow-300' : tone === 'risk' ? 'text-orange-300' : tone === 'danger' ? 'text-red-300' : 'text-slate-100'
   return (
@@ -1302,7 +1323,7 @@ function Info({ title, value, className = '', tone = 'neutral', glow = false }: 
     </div>
   )
 }
-
+ 
 function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; valueClass?: string }) {
   return (
     <div className="py-1.5 border-b border-slate-700 last:border-b-0 flex justify-between text-sm">
@@ -1311,3 +1332,4 @@ function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; va
     </div>
   )
 }
+ 
