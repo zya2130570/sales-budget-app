@@ -456,7 +456,48 @@ export default function App() {
   }}
 /><button className="rounded bg-blue-600" onClick={createTarget}>Create</button></div></Card>
       <Card title="Target Sets"><div className="grid md:grid-cols-3 gap-2"><input className="p-2 rounded bg-slate-800 border border-slate-600" value={targetSetName} onChange={(e)=>setTargetSetName(e.target.value)} placeholder="Target set name" /><button className="rounded bg-blue-600" onClick={()=>{const n=targetSetName.trim(); if(!n) return; setSavedTargetSets([{name:n,targets,savedAt:new Date().toISOString()}, ...savedTargetSets.filter(s=>s.name.toLowerCase()!==n.toLowerCase())])}}>Save</button><div className="text-xs text-slate-400 self-center">Saved locally</div></div><div className="space-y-2 mt-2">{savedTargetSets.map(s=><div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between"><div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div><div className="flex gap-2"><button className="text-blue-300" onClick={()=>setTargets(s.targets)}>Load</button><button className="text-red-300" onClick={()=>setSavedTargetSets(prev=>prev.filter(x=>x.name!==s.name))}>Delete</button></div></div>)}</div></Card>
-      <div className="grid md:grid-cols-2 gap-3">{targets.map((t)=>{const req=requiredForTarget(t); const progress=t.goalAmount>0?Math.min(100,(t.currentSaved/t.goalAmount)*100):0; const elapsed=Math.min(1, Math.max(0, (new Date().getTime() - new Date().setHours(0,0,0,0)) / Math.max(1, new Date(t.deadline).getTime() - new Date().setHours(0,0,0,0)))); const expected=t.goalAmount*elapsed; const status=t.currentSaved>expected*1.05?'Ahead':t.currentSaved<expected*0.95?'Behind':'On Track'; const log=targetLogForm[t.id] ?? { date: new Date().toISOString().slice(0,10), amount:'', note:'' }; return <Card key={t.id} title={t.name}><Row l="Goal amount" v={currency(t.goalAmount)} /><Row l="Current saved" v={currency(t.currentSaved)} /><Row l="Remaining amount" v={currency(req.remaining)} /><Row l="Progress" v={`${progress.toFixed(1)}%`} /><Row l="Status" v={status} /><Row l="Days remaining" v={`${req.days}`} /><Row l="Est. pay periods remaining" v={`${req.payPeriods}`} /><Row l="Weekly required" v={currency(req.weekly)} /><Row l="Bi-weekly required" v={currency(req.biWeekly)} /><Row l="Monthly required" v={currency(req.monthly)} /><Row l="Yearly required" v={currency(req.yearly)} /><div className="h-2 bg-slate-700 rounded mt-2"><div className="h-2 bg-blue-500 rounded" style={{width:`${progress}%`}} /></div><div className="mt-3 grid grid-cols-4 gap-2"><input type="date" className="p-2 rounded bg-slate-800 border border-slate-600" value={log.date} onChange={(e)=>setTargetLogForm(v=>({...v,[t.id]:{...log,date:e.target.value}}))} /><input type="number" min={0} step={25} className="p-2 rounded bg-slate-800 border border-slate-600" value={log.amount} onChange={(e)=>setTargetLogForm(v=>({...v,[t.id]:{...log,amount:e.target.value}}))} placeholder="Amount" /><input className="p-2 rounded bg-slate-800 border border-slate-600" value={log.note} onChange={(e)=>setTargetLogForm(v=>({...v,[t.id]:{...log,note:e.target.value}}))} placeholder="Note" /><button className="rounded bg-blue-600" onClick={()=>{ addTargetContribution(t.id, Number(log.amount)||0, log.date, log.note); setTargetLogForm(v=>({...v,[t.id]:{...log,amount:'',note:''}})) }}>Log Contribution</button></div><button className="mt-3 rounded bg-slate-700 px-3 py-1.5" onClick={()=>{ const amount = period==='weekly'?req.weekly:period==='bi-weekly'?req.biWeekly:period==='yearly'?req.yearly:req.monthly; const monthlyAmt = convertToMonthly(amount, period); setCategories(prev=>{const i=prev.findIndex(c=>c.name.trim().toLowerCase()===t.name.trim().toLowerCase()&&c.type==='savings'); if(i>=0){const cp=[...prev]; cp[i]={...cp[i], amount: monthlyAmt}; return cp} return [...prev,{id:crypto.randomUUID(), name:t.name, amount:monthlyAmt, type:'savings'}]})}}>Add to Current Budget</button><details className="mt-3"><summary className="cursor-pointer text-sm text-slate-300">Contribution history ({t.contributions.length})</summary><div className="mt-2 space-y-1">{t.contributions.map(c=><div key={c.id} className="flex justify-between text-sm border-b border-slate-700 py-1"><span>{c.date} • {currency(c.amount)} {c.note?`• ${c.note}`:''}</span><button className="text-red-300" onClick={()=>setTargets(prev=>prev.map(x=>x.id===t.id?{...x,currentSaved:Math.max(0,x.currentSaved-c.amount), contributions:x.contributions.filter(k=>k.id!==c.id)}:x))}>Delete</button></div>)}</div></details></Card>})}</div></section>}
+      <div className="grid md:grid-cols-2 gap-3">{targets.map((t)=>{const req=requiredForTarget(t); const progress=t.goalAmount>0?Math.min(100,(t.currentSaved/t.goalAmount)*100):0; const elapsed=Math.min(1, Math.max(0, (new Date().getTime() - new Date().setHours(0,0,0,0)) / Math.max(1, new Date(t.deadline).getTime() - new Date().setHours(0,0,0,0)))); const expected=t.goalAmount*elapsed; const status=t.currentSaved>expected*1.05?'Ahead':t.currentSaved<expected*0.95?'Behind':'On Track'; const log=targetLogForm[t.id] ?? { date: new Date().toISOString().slice(0,10), amount:'', note:'' }; return <Card key={t.id} title={t.name}><Row l="Goal amount" v={currency(t.goalAmount)} /><Row l="Current saved" v={currency(t.currentSaved)} /><Row l="Remaining amount" v={currency(req.remaining)} /><Row l="Progress" v={`${progress.toFixed(1)}%`} /><Row l="Status" v={status} /><Row l="Days remaining" v={`${req.days}`} /><Row l="Est. pay periods remaining" v={`${req.payPeriods}`} /><Row l="Weekly required" v={currency(req.weekly)} /><Row l="Bi-weekly required" v={currency(req.biWeekly)} /><Row l="Monthly required" v={currency(req.monthly)} /><Row l="Yearly required" v={currency(req.yearly)} /><div className="h-2 bg-slate-700 rounded mt-2"><div className="h-2 bg-blue-500 rounded" style={{width:`${progress}%`}} /></div><div className="mt-3 grid grid-cols-4 gap-2"><input type="date" className="p-2 rounded bg-slate-800 border border-slate-600" value={log.date} onChange={(e)=>setTargetLogForm(v=>({...v,[t.id]:{...log,date:e.target.value}}))} /><input type="number" min={0} step={25} className="p-2 rounded bg-slate-800 border border-slate-600" value={log.amount} onChange={(e)=>setTargetLogForm(v=>({...v,[t.id]:{...log,amount:e.target.value}}))} placeholder="Amount" /><input className="p-2 rounded bg-slate-800 border border-slate-600" value={log.note} onChange={(e)=>setTargetLogForm(v=>({...v,[t.id]:{...log,note:e.target.value}}))} placeholder="Note" /><button className="rounded bg-blue-600" onClick={()=>{ addTargetContribution(t.id, Number(log.amount)||0, log.date, log.note); setTargetLogForm(v=>({...v,[t.id]:{...log,amount:'',note:''}})) }}>Log Contribution</button></div><button
+  className="mt-3 rounded bg-slate-700 px-3 py-1.5"
+  onClick={() => {
+    const amount =
+      period === 'weekly'
+        ? req.weekly
+        : period === 'bi-weekly'
+        ? req.biWeekly
+        : period === 'yearly'
+        ? req.yearly
+        : req.monthly
+
+    const monthlyAmt = convertToMonthly(amount, period)
+
+    setCategories((prev) => {
+      const i = prev.findIndex(
+        (c) =>
+          c.name.trim().toLowerCase() === t.name.trim().toLowerCase() &&
+          c.type === 'savings'
+      )
+
+      if (i >= 0) {
+        const cp = [...prev]
+        cp[i] = { ...cp[i], amount: monthlyAmt }
+        return cp
+      }
+
+      return [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          name: t.name,
+          amount: monthlyAmt,
+          type: 'savings',
+        },
+      ]
+    })
+  }}
+>
+  Add to Current Budget
+</button>
+		  Add to Current Budget</button><details className="mt-3"><summary className="cursor-pointer text-sm text-slate-300">Contribution history ({t.contributions.length})</summary><div className="mt-2 space-y-1">{t.contributions.map(c=><div key={c.id} className="flex justify-between text-sm border-b border-slate-700 py-1"><span>{c.date} • {currency(c.amount)} {c.note?`• ${c.note}`:''}</span><button className="text-red-300" onClick={()=>setTargets(prev=>prev.map(x=>x.id===t.id?{...x,currentSaved:Math.max(0,x.currentSaved-c.amount), contributions:x.contributions.filter(k=>k.id!==c.id)}:x))}>Delete</button></div>)}</div></details></Card>})}</div></section>}
 
   </div></div>
 }
