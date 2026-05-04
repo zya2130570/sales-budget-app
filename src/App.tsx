@@ -90,7 +90,7 @@ export default function App() {
   const budgetAmountRef = useRef<HTMLInputElement>(null)
   const budgetTypeRef = useRef<HTMLSelectElement>(null)
   const scenarioSlowRef = useRef<HTMLInputElement>(null)
-   const targetNameRef = useRef<HTMLInputElement>(null)
+  const targetNameRef = useRef<HTMLInputElement>(null)
   const targetGoalRef = useRef<HTMLInputElement>(null)
   const targetSavedRef = useRef<HTMLInputElement>(null)
   const targetDeadlineRef = useRef<HTMLInputElement>(null)
@@ -105,7 +105,7 @@ export default function App() {
   const [targets, setTargets] = useState<Target[]>([])
   const [savedTargetSets, setSavedTargetSets] = useState<SavedTargetSet[]>([])
   const [targetSetName, setTargetSetName] = useState('')
-  const [targetForm, setTargetForm] = useState({ name: '', goalAmount: '', currentSaved: '0', deadline: '' })
+  const [targetForm, setTargetForm] = useState({ name: 'Bike', goalAmount: '', currentSaved: '0', deadline: '' })
   const [targetLogForm, setTargetLogForm] = useState<Record<string, { date: string; amount: string; note: string }>>({})
   const [dashboardQuickDate, setDashboardQuickDate] = useState('2026-05-29')
   const [dashboardQuickTargetId, setDashboardQuickTargetId] = useState('')
@@ -280,60 +280,6 @@ export default function App() {
     setTargets((prev) => prev.map((t) => t.id === targetId ? { ...t, currentSaved: t.currentSaved + amount, contributions: [{ id: crypto.randomUUID(), amount, date, note }, ...t.contributions] } : t))
   }
 
-	  const createTarget = () => {
-    const name = targetForm.name.trim()
-    const goalAmount = Number(targetForm.goalAmount) || 0
-    const currentSaved = Number(targetForm.currentSaved) || 0
-    const deadline = targetForm.deadline
-
-    if (!name || goalAmount <= 0 || !deadline) return
-
-    const existing = targets.find(
-      (t) => t.name.trim().toLowerCase() === name.toLowerCase() && t.deadline === deadline
-    )
-
-    if (existing) {
-      const choice = window.prompt(
-        'This target name and deadline already exist. Type: combine, re-enter, or keep separate',
-        'combine'
-      )?.trim().toLowerCase()
-
-      if (choice === 're-enter' || !choice) return
-
-      if (choice === 'combine') {
-        setTargets((prev) =>
-          prev.map((t) =>
-            t.id === existing.id
-              ? {
-                  ...t,
-                  goalAmount: t.goalAmount + goalAmount,
-                  currentSaved: t.currentSaved + currentSaved,
-                }
-              : t
-          )
-        )
-        setTargetForm({ name: '', goalAmount: '', currentSaved: '0', deadline: '' })
-        setTimeout(() => targetNameRef.current?.focus(), 0)
-        return
-      }
-    }
-
-    setTargets((prev) => [
-      {
-        id: crypto.randomUUID(),
-        name,
-        goalAmount,
-        currentSaved,
-        deadline,
-        type: 'savings',
-        contributions: [],
-      },
-      ...prev,
-    ])
-
-    setTargetForm({ name: '', goalAmount: '', currentSaved: '0', deadline: '' })
-    setTimeout(() => targetNameRef.current?.focus(), 0)
-  }
   return <div className="min-h-screen bg-slate-900 text-slate-100"><div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
     <header className="rounded-2xl border border-slate-700 bg-slate-800/80 shadow-xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4"><div><h1 className="text-3xl font-bold tracking-tight">Flow</h1><p className="text-slate-400">Personal Finance Dashboard</p></div><div className="flex flex-wrap gap-2">{(['Dashboard','Income','Budget','Scenarios','Targets'] as Tab[]).map(t => <button title={tabTips[t]} key={t} onClick={() => setTab(t)} className={`px-4 py-2 rounded-lg transition-all duration-200 hover:-translate-y-0.5 ${tab===t?'bg-blue-600 text-white':'bg-slate-700 hover:bg-slate-600'}`}>{t}</button>)}</div></header>
 
@@ -352,63 +298,7 @@ export default function App() {
     <table className="w-full text-sm mt-3"><thead><tr className="text-left text-slate-400 border-b border-slate-700"><th>Name</th><th>Type</th><th>Monthly</th><th>{labelPeriod(period)}</th><th/></tr></thead><tbody>{top.map(c=><tr key={c.id} className="border-b border-slate-800"><td>{c.name}</td><td>{c.type === 'fixed bill' ? 'Fixed Bill' : c.type === 'variable spending' ? 'Variable Spending' : c.type === 'savings' ? 'Savings' : 'Investing'}</td><td>{currency(c.amount)}</td><td>{currency(convertFromMonthly(c.amount,period))}</td><td className="space-x-2"><button className="text-blue-300" onClick={()=>{setForm({name:c.name,amount:String(convertFromMonthly(c.amount,period)),type:c.type}); setEditId(c.id); budgetNameRef.current?.focus()}}>Edit</button><button className="text-red-300" onClick={()=>{pushBudgetHistory(); setCategories(prev=>prev.filter(x=>x.id!==c.id))}}>Delete</button></td></tr>)}</tbody></table></Card></section>}
 
 	    {tab==='Scenarios' && <section className="space-y-4 transition-all duration-300"><Card title="Scenario Set Manager"><div className="flex gap-2 mb-3">{periods.map(p=><Pill key={p} active={period===p} onClick={()=>setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div><div className="grid md:grid-cols-4 gap-2">{(['Slow','Medium','Fast','Custom'] as ScenarioName[]).map(n=><div key={n}><label className="text-xs text-slate-400">{n}</label><input ref={n==='Slow'?scenarioSlowRef:undefined} type="number" min={0} step={100} value={scenario[n]} onChange={e=>setScenario(v=>({...v,[n]:Math.max(0,Number(e.target.value)||0)}))} className="w-full p-2 rounded bg-slate-800 border border-slate-600" /></div>)}</div><div className="grid md:grid-cols-3 gap-2 mt-3"><input className="p-2 rounded bg-slate-800 border border-slate-600" placeholder="Scenario set name" value={scenarioTitle} onChange={e=>setScenarioTitle(e.target.value)} /><button className="rounded bg-blue-600" onClick={()=>{const n=scenarioTitle.trim(); if(!n) return; const ex=savedScenarios.find(x=>x.name.toLowerCase()===n.toLowerCase()); if(ex && !window.confirm('Overwrite existing set?')) return; setSavedScenarios([{name:n,scenarios:scenario,period:period,savedAt:new Date().toISOString()},...savedScenarios.filter(x=>x.name.toLowerCase()!==n.toLowerCase())])}}>Save Scenario Set</button><div className="text-xs text-slate-400 self-center">Saved locally</div></div><div className="space-y-2 mt-2">{savedScenarios.map(s=><div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between"><div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div><div className="flex gap-2"><button className="text-blue-300" onClick={()=>{setScenario(s.scenarios); setPeriod(s.period)}}>Load</button><button className="text-red-300" onClick={()=>setSavedScenarios(prev=>prev.filter(x=>x.name!==s.name))}>Delete</button></div></div>)}</div></Card><div className="grid md:grid-cols-2 gap-3">{(['Slow','Medium','Fast','Custom'] as ScenarioName[]).map(n=>{const ii=income(scenario[n], adjustedSalary); const rem=convertFromMonthly(ii.totalMonthly-monthlyBudget,period); const tone=n==='Slow'?'border-yellow-500/60 text-yellow-200':n==='Medium'?'border-blue-500/60 text-blue-200':n==='Fast'?'border-green-500/60 text-green-200':'border-slate-300/60 text-slate-100'; const b = n === 'Slow' ? '#facc15' : n === 'Medium' ? '#60a5fa' : n === 'Fast' ? '#4ade80' : '#cbd5e1'; return <Card key={n} title={`${n} Scenario`} className={tone} style={{ borderColor: b, borderWidth: 2 }}><Row l="Monthly Gross Profit Input" v={currency(scenario[n])} /><Row l={`Converted Gross Profit (${labelPeriod(period)})`} v={currency(convertFromMonthly(scenario[n],period))} /><Row l="Commission" v={currency(convertFromMonthly(ii.cMonthly,period))} /><Row l="Base net income" v={currency(convertFromMonthly(ii.baseMonthly,period))} /><Row l="Total net income" v={currency(convertFromMonthly(ii.totalMonthly,period))} /><Row l="Effective hourly rate" v={currency(ii.totalWeekly/HOURS_PER_WEEK)} /><Row l="Remaining after budget" v={currency(rem)} valueClass={rem<0?'text-red-400':'text-green-400'} /></Card>})}</div></section>}
-    {tab === 'Targets' && <section className="space-y-4"><Card title="Create Target"><div className="grid md:grid-cols-5 gap-2"><div ref={targetAutocompleteWrapRef} className="relative"><input
-  ref={targetNameRef}
-  className="w-full p-2 rounded bg-slate-800 border border-slate-600"
-  value={targetForm.name}
-  onFocus={() => setShowTargetSuggestions(true)}
-  onChange={(e) => {
-    setTargetForm((v) => ({ ...v, name: e.target.value }))
-    setTargetSuggestionIndex(-1)
-    setShowTargetSuggestions(true)
-  }}
-  onKeyDown={(e) => {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      if (targetSuggestionList.length) {
-        setTargetSuggestionIndex((v) => Math.min(v + 1, targetSuggestionList.length - 1))
-        setShowTargetSuggestions(true)
-      }
-      return
-    }
-
-    if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      if (targetSuggestionList.length) {
-        setTargetSuggestionIndex((v) => Math.max(v - 1, 0))
-        setShowTargetSuggestions(true)
-      }
-      return
-    }
-
-    if (e.key === 'Enter') {
-      e.preventDefault()
-
-      if (targetSuggestionIndex >= 0 && targetSuggestionList.length) {
-        setTargetForm((v) => ({ ...v, name: targetSuggestionList[targetSuggestionIndex] }))
-        setShowTargetSuggestions(false)
-        setTargetSuggestionIndex(-1)
-        targetGoalRef.current?.focus()
-        return
-      }
-
-      if (targetSuggestionList.length === 1) {
-        setTargetForm((v) => ({ ...v, name: targetSuggestionList[0] }))
-        setShowTargetSuggestions(false)
-        setTargetSuggestionIndex(-1)
-        targetGoalRef.current?.focus()
-        return
-      }
-
-      if (targetForm.name.trim()) {
-        setShowTargetSuggestions(false)
-        setTargetSuggestionIndex(-1)
-        targetGoalRef.current?.focus()
-      }
-    }
-  }}
-  placeholder="Target Name"
-/> className="w-full p-2 rounded bg-slate-800 border border-slate-600" value={targetForm.name} onFocus={()=>setShowTargetSuggestions(true)} onChange={(e)=>{setTargetForm((v)=>({...v,name:e.target.value})); setTargetSuggestionIndex(-1); setShowTargetSuggestions(true)}} onKeyDown={(e)=>{ if(e.key==='ArrowDown'){e.preventDefault(); if(targetSuggestionList.length){ setTargetSuggestionIndex((v)=>Math.min(v+1,targetSuggestionList.length-1)); setShowTargetSuggestions(true) } return } if(e.key==='ArrowUp'){e.preventDefault(); if(targetSuggestionList.length){ setTargetSuggestionIndex((v)=>Math.max(v-1,0)); setShowTargetSuggestions(true) } return } if(e.key==='Enter'){ e.preventDefault(); const typed = targetForm.name.trim(); const isValidPreset = targetPresets.includes(typed); if(targetSuggestionIndex>=0 && targetSuggestionList.length){ setTargetForm((v)=>({...v,name:targetSuggestionList[targetSuggestionIndex]})); setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus(); return } if(isValidPreset){ setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus(); return } if(targetSuggestionList.length===1){ setTargetForm((v)=>({...v,name:targetSuggestionList[0]})); setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus(); return } setShowTargetSuggestions(true); } }} placeholder="Target Name" />{showTargetSuggestions && targetSuggestionList.length>0 && <div className="absolute z-10 w-full mt-1 max-h-48 overflow-y-auto bg-slate-800 border border-slate-600 rounded-lg">{targetSuggestionList.map((preset,i)=><button key={preset} type="button" className={`w-full text-left px-2 py-1 ${i===targetSuggestionIndex?'bg-slate-700':'hover:bg-slate-700'}`} onMouseDown={(e)=>e.preventDefault()} onClick={()=>{setTargetForm((v)=>({...v,name:preset})); setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus()}}>{preset}</button>)}</div>}</div><input ref={targetGoalRef} type="number" min={0} step={25} className="p-2 rounded bg-slate-800 border border-slate-600" value={targetForm.goalAmount} onChange={(e)=>setTargetForm((v)=>({...v,goalAmount:e.target.value}))} placeholder="Goal Amount" /><input type="number" min={0} step={25} className="p-2 rounded bg-slate-800 border border-slate-600" value={targetForm.currentSaved} onChange={(e)=>setTargetForm((v)=>({...v,currentSaved:e.target.value}))} placeholder="Current Saved" /><input type="date" className="p-2 rounded bg-slate-800 border border-slate-600" value={targetForm.deadline} onChange={(e)=>setTargetForm((v)=>({...v,deadline:e.target.value}))} /><button className="rounded bg-blue-600" onClick={()=>{ if(!targetForm.name || !targetForm.goalAmount || !targetForm.deadline) return; setTargets((p)=>[{ id: crypto.randomUUID(), name: targetForm.name, goalAmount: Number(targetForm.goalAmount), currentSaved: Number(targetForm.currentSaved)||0, deadline: targetForm.deadline, type:'savings', contributions: [] }, ...p]); setTargetForm({ name:'Bike', goalAmount:'', currentSaved:'0', deadline:'' }) }}>Create</button></div></Card>
+    {tab === 'Targets' && <section className="space-y-4"><Card title="Create Target"><div className="grid md:grid-cols-5 gap-2"><div ref={targetAutocompleteWrapRef} className="relative"><input ref={targetNameRef} className="w-full p-2 rounded bg-slate-800 border border-slate-600" value={targetForm.name} onFocus={()=>setShowTargetSuggestions(true)} onChange={(e)=>{setTargetForm((v)=>({...v,name:e.target.value})); setTargetSuggestionIndex(-1); setShowTargetSuggestions(true)}} onKeyDown={(e)=>{ if(e.key==='ArrowDown'){e.preventDefault(); if(targetSuggestionList.length){ setTargetSuggestionIndex((v)=>Math.min(v+1,targetSuggestionList.length-1)); setShowTargetSuggestions(true) } return } if(e.key==='ArrowUp'){e.preventDefault(); if(targetSuggestionList.length){ setTargetSuggestionIndex((v)=>Math.max(v-1,0)); setShowTargetSuggestions(true) } return } if(e.key==='Enter'){ e.preventDefault(); const typed = targetForm.name.trim(); const isValidPreset = targetPresets.includes(typed); if(targetSuggestionIndex>=0 && targetSuggestionList.length){ setTargetForm((v)=>({...v,name:targetSuggestionList[targetSuggestionIndex]})); setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus(); return } if(isValidPreset){ setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus(); return } if(targetSuggestionList.length===1){ setTargetForm((v)=>({...v,name:targetSuggestionList[0]})); setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus(); return } setShowTargetSuggestions(true); } }} placeholder="Target Name" />{showTargetSuggestions && targetSuggestionList.length>0 && <div className="absolute z-10 w-full mt-1 max-h-48 overflow-y-auto bg-slate-800 border border-slate-600 rounded-lg">{targetSuggestionList.map((preset,i)=><button key={preset} type="button" className={`w-full text-left px-2 py-1 ${i===targetSuggestionIndex?'bg-slate-700':'hover:bg-slate-700'}`} onMouseDown={(e)=>e.preventDefault()} onClick={()=>{setTargetForm((v)=>({...v,name:preset})); setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus()}}>{preset}</button>)}</div>}</div><input ref={targetGoalRef} type="number" min={0} step={25} className="p-2 rounded bg-slate-800 border border-slate-600" value={targetForm.goalAmount} onChange={(e)=>setTargetForm((v)=>({...v,goalAmount:e.target.value}))} placeholder="Goal Amount" /><input type="number" min={0} step={25} className="p-2 rounded bg-slate-800 border border-slate-600" value={targetForm.currentSaved} onChange={(e)=>setTargetForm((v)=>({...v,currentSaved:e.target.value}))} placeholder="Current Saved" /><input type="date" className="p-2 rounded bg-slate-800 border border-slate-600" value={targetForm.deadline} onChange={(e)=>setTargetForm((v)=>({...v,deadline:e.target.value}))} /><button className="rounded bg-blue-600" onClick={()=>{ if(!targetForm.name || !targetForm.goalAmount || !targetForm.deadline) return; setTargets((p)=>[{ id: crypto.randomUUID(), name: targetForm.name, goalAmount: Number(targetForm.goalAmount), currentSaved: Number(targetForm.currentSaved)||0, deadline: targetForm.deadline, type:'savings', contributions: [] }, ...p]); setTargetForm({ name:'Bike', goalAmount:'', currentSaved:'0', deadline:'' }) }}>Create</button></div></Card>
       <Card title="Target Sets"><div className="grid md:grid-cols-3 gap-2"><input className="p-2 rounded bg-slate-800 border border-slate-600" value={targetSetName} onChange={(e)=>setTargetSetName(e.target.value)} placeholder="Target set name" /><button className="rounded bg-blue-600" onClick={()=>{const n=targetSetName.trim(); if(!n) return; setSavedTargetSets([{name:n,targets,savedAt:new Date().toISOString()}, ...savedTargetSets.filter(s=>s.name.toLowerCase()!==n.toLowerCase())])}}>Save</button><div className="text-xs text-slate-400 self-center">Saved locally</div></div><div className="space-y-2 mt-2">{savedTargetSets.map(s=><div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between"><div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div><div className="flex gap-2"><button className="text-blue-300" onClick={()=>setTargets(s.targets)}>Load</button><button className="text-red-300" onClick={()=>setSavedTargetSets(prev=>prev.filter(x=>x.name!==s.name))}>Delete</button></div></div>)}</div></Card>
       <div className="grid md:grid-cols-2 gap-3">{targets.map((t)=>{const req=requiredForTarget(t); const progress=t.goalAmount>0?Math.min(100,(t.currentSaved/t.goalAmount)*100):0; const elapsed=Math.min(1, Math.max(0, (new Date().getTime() - new Date().setHours(0,0,0,0)) / Math.max(1, new Date(t.deadline).getTime() - new Date().setHours(0,0,0,0)))); const expected=t.goalAmount*elapsed; const status=t.currentSaved>expected*1.05?'Ahead':t.currentSaved<expected*0.95?'Behind':'On Track'; const log=targetLogForm[t.id] ?? { date: new Date().toISOString().slice(0,10), amount:'', note:'' }; return <Card key={t.id} title={t.name}><Row l="Goal amount" v={currency(t.goalAmount)} /><Row l="Current saved" v={currency(t.currentSaved)} /><Row l="Remaining amount" v={currency(req.remaining)} /><Row l="Progress" v={`${progress.toFixed(1)}%`} /><Row l="Status" v={status} /><Row l="Days remaining" v={`${req.days}`} /><Row l="Est. pay periods remaining" v={`${req.payPeriods}`} /><Row l="Weekly required" v={currency(req.weekly)} /><Row l="Bi-weekly required" v={currency(req.biWeekly)} /><Row l="Monthly required" v={currency(req.monthly)} /><Row l="Yearly required" v={currency(req.yearly)} /><div className="h-2 bg-slate-700 rounded mt-2"><div className="h-2 bg-blue-500 rounded" style={{width:`${progress}%`}} /></div><div className="mt-3 grid grid-cols-4 gap-2"><input type="date" className="p-2 rounded bg-slate-800 border border-slate-600" value={log.date} onChange={(e)=>setTargetLogForm(v=>({...v,[t.id]:{...log,date:e.target.value}}))} /><input type="number" min={0} step={25} className="p-2 rounded bg-slate-800 border border-slate-600" value={log.amount} onChange={(e)=>setTargetLogForm(v=>({...v,[t.id]:{...log,amount:e.target.value}}))} placeholder="Amount" /><input className="p-2 rounded bg-slate-800 border border-slate-600" value={log.note} onChange={(e)=>setTargetLogForm(v=>({...v,[t.id]:{...log,note:e.target.value}}))} placeholder="Note" /><button className="rounded bg-blue-600" onClick={()=>{ addTargetContribution(t.id, Number(log.amount)||0, log.date, log.note); setTargetLogForm(v=>({...v,[t.id]:{...log,amount:'',note:''}})) }}>Log Contribution</button></div><button className="mt-3 rounded bg-slate-700 px-3 py-1.5" onClick={()=>{ const amount = period==='weekly'?req.weekly:period==='bi-weekly'?req.biWeekly:period==='yearly'?req.yearly:req.monthly; const monthlyAmt = convertToMonthly(amount, period); setCategories(prev=>{const i=prev.findIndex(c=>c.name.trim().toLowerCase()===t.name.trim().toLowerCase()&&c.type==='savings'); if(i>=0){const cp=[...prev]; cp[i]={...cp[i], amount: monthlyAmt}; return cp} return [...prev,{id:crypto.randomUUID(), name:t.name, amount:monthlyAmt, type:'savings'}]})}}>Add to Current Budget</button><details className="mt-3"><summary className="cursor-pointer text-sm text-slate-300">Contribution history ({t.contributions.length})</summary><div className="mt-2 space-y-1">{t.contributions.map(c=><div key={c.id} className="flex justify-between text-sm border-b border-slate-700 py-1"><span>{c.date} • {currency(c.amount)} {c.note?`• ${c.note}`:''}</span><button className="text-red-300" onClick={()=>setTargets(prev=>prev.map(x=>x.id===t.id?{...x,currentSaved:Math.max(0,x.currentSaved-c.amount), contributions:x.contributions.filter(k=>k.id!==c.id)}:x))}>Delete</button></div>)}</div></details></Card>})}</div></section>}
 
