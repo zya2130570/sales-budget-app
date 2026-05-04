@@ -119,7 +119,7 @@ export default function App() {
   const [savedBudgets, setSavedBudgets] = useState<SavedBudget[]>([])
   const [savedScenarios, setSavedScenarios] = useState<SavedScenarioSet[]>([])
   const [targets, setTargets] = useState<Target[]>([])
-  const [savedTargetSets, setSavedTargetSets] = useState<SavedTargetSet[]>([])
+  const [savedSavedTargets, setSavedSavedTargets] = useState<SavedTargetSet[]>([])
   const [targetSetName, setTargetSetName] = useState('')
   const [targetForm, setTargetForm] = useState({ name: '', goalAmount: '', currentSaved: '0', deadline: '' })
   const [targetLogForm, setTargetLogForm] = useState<Record<string, { date: string; amount: string; note: string }>>({})
@@ -179,13 +179,13 @@ export default function App() {
     const b = localStorage.getItem('v42-budgets'); if (b) setSavedBudgets(JSON.parse(b))
     const s = localStorage.getItem('v42-scenarios'); if (s) setSavedScenarios(JSON.parse(s))
     const t = localStorage.getItem('v42-targets'); if (t) setTargets(JSON.parse(t))
-    const ts = localStorage.getItem('v42-target-sets'); if (ts) setSavedTargetSets(JSON.parse(ts))
+    const ts = localStorage.getItem('v42-target-sets'); if (ts) setSavedSavedTargets(JSON.parse(ts))
   }, [])
   useEffect(() => localStorage.setItem('v42-cats', JSON.stringify(categories)), [categories])
   useEffect(() => localStorage.setItem('v42-budgets', JSON.stringify(savedBudgets)), [savedBudgets])
   useEffect(() => localStorage.setItem('v42-scenarios', JSON.stringify(savedScenarios)), [savedScenarios])
   useEffect(() => localStorage.setItem('v42-targets', JSON.stringify(targets)), [targets])
-  useEffect(() => localStorage.setItem('v42-target-sets', JSON.stringify(savedTargetSets)), [savedTargetSets])
+  useEffect(() => localStorage.setItem('v42-target-sets', JSON.stringify(savedSavedTargets)), [savedSavedTargets])
 
   // Tab focus
   useEffect(() => {
@@ -568,9 +568,9 @@ export default function App() {
                 <Row l="Gross Salary (annual)" v={currency(grossSalary)} />
               </Card>
               <Card title="Efficiency Metrics">
-                <Row l="Effective hourly net rate" v={currency(inc.totalWeekly / HOURS_PER_WEEK) + ' per hour'} />
+                <Row l="Effective hourly net rate" v={currency(inc.totalWeekly / HOURS_PER_WEEK) + '/hour'} />
                 <Row l="Commission as % of total" v={`${dep.toFixed(1)}%`} />
-                <Row l="Commission per hour" v={currency(inc.cWeekly / HOURS_PER_WEEK)} />
+                <Row l="Commission per hour" v={currency(inc.cWeekly / HOURS_PER_WEEK) + '/hour'} />
               </Card>
             </div>
           </section>
@@ -735,7 +735,7 @@ export default function App() {
                     <Row l="Commission" v={currency(convertFromMonthly(ii.cMonthly, period))} />
                     <Row l="Base net income" v={currency(convertFromMonthly(ii.baseMonthly, period))} />
                     <Row l="Total net income" v={currency(convertFromMonthly(ii.totalMonthly, period))} />
-                    <Row l="Effective hourly rate" v={currency(ii.totalWeekly / HOURS_PER_WEEK) + ' /hr'} />
+                    <Row l="Effective hourly rate" v={currency(ii.totalWeekly / HOURS_PER_WEEK) + '/hr'} />
                     <Row l="Remaining after budget" v={currency(rem)} valueClass={rem < 0 ? 'text-red-400' : 'text-green-400'} />
                   </Card>
                 )
@@ -832,19 +832,19 @@ export default function App() {
               </div>
             </Card>
 
-            <Card title="Target Sets">
+            <Card title="Saved Targets">
               <div className="grid md:grid-cols-3 gap-2">
                 <input className="p-2 rounded bg-slate-800 border border-slate-600" value={targetSetName} onChange={(e) => setTargetSetName(e.target.value)} placeholder="Target set name" />
-                <button className="rounded bg-blue-600" onClick={() => { const n = targetSetName.trim(); if (!n) return; setSavedTargetSets([{ name: n, targets, savedAt: new Date().toISOString() }, ...savedTargetSets.filter(s => s.name.toLowerCase() !== n.toLowerCase())]) }}>Save</button>
+                <button className="rounded bg-blue-600" onClick={() => { const n = targetSetName.trim(); if (!n) return; setSavedSavedTargets([{ name: n, targets, savedAt: new Date().toISOString() }, ...savedSavedTargets.filter(s => s.name.toLowerCase() !== n.toLowerCase())]) }}>Save</button>
                 <div className="text-xs text-slate-400 self-center">Saved locally</div>
               </div>
               <div className="space-y-2 mt-2">
-                {savedTargetSets.map(s => (
+                {savedSavedTargets.map(s => (
                   <div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between">
                     <div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div>
                     <div className="flex gap-2">
                       <button className="text-blue-300" onClick={() => setTargets(s.targets)}>Load</button>
-                      <button className="text-red-300" onClick={() => setSavedTargetSets(prev => prev.filter(x => x.name !== s.name))}>Delete</button>
+                      <button className="text-red-300" onClick={() => setSavedSavedTargets(prev => prev.filter(x => x.name !== s.name))}>Delete</button>
                     </div>
                   </div>
                 ))}
