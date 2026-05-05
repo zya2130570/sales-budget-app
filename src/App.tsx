@@ -557,9 +557,11 @@ export default function App() {
   }
 
   const cancelEditTarget = (targetId: string) => {
-    // Restore original target values if any blur-saves already fired
+    // Restore original target values without pushing to history.
+    // Using setTargets directly (not setTargetsWithHistory) avoids creating a spurious
+    // undo entry when blur-save fires before this cancel click resolves.
     if (editTargetOriginal && editTargetOriginal.id === targetId) {
-      setTargetsWithHistory(prev => prev.map(t => t.id === targetId ? editTargetOriginal : t))
+      setTargets(prev => prev.map(t => t.id === targetId ? editTargetOriginal! : t))
     }
     setEditTargetId(null)
     setEditTargetOriginal(null)
@@ -797,13 +799,19 @@ export default function App() {
                 <button
                   className="mt-2 rounded bg-slate-600 hover:bg-slate-500 px-3 py-1.5 text-sm transition-colors ml-2 min-w-[7rem]"
                   onClick={() => {
-                    setTargetForm({
-                      name: '',
-                      goalAmount: String(t.goalAmount),
-                      currentSaved: String(t.currentSaved),
-                      startDate: t.startDate ?? t.createdAt ?? new Date().toISOString().slice(0, 10),
-                      deadline: t.deadline ?? '',
-                    })
+                    const today = new Date().toISOString().slice(0, 10)
+                    // Immediately create the duplicate and record it in undo/redo history
+                    setTargetsWithHistory(prev => [
+                      {
+                        ...t,
+                        id: crypto.randomUUID(),
+                        createdAt: today,
+                        startDate: t.startDate ?? t.createdAt ?? today,
+                        contributions: t.contributions.map(c => ({ ...c, id: crypto.randomUUID() })),
+                        completed: false,
+                      },
+                      ...prev,
+                    ])
                     setTab('Targets')
                     setTimeout(() => targetNameRef.current?.focus(), 50)
                   }}
@@ -1573,6 +1581,3 @@ function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; va
     </div>
   )
 }
- 
- 
- 
