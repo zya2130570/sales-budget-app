@@ -238,6 +238,10 @@ export default function App() {
   const [targetHistory, setTargetHistory] = useState<Target[][]>([])
   const [targetRedo, setTargetRedo] = useState<Target[][]>([])
  
+  // Form-level undo history for Create Savings Goal form (for Duplicate preload undo)
+  const [targetFormHistory, setTargetFormHistory] = useState<Array<{ name: string; goalAmount: string; currentSaved: string; startDate: string; deadline: string }>>([])
+  const [targetFormRedo, setTargetFormRedo] = useState<Array<{ name: string; goalAmount: string; currentSaved: string; startDate: string; deadline: string }>>([])
+ 
   // Collapsible sections for Fully Funded and Completed
   const [fullyFundedOpen, setFullyFundedOpen] = useState(true)
   const [completedOpen, setCompletedOpen] = useState(true)
@@ -251,6 +255,10 @@ export default function App() {
   // Toast notification state
   const [toast, setToast] = useState<{ message: string; visible: boolean } | null>(null)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+ 
+  // Highlighted budget category (after Add to Current Budget)
+  const [highlightedCategoryId, setHighlightedCategoryId] = useState<string | null>(null)
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
  
   const showToast = (message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
@@ -266,6 +274,12 @@ export default function App() {
   const editDeadlineArrowCount = useRef(0)
   const editStartDateLeftArrowCount = useRef(0)
   const editDeadlineLeftArrowCount = useRef(0)
+ 
+  // Refs for Log Contribution fields per target card (keyed by target id)
+  const logDateRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const logAmountRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const logNoteRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const logDateArrowCounts = useRef<Record<string, number>>({})
  
   const gp = Math.max(0, Number(gpInput) || 0)
   const adjustedSalary = BASE_SALARY + (baseBumpsAchieved * 5000)
@@ -439,25 +453,48 @@ export default function App() {
   const pushTargetHistory = (prev: Target[]) => {
     setTargetHistory(h => [...h.slice(-19), prev])
     setTargetRedo([])
+    setTargetFormRedo([])
   }
   const undoTarget = () => {
-    setTargetHistory(h => {
-      if (!h.length) return h
-      const next = [...h]
-      const prior = next.pop()!
-      setTargetRedo(r => [...r.slice(-19), targets])
-      setTargets(prior)
-      return next
+    // First drain any form history (Duplicate preloads) before undoing target list changes
+    setTargetFormHistory(fh => {
+      if (fh.length > 0) {
+        const next = [...fh]
+        const prior = next.pop()!
+        setTargetFormRedo(fr => [...fr.slice(-19), targetForm])
+        setTargetForm(prior)
+        return next
+      }
+      // No form history — undo the target list
+      setTargetHistory(h => {
+        if (!h.length) return h
+        const next = [...h]
+        const prior = next.pop()!
+        setTargetRedo(r => [...r.slice(-19), targets])
+        setTargets(prior)
+        return next
+      })
+      return fh
     })
   }
   const redoTarget = () => {
-    setTargetRedo(r => {
-      if (!r.length) return r
-      const next = [...r]
-      const snapshot = next.pop()!
-      setTargetHistory(h => [...h.slice(-19), targets])
-      setTargets(snapshot)
-      return next
+    setTargetFormRedo(fr => {
+      if (fr.length > 0) {
+        const next = [...fr]
+        const snapshot = next.pop()!
+        setTargetFormHistory(fh => [...fh.slice(-19), targetForm])
+        setTargetForm(snapshot)
+        return next
+      }
+      setTargetRedo(r => {
+        if (!r.length) return r
+        const next = [...r]
+        const snapshot = next.pop()!
+        setTargetHistory(h => [...h.slice(-19), targets])
+        setTargets(snapshot)
+        return next
+      })
+      return fr
     })
   }
  
@@ -831,7 +868,7 @@ export default function App() {
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${statusBadge}`}>{status}</span>
                 <span className="text-sm font-semibold text-slate-100">{progressPct.toFixed(1)}%</span>
-                <span className="text-xs text-slate-400">· {currency(req.remaining)} remaining</span>
+                <span className="text-xs text-slate-300 font-semibold">· {currency(req.remaining)} remaining</span>
               </div>
             </div>
  
@@ -978,13 +1015,39 @@ export default function App() {
                     onClick={() => {
                       const amount = period === 'weekly' ? req.weekly : period === 'bi-weekly' ? req.biWeekly : period === 'yearly' ? req.yearly : req.monthly
                       const monthlyAmt = convertToMonthly(amount, period)
-                      let isUpdate = false
+                      const periodAmtDisplay = currency(amount)
+                      let toastMsg = ''
+                      let affectedId = ''
                       setCategories(prev => {
                         const i = prev.findIndex(c => c.name.trim().toLowerCase() === t.name.trim().toLowerCase() && c.type === 'savings')
-                        if (i >= 0) { isUpdate = true; const cp = [...prev]; cp[i] = { ...cp[i], amount: monthlyAmt }; return cp }
-                        return [...prev, { id: crypto.randomUUID(), name: t.name, amount: monthlyAmt, type: 'savings' }]
+                        if (i >= 0) {
+                          const old = prev[i].amount
+                          const diff = monthlyAmt - old
+                          if (Math.abs(diff) < 0.005) {
+                            toastMsg = `No change: ${t.name} already matches ${periodAmtDisplay}`
+                          } else if (diff > 0) {
+                            toastMsg = `Updated: ${t.name} increased by ${currency(convertFromMonthly(diff, period))} to ${periodAmtDisplay}`
+                          } else {
+                            toastMsg = `Updated: ${t.name} decreased by ${currency(convertFromMonthly(Math.abs(diff), period))} to ${periodAmtDisplay}`
+                          }
+                          affectedId = prev[i].id
+                          const cp = [...prev]
+                          cp[i] = { ...cp[i], amount: monthlyAmt }
+                          return cp
+                        }
+                        const newId = crypto.randomUUID()
+                        affectedId = newId
+                        toastMsg = `New: ${t.name} added to Budget at ${periodAmtDisplay}`
+                        return [...prev, { id: newId, name: t.name, amount: monthlyAmt, type: 'savings' }]
                       })
-                      showToast(isUpdate ? `Updated ${t.name} in Budget` : `Added ${t.name} to Budget`)
+                      // Switch to Budget tab and highlight the affected row
+                      setTab('Budget')
+                      setTimeout(() => {
+                        if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
+                        setHighlightedCategoryId(affectedId)
+                        highlightTimerRef.current = setTimeout(() => setHighlightedCategoryId(null), 2500)
+                      }, 80)
+                      showToast(toastMsg)
                     }}
                   >
                     Add to Current Budget
@@ -998,8 +1061,9 @@ export default function App() {
                   <button
                     className="rounded bg-slate-600 hover:bg-slate-500 px-3 py-1.5 text-sm transition-colors min-w-[7rem]"
                     onClick={() => {
-                      // Preload the Create Savings Goal form with the source goal's fields.
-                      // Name is intentionally left blank — user must choose a unique name.
+                      // Push current form to history so Duplicate preload is undoable
+                      setTargetFormHistory(fh => [...fh.slice(-19), { ...targetForm }])
+                      setTargetFormRedo([])
                       setTargetForm({
                         name: '',
                         goalAmount: String(t.goalAmount),
@@ -1293,7 +1357,7 @@ export default function App() {
                 </thead>
                 <tbody>
                   {top.map(c => (
-                    <tr key={c.id} className="border-b border-slate-800">
+                    <tr key={c.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedCategoryId === c.id ? 'bg-blue-600/20' : ''}`}>
                       <td>{c.name}</td>
                       <td>{c.type === 'fixed bill' ? 'Fixed Bill' : c.type === 'variable spending' ? 'Variable Spending' : c.type === 'savings' ? 'Savings' : 'Investing'}</td>
                       {period === 'weekly' && <><td>{currency(convertFromMonthly(c.amount, 'weekly'))}</td><td>{currency(c.amount)}</td></>}
@@ -1546,15 +1610,15 @@ export default function App() {
             <div className="flex gap-2 items-center">
               <button
                 onClick={undoTarget}
-                disabled={!targetHistory.length}
-                className={`rounded-lg px-3 py-1.5 text-sm ${targetHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+                disabled={!targetHistory.length && !targetFormHistory.length}
+                className={`rounded-lg px-3 py-1.5 text-sm ${(targetHistory.length || targetFormHistory.length) ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
               >
                 Undo
               </button>
               <button
                 onClick={redoTarget}
-                disabled={!targetRedo.length}
-                className={`rounded-lg px-3 py-1.5 text-sm ${targetRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+                disabled={!targetRedo.length && !targetFormRedo.length}
+                className={`rounded-lg px-3 py-1.5 text-sm ${(targetRedo.length || targetFormRedo.length) ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
               >
                 Redo
               </button>
@@ -1711,4 +1775,5 @@ function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; va
     </div>
   )
 }
+ 
  
