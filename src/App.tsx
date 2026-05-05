@@ -143,8 +143,8 @@ function computeTargetStatus(t: Target): 'Complete' | 'Ahead' | 'On Track' | 'Be
   // Early-stage protection: first 7 days, use funded-percent tiers only
   // This prevents brand-new targets from showing Ahead just because expectedSaved ≈ 0
   if (elapsedDays < 7) {
-    if (fundedPercent >= 75) return 'Ahead'
-    // Below 75% funded in first week is On Track — not Ahead
+    if (fundedPercent >= 100) return 'Complete'
+    if (fundedPercent >= 15) return 'Ahead'
     return 'On Track'
   }
  
@@ -157,7 +157,7 @@ function computeTargetStatus(t: Target): 'Complete' | 'Ahead' | 'On Track' | 'Be
  
   const ratio = t.currentSaved / expectedSaved
   if (ratio < 0.70) return 'Behind'
-  if (ratio > 1.25) return 'Ahead'
+  if (ratio >= 1.07) return 'Ahead'
   return 'On Track'
 }
  
@@ -185,7 +185,7 @@ export default function App() {
   const [targets, setTargets] = useState<Target[]>([])
   const [savedTargetSets, setSavedTargetSets] = useState<SavedTargetSet[]>([])
   const [targetSetName, setTargetSetName] = useState('')
-  const [targetForm, setTargetForm] = useState({ name: '', goalAmount: '', currentSaved: '0', startDate: '', deadline: '' })
+  const [targetForm, setTargetForm] = useState(() => ({ name: '', goalAmount: '', currentSaved: '0', startDate: new Date().toISOString().slice(0, 10), deadline: '' }))
   const [targetLogForm, setTargetLogForm] = useState<Record<string, { date: string; amount: string; note: string }>>({})
   const [dashboardQuickDate, setDashboardQuickDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [dashboardQuickTargetId, setDashboardQuickTargetId] = useState('')
@@ -498,7 +498,7 @@ export default function App() {
             : t
         )
       )
-      setTargetForm({ name: '', goalAmount: '', currentSaved: '0', startDate: '', deadline: '' })
+      setTargetForm({ name: '', goalAmount: '', currentSaved: '0', startDate: new Date().toISOString().slice(0, 10), deadline: '' })
       setTimeout(() => targetNameRef.current?.focus(), 0)
       return
     }
@@ -508,7 +508,7 @@ export default function App() {
       { id: crypto.randomUUID(), name, goalAmount, currentSaved, startDate: startDate || today, deadline, createdAt: today, type: 'savings', contributions: [], completed: false },
       ...prev,
     ])
-    setTargetForm({ name: '', goalAmount: '', currentSaved: '0', startDate: '', deadline: '' })
+    setTargetForm({ name: '', goalAmount: '', currentSaved: '0', startDate: new Date().toISOString().slice(0, 10), deadline: '' })
     setTimeout(() => targetNameRef.current?.focus(), 0)
   }
  
@@ -625,6 +625,7 @@ export default function App() {
                 className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
                 value={editTargetForm.name}
                 onChange={e => setEditTargetForm(v => ({ ...v, name: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
                 placeholder="Target name"
               />
             </div>
@@ -637,6 +638,7 @@ export default function App() {
                 className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
                 value={editTargetForm.goalAmount}
                 onChange={e => setEditTargetForm(v => ({ ...v, goalAmount: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
                 placeholder="Goal amount"
               />
             </div>
@@ -649,6 +651,7 @@ export default function App() {
                 className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
                 value={editTargetForm.currentSaved}
                 onChange={e => setEditTargetForm(v => ({ ...v, currentSaved: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
                 placeholder="Current saved"
               />
             </div>
@@ -659,6 +662,7 @@ export default function App() {
                 className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
                 value={editTargetForm.deadline}
                 onChange={e => setEditTargetForm(v => ({ ...v, deadline: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
               />
             </div>
             <div>
@@ -668,6 +672,7 @@ export default function App() {
                 className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
                 value={editTargetForm.startDate}
                 onChange={e => setEditTargetForm(v => ({ ...v, startDate: e.target.value }))}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
               />
             </div>
             <div className="flex gap-2 pt-1">
@@ -1235,23 +1240,30 @@ export default function App() {
                   onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); targetStartDateRef.current?.focus() } }}
                   placeholder="Current Saved"
                 />
-                <input
-                  ref={targetStartDateRef}
-                  type="date"
-                  className="p-2 rounded bg-slate-800 border border-slate-600"
-                  value={targetForm.startDate}
-                  onChange={(e) => setTargetForm((v) => ({ ...v, startDate: e.target.value }))}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); targetDeadlineRef.current?.focus() } }}
-                  placeholder="Start Date"
-                />
-                <input
-                  ref={targetDeadlineRef}
-                  type="date"
-                  className="p-2 rounded bg-slate-800 border border-slate-600"
-                  value={targetForm.deadline}
-                  onChange={(e) => setTargetForm((v) => ({ ...v, deadline: e.target.value }))}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createTarget() } }}
-                />
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Start Date (when you began saving)</label>
+                  <input
+                    ref={targetStartDateRef}
+                    type="date"
+                    className="w-full p-2 rounded bg-slate-800 border border-slate-600"
+                    value={targetForm.startDate}
+                    onChange={(e) => setTargetForm((v) => ({ ...v, startDate: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); targetDeadlineRef.current?.focus() } }}
+                  />
+                  <p className="text-xs text-slate-500 mt-1">Use a past date if you already started saving before creating this goal.</p>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Deadline (when the goal is due)</label>
+                  <input
+                    ref={targetDeadlineRef}
+                    type="date"
+                    className="w-full p-2 rounded bg-slate-800 border border-slate-600"
+                    value={targetForm.deadline}
+                    onChange={(e) => setTargetForm((v) => ({ ...v, deadline: e.target.value }))}
+                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createTarget() } }}
+                  />
+                  <p className="text-xs text-slate-500 mt-1">The date you want to reach your goal by.</p>
+                </div>
                 <button className="rounded bg-blue-600" onClick={createTarget}>Create</button>
               </div>
             </Card>
@@ -1409,6 +1421,7 @@ function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; va
     </div>
   )
 }
+ 
  
  
  
