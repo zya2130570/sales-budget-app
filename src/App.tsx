@@ -101,7 +101,11 @@ const formatDate = (dateStr: string | undefined | null): string => {
   if (!dateStr) return '—'
   const d = new Date(dateStr + 'T00:00:00')
   if (isNaN(d.getTime())) return dateStr
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  // Format as "Sep 22, 2026"
+  const mon = d.toLocaleDateString('en-US', { month: 'short' })
+  const day = d.getDate()
+  const yr = d.getFullYear()
+  return `${mon} ${day}, ${yr}`
 }
  
 function computeTargetStatus(t: Target): 'Complete' | 'Ahead' | 'On Track' | 'Behind' {
@@ -185,6 +189,8 @@ export default function App() {
   const targetStartDateRef = useRef<HTMLInputElement>(null)
   const targetAutocompleteWrapRef = useRef<HTMLDivElement>(null)
   const editGoalAmountRef = useRef<HTMLInputElement>(null)
+  const startDateArrowCount = useRef(0)
+  const deadlineArrowCount = useRef(0)
  
   const [tab, setTab] = useState<Tab>('Dashboard')
   const [period, setPeriod] = useState<Period>('monthly')
@@ -196,7 +202,7 @@ export default function App() {
   const [targets, setTargets] = useState<Target[]>([])
   const [savedTargetSets, setSavedTargetSets] = useState<SavedTargetSet[]>([])
   const [targetSetName, setTargetSetName] = useState('')
-  const [targetForm, setTargetForm] = useState(() => ({ name: '', goalAmount: '', currentSaved: '0', startDate: new Date().toISOString().slice(0, 10), deadline: '' }))
+  const [targetForm, setTargetForm] = useState(() => ({ name: '', goalAmount: '', currentSaved: '', startDate: new Date().toISOString().slice(0, 10), deadline: '' }))
   const [targetLogForm, setTargetLogForm] = useState<Record<string, { date: string; amount: string; note: string }>>({})
   const [dashboardQuickDate, setDashboardQuickDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [dashboardQuickTargetId, setDashboardQuickTargetId] = useState('')
@@ -516,7 +522,7 @@ export default function App() {
             : t
         )
       )
-      setTargetForm({ name: '', goalAmount: '', currentSaved: '0', startDate: new Date().toISOString().slice(0, 10), deadline: '' })
+      setTargetForm({ name: '', goalAmount: '', currentSaved: '', startDate: new Date().toISOString().slice(0, 10), deadline: '' })
       setTimeout(() => targetNameRef.current?.focus(), 0)
       return
     }
@@ -526,7 +532,7 @@ export default function App() {
       { id: crypto.randomUUID(), name, goalAmount, currentSaved, startDate: startDate || today, deadline, createdAt: today, type: 'savings', contributions: [], completed: false },
       ...prev,
     ])
-    setTargetForm({ name: '', goalAmount: '', currentSaved: '0', startDate: new Date().toISOString().slice(0, 10), deadline: '' })
+    setTargetForm({ name: '', goalAmount: '', currentSaved: '', startDate: new Date().toISOString().slice(0, 10), deadline: '' })
     setTimeout(() => targetNameRef.current?.focus(), 0)
   }
  
@@ -606,7 +612,14 @@ export default function App() {
         title={isEditingTarget ? `Editing: ${t.name}` : t.name}
         headerAction={
           <div className="flex gap-2">
-            {!isEditingTarget && (
+            {isEditingTarget ? (
+              <button
+                className="text-xs text-slate-300 hover:text-slate-100 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
+                onClick={() => setEditTargetId(null)}
+              >
+                Cancel
+              </button>
+            ) : (
               <button
                 className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
                 onClick={() => {
@@ -624,15 +637,14 @@ export default function App() {
                 Edit
               </button>
             )}
-            <button
-              className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
-              onClick={() => {
-                if (isEditingTarget) setEditTargetId(null)
-                setTargetsWithHistory(prev => prev.filter(x => x.id !== t.id))
-              }}
-            >
-              Delete
-            </button>
+            {!isEditingTarget && (
+              <button
+                className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
+                onClick={() => setTargetsWithHistory(prev => prev.filter(x => x.id !== t.id))}
+              >
+                Delete
+              </button>
+            )}
           </div>
         }
       >
@@ -659,6 +671,7 @@ export default function App() {
                 value={editTargetForm.goalAmount}
                 onChange={e => setEditTargetForm(v => ({ ...v, goalAmount: e.target.value }))}
                 onFocus={e => e.target.select()}
+                onBlur={() => saveEditTarget(t.id)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
                 placeholder="Goal amount"
               />
@@ -673,6 +686,7 @@ export default function App() {
                 value={editTargetForm.currentSaved}
                 onChange={e => setEditTargetForm(v => ({ ...v, currentSaved: e.target.value }))}
                 onFocus={e => e.target.select()}
+                onBlur={() => saveEditTarget(t.id)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
                 placeholder="Current saved"
               />
@@ -684,6 +698,7 @@ export default function App() {
                 className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
                 value={editTargetForm.deadline}
                 onChange={e => setEditTargetForm(v => ({ ...v, deadline: e.target.value }))}
+                onBlur={() => saveEditTarget(t.id)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
               />
             </div>
@@ -694,6 +709,7 @@ export default function App() {
                 className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
                 value={editTargetForm.startDate}
                 onChange={e => setEditTargetForm(v => ({ ...v, startDate: e.target.value }))}
+                onBlur={() => saveEditTarget(t.id)}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
               />
             </div>
@@ -765,7 +781,7 @@ export default function App() {
                   Move to Completed
                 </button>
                 <button
-                  className="mt-2 rounded bg-slate-600 hover:bg-slate-500 px-3 py-1.5 text-sm transition-colors ml-2"
+                  className="mt-2 rounded bg-slate-600 hover:bg-slate-500 px-3 py-1.5 text-sm transition-colors ml-2 min-w-[7rem]"
                   onClick={() => {
                     setTargetForm({
                       name: '',
@@ -1085,8 +1101,9 @@ export default function App() {
                   value={form.type}
                   onKeyDown={e => {
                     if (['1', '2', '3', '4'].includes(e.key)) { const m = { '1': 'fixed bill', '2': 'variable spending', '3': 'savings', '4': 'investing' } as const; setForm(v => ({ ...v, type: m[e.key as keyof typeof m] })) }
-                    if (e.key === 'Enter') { e.preventDefault(); commitFormCheckpoint(); upsert() }
+                    if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); commitFormCheckpoint(); upsert() }
                     if (e.key === 'ArrowLeft') { e.preventDefault(); commitFormCheckpoint(); budgetAmountRef.current?.focus() }
+                    // ArrowUp/ArrowDown: let browser handle native select navigation (no preventDefault)
                   }}
                   onChange={e => { setForm(v => ({ ...v, type: e.target.value as CategoryType })); commitFormCheckpoint() }}
                 >
@@ -1283,7 +1300,7 @@ export default function App() {
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); targetSavedRef.current?.focus() }
                     }}
-                    placeholder="0"
+                    placeholder="e.g. 1000"
                   />
                 </div>
                 <div>
@@ -1301,7 +1318,7 @@ export default function App() {
                       if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); targetStartDateRef.current?.focus() }
                       if (e.key === 'ArrowLeft') { e.preventDefault(); targetGoalRef.current?.focus() }
                     }}
-                    placeholder="0"
+                    placeholder="e.g. 250"
                   />
                 </div>
                 <div>
@@ -1313,8 +1330,25 @@ export default function App() {
                     value={targetForm.startDate}
                     onChange={(e) => setTargetForm((v) => ({ ...v, startDate: e.target.value }))}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); targetDeadlineRef.current?.focus() }
-                      if (e.key === 'ArrowLeft') { e.preventDefault(); targetSavedRef.current?.focus() }
+                      if (e.key === 'ArrowRight') {
+                        // Let browser move through M→D→Y segments; after 2 presses jump to Deadline
+                        startDateArrowCount.current += 1
+                        if (startDateArrowCount.current > 2) {
+                          e.preventDefault()
+                          startDateArrowCount.current = 0
+                          targetDeadlineRef.current?.focus()
+                        }
+                      } else if (e.key === 'Enter') {
+                        e.preventDefault()
+                        startDateArrowCount.current = 0
+                        targetDeadlineRef.current?.focus()
+                      } else if (e.key === 'ArrowLeft') {
+                        startDateArrowCount.current = 0
+                        e.preventDefault()
+                        targetSavedRef.current?.focus()
+                      } else {
+                        startDateArrowCount.current = 0
+                      }
                     }}
                   />
          
@@ -1328,8 +1362,25 @@ export default function App() {
                     value={targetForm.deadline}
                     onChange={(e) => setTargetForm((v) => ({ ...v, deadline: e.target.value }))}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') { e.preventDefault(); createTarget() }
-                      if (e.key === 'ArrowLeft') { e.preventDefault(); targetStartDateRef.current?.focus() }
+                      if (e.key === 'ArrowRight') {
+                        // Let browser move through M→D→Y segments; after 2 presses trigger Create
+                        deadlineArrowCount.current += 1
+                        if (deadlineArrowCount.current > 2) {
+                          e.preventDefault()
+                          deadlineArrowCount.current = 0
+                          createTarget()
+                        }
+                      } else if (e.key === 'Enter') {
+                        e.preventDefault()
+                        deadlineArrowCount.current = 0
+                        createTarget()
+                      } else if (e.key === 'ArrowLeft') {
+                        deadlineArrowCount.current = 0
+                        e.preventDefault()
+                        targetStartDateRef.current?.focus()
+                      } else {
+                        deadlineArrowCount.current = 0
+                      }
                     }}
                   />
        
@@ -1364,7 +1415,7 @@ export default function App() {
               </button>
             </div>
  
-            <Card title="Target Sets">
+            <Card title="Target Sets" noHover>
               <div className="grid md:grid-cols-3 gap-2">
                 <input className="p-2 rounded bg-slate-800 border border-slate-600" value={targetSetName} onChange={(e) => setTargetSetName(e.target.value)} placeholder="Target set name" />
                 <button className="rounded bg-blue-600" onClick={() => { const n = targetSetName.trim(); if (!n) return; setSavedTargetSets([{ name: n, targets, savedAt: new Date().toISOString() }, ...savedTargetSets.filter(s => s.name.toLowerCase() !== n.toLowerCase())]) }}>Save</button>
@@ -1442,9 +1493,9 @@ export default function App() {
   )
 }
  
-function Card({ title, children, className = '', style, headerAction }: { title: string; children: React.ReactNode; className?: string; style?: React.CSSProperties; headerAction?: React.ReactNode }) {
+function Card({ title, children, className = '', style, headerAction, noHover = false }: { title: string; children: React.ReactNode; className?: string; style?: React.CSSProperties; headerAction?: React.ReactNode; noHover?: boolean }) {
   return (
-    <div style={style} className={`rounded-2xl border border-slate-700 bg-slate-800/80 shadow-lg p-4 md:p-5 transition-all duration-200 hover:-translate-y-0.5 ${className}`}>
+    <div style={style} className={`rounded-2xl border border-slate-700 bg-slate-800/80 shadow-lg p-4 md:p-5 transition-all duration-200 ${noHover ? '' : 'hover:-translate-y-0.5'} ${className}`}>
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-semibold">{title}</h2>
         {headerAction}
@@ -1495,8 +1546,6 @@ function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; va
     </div>
   )
 }
- 
- 
  
  
  
