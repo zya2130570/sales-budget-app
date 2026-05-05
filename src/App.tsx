@@ -1317,7 +1317,7 @@ export default function App() {
                       if (e.key === 'ArrowLeft') { e.preventDefault(); targetSavedRef.current?.focus() }
                     }}
                   />
-                  <p className="text-xs text-slate-500 mt-0.5">Use a past date if you already started saving.</p>
+         
                 </div>
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Deadline (when the goal is due)</label>
@@ -1332,7 +1332,7 @@ export default function App() {
                       if (e.key === 'ArrowLeft') { e.preventDefault(); targetStartDateRef.current?.focus() }
                     }}
                   />
-                  <p className="text-xs text-slate-500 mt-0.5">The date you want to reach your goal by.</p>
+       
                 </div>
                 <div>
                   <button className="w-full px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 transition-colors" onClick={createTarget}>Create</button>
