@@ -219,6 +219,7 @@ export default function App() {
   const [showTargetSuggestions, setShowTargetSuggestions] = useState(false)
   const [targetSuggestionIndex, setTargetSuggestionIndex] = useState(-1)
   const [budgetFormHint, setBudgetFormHint] = useState('')
+  const [targetFormHint, setTargetFormHint] = useState('')
   const [budgetHistory, setBudgetHistory] = useState<BudgetSnapshot[]>([])
   const [budgetRedo, setBudgetRedo] = useState<BudgetSnapshot[]>([])
   const [form, setForm] = useState({ name: '', amount: '', type: 'fixed bill' as CategoryType })
@@ -515,20 +516,12 @@ export default function App() {
     if (!name || goalAmount <= 0 || !deadline) return
  
     const existing = targets.find(
-      (t) => t.name.trim().toLowerCase() === name.toLowerCase() && t.deadline === deadline
+      (t) => t.name.trim().toLowerCase() === name.toLowerCase()
     )
  
     if (existing) {
-      // Combine silently without browser prompt
-      setTargetsWithHistory(prev =>
-        prev.map((t) =>
-          t.id === existing.id
-            ? { ...t, goalAmount: t.goalAmount + goalAmount, currentSaved: t.currentSaved + currentSaved }
-            : t
-        )
-      )
-      setTargetForm({ name: '', goalAmount: '', currentSaved: '', startDate: new Date().toISOString().slice(0, 10), deadline: '' })
-      setTimeout(() => targetNameRef.current?.focus(), 0)
+      setTargetFormHint('A target with this name already exists. Use a different name.')
+      targetNameRef.current?.focus()
       return
     }
  
@@ -799,19 +792,16 @@ export default function App() {
                 <button
                   className="mt-2 rounded bg-slate-600 hover:bg-slate-500 px-3 py-1.5 text-sm transition-colors ml-2 min-w-[7rem]"
                   onClick={() => {
-                    const today = new Date().toISOString().slice(0, 10)
-                    // Immediately create the duplicate and record it in undo/redo history
-                    setTargetsWithHistory(prev => [
-                      {
-                        ...t,
-                        id: crypto.randomUUID(),
-                        createdAt: today,
-                        startDate: t.startDate ?? t.createdAt ?? today,
-                        contributions: t.contributions.map(c => ({ ...c, id: crypto.randomUUID() })),
-                        completed: false,
-                      },
-                      ...prev,
-                    ])
+                    // Preload the Create Target form with the source target's fields.
+                    // Name is intentionally left blank — user must choose a unique name.
+                    setTargetForm({
+                      name: '',
+                      goalAmount: String(t.goalAmount),
+                      currentSaved: String(t.currentSaved),
+                      startDate: t.startDate ?? t.createdAt ?? new Date().toISOString().slice(0, 10),
+                      deadline: t.deadline ?? '',
+                    })
+                    setTargetFormHint('')
                     setTab('Targets')
                     setTimeout(() => targetNameRef.current?.focus(), 50)
                   }}
@@ -1265,7 +1255,7 @@ export default function App() {
                       value={targetForm.name}
                       placeholder="e.g. Emergency Fund"
                       onFocus={() => setShowTargetSuggestions(true)}
-                      onChange={(e) => { setTargetForm((v) => ({ ...v, name: e.target.value })); setTargetSuggestionIndex(-1); setShowTargetSuggestions(true) }}
+                      onChange={(e) => { setTargetForm((v) => ({ ...v, name: e.target.value })); setTargetSuggestionIndex(-1); setShowTargetSuggestions(true); setTargetFormHint('') }}
                       onKeyDown={(e) => {
                         if (e.key === 'ArrowDown') {
                           e.preventDefault()
@@ -1424,6 +1414,9 @@ export default function App() {
                   <button className="w-full px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 transition-colors" onClick={createTarget}>Create</button>
                 </div>
               </div>
+              {targetFormHint && (
+                <p className="mt-2 text-sm text-amber-300">{targetFormHint}</p>
+              )}
             </Card>
  
             {/* Target Undo / Redo / Clear row */}
