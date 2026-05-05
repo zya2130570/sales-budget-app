@@ -155,9 +155,12 @@ function computeTargetStatus(t: Target): 'Complete' | 'Ahead' | 'On Track' | 'Be
   // If nothing is expected yet (shouldn't reach here after the elapsedDays < 7 guard, but be safe)
   if (expectedSaved <= 0) return 'On Track'
  
-  const ratio = t.currentSaved / expectedSaved
-  if (ratio < 0.70) return 'Behind'
-  if (ratio >= 1.07) return 'Ahead'
+  // Use rounded cents to avoid floating-point weirdness (e.g. 69.9 appearing as Ahead)
+  const savedCents = Math.round(t.currentSaved * 100)
+  const behindThresholdCents = Math.round(expectedSaved * 0.70 * 100)
+  const aheadThresholdCents = Math.round(expectedSaved * 1.07 * 100)
+  if (savedCents < behindThresholdCents) return 'Behind'
+  if (savedCents >= aheadThresholdCents) return 'Ahead'
   return 'On Track'
 }
  
@@ -638,6 +641,7 @@ export default function App() {
                 className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
                 value={editTargetForm.goalAmount}
                 onChange={e => setEditTargetForm(v => ({ ...v, goalAmount: e.target.value }))}
+                onFocus={e => e.target.select()}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
                 placeholder="Goal amount"
               />
@@ -651,6 +655,7 @@ export default function App() {
                 className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
                 value={editTargetForm.currentSaved}
                 onChange={e => setEditTargetForm(v => ({ ...v, currentSaved: e.target.value }))}
+                onFocus={e => e.target.select()}
                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
                 placeholder="Current saved"
               />
@@ -742,6 +747,21 @@ export default function App() {
                 >
                   Move to Completed
                 </button>
+                <button
+                  className="mt-2 rounded bg-slate-600 hover:bg-slate-500 px-3 py-1.5 text-sm transition-colors ml-2"
+                  onClick={() => {
+                    setTargetForm({
+                      name: '',
+                      goalAmount: String(t.goalAmount),
+                      currentSaved: String(t.currentSaved),
+                      startDate: t.startDate ?? t.createdAt ?? new Date().toISOString().slice(0, 10),
+                      deadline: t.deadline ?? '',
+                    })
+                    setTimeout(() => targetNameRef.current?.focus(), 50)
+                  }}
+                >
+                  Duplicate
+                </button>
               </>
             )}
             {t.completed && (
@@ -781,6 +801,7 @@ export default function App() {
                               className="w-full p-1.5 rounded bg-slate-800 border border-slate-600 text-sm"
                               value={editContributionForm.amount}
                               onChange={e => setEditContributionForm(v => ({ ...v, amount: e.target.value }))}
+                              onFocus={e => e.target.select()}
                             />
                           </div>
                           <div>
@@ -1312,54 +1333,56 @@ export default function App() {
             </Card>
  
             {/* Active Targets */}
-            {activeTargets.length > 0 && (
-              <section className="space-y-3">
-                <h3 className="text-base font-semibold text-slate-200">Active ({activeTargets.length})</h3>
+            <section className="space-y-3">
+              <h3 className="text-base font-semibold text-slate-200">Active ({activeTargets.length})</h3>
+              {activeTargets.length > 0 ? (
                 <div className="grid md:grid-cols-2 gap-3">
                   {activeTargets.map(t => renderTargetCard(t))}
                 </div>
-              </section>
-            )}
+              ) : (
+                <p className="text-slate-500 text-sm">No active targets.</p>
+              )}
+            </section>
  
             {/* Fully Funded Targets */}
-            {fullyFundedTargets.length > 0 && (
-              <section className="space-y-3">
-                <button
-                  className="flex items-center gap-2 text-base font-semibold text-green-300 hover:text-green-200 transition-colors"
-                  onClick={() => setFullyFundedOpen(v => !v)}
-                >
-                  <span>{fullyFundedOpen ? '▾' : '▸'}</span>
-                  <span>Fully Funded ({fullyFundedTargets.length})</span>
-                </button>
-                {fullyFundedOpen && (
+            <section className="space-y-3">
+              <button
+                className="flex items-center gap-2 text-base font-semibold text-green-300 hover:text-green-200 transition-colors"
+                onClick={() => setFullyFundedOpen(v => !v)}
+              >
+                <span>{fullyFundedOpen ? '▾' : '▸'}</span>
+                <span>Fully Funded ({fullyFundedTargets.length})</span>
+              </button>
+              {fullyFundedOpen && (
+                fullyFundedTargets.length > 0 ? (
                   <div className="grid md:grid-cols-2 gap-3">
                     {fullyFundedTargets.map(t => renderTargetCard(t))}
                   </div>
-                )}
-              </section>
-            )}
+                ) : (
+                  <p className="text-slate-500 text-sm">No fully funded targets.</p>
+                )
+              )}
+            </section>
  
             {/* Completed Targets */}
-            {completedTargets.length > 0 && (
-              <section className="space-y-3">
-                <button
-                  className="flex items-center gap-2 text-base font-semibold text-slate-400 hover:text-slate-300 transition-colors"
-                  onClick={() => setCompletedOpen(v => !v)}
-                >
-                  <span>{completedOpen ? '▾' : '▸'}</span>
-                  <span>Completed ({completedTargets.length})</span>
-                </button>
-                {completedOpen && (
+            <section className="space-y-3">
+              <button
+                className="flex items-center gap-2 text-base font-semibold text-slate-400 hover:text-slate-300 transition-colors"
+                onClick={() => setCompletedOpen(v => !v)}
+              >
+                <span>{completedOpen ? '▾' : '▸'}</span>
+                <span>Completed ({completedTargets.length})</span>
+              </button>
+              {completedOpen && (
+                completedTargets.length > 0 ? (
                   <div className="grid md:grid-cols-2 gap-3">
                     {completedTargets.map(t => renderTargetCard(t))}
                   </div>
-                )}
-              </section>
-            )}
- 
-            {targets.length === 0 && (
-              <p className="text-slate-400 text-sm">No targets yet. Create one above.</p>
-            )}
+                ) : (
+                  <p className="text-slate-500 text-sm">No completed targets.</p>
+                )
+              )}
+            </section>
           </section>
         )}
  
@@ -1421,6 +1444,7 @@ function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; va
     </div>
   )
 }
+ 
  
  
  
