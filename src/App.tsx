@@ -244,9 +244,28 @@ export default function App() {
  
   // Track which targets have already been shown the deadline-passed popup
   const [deadlinePassedPrompted, setDeadlinePassedPrompted] = useState<Set<string>>(new Set())
-
+ 
   // Track which goal cards have expanded details visible
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set())
+ 
+  // Toast notification state
+  const [toast, setToast] = useState<{ message: string; visible: boolean } | null>(null)
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+ 
+  const showToast = (message: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    setToast({ message, visible: true })
+    toastTimerRef.current = setTimeout(() => setToast(null), 4000)
+  }
+ 
+  // Refs for edit-mode fields inside target cards
+  const editCurrentSavedRef = useRef<HTMLInputElement>(null)
+  const editStartDateRef = useRef<HTMLInputElement>(null)
+  const editDeadlineRef = useRef<HTMLInputElement>(null)
+  const editStartDateArrowCount = useRef(0)
+  const editDeadlineArrowCount = useRef(0)
+  const editStartDateLeftArrowCount = useRef(0)
+  const editDeadlineLeftArrowCount = useRef(0)
  
   const gp = Math.max(0, Number(gpInput) || 0)
   const adjustedSalary = BASE_SALARY + (baseBumpsAchieved * 5000)
@@ -551,7 +570,7 @@ export default function App() {
     setEditTargetId(null)
     setEditTargetOriginal(null)
   }
-
+ 
   const cancelEditTarget = (targetId: string) => {
     // Restore original target values without pushing to history.
     // Using setTargets directly (not setTargetsWithHistory) avoids creating a spurious
@@ -619,21 +638,21 @@ export default function App() {
       else next.add(t.id)
       return next
     })
-
+ 
     const statusBadge =
       status === 'Complete' || status === 'Ahead'
         ? 'bg-green-900/60 text-green-300 border border-green-700/50'
         : status === 'Behind'
           ? 'bg-red-900/60 text-red-300 border border-red-700/50'
           : 'bg-slate-700/80 text-slate-200 border border-slate-600/50'
-
+ 
     const barColor =
       status === 'Complete' || status === 'Ahead'
         ? 'bg-green-500'
         : status === 'Behind'
           ? 'bg-red-500'
           : 'bg-blue-500'
-
+ 
     return (
       <Card
         key={t.id}
@@ -698,14 +717,17 @@ export default function App() {
                 value={editTargetForm.goalAmount}
                 onChange={e => setEditTargetForm(v => ({ ...v, goalAmount: e.target.value }))}
                 onFocus={e => e.target.select()}
-                onBlur={() => saveEditTarget(t.id)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) }
+                  if (e.key === 'ArrowRight') { e.preventDefault(); editCurrentSavedRef.current?.focus() }
+                }}
                 placeholder="Goal amount"
               />
             </div>
             <div>
               <label className="text-xs text-slate-400 mb-1 block">Current Saved</label>
               <input
+                ref={editCurrentSavedRef}
                 type="number"
                 min={0}
                 step={25}
@@ -713,31 +735,78 @@ export default function App() {
                 value={editTargetForm.currentSaved}
                 onChange={e => setEditTargetForm(v => ({ ...v, currentSaved: e.target.value }))}
                 onFocus={e => e.target.select()}
-                onBlur={() => saveEditTarget(t.id)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) }
+                  if (e.key === 'ArrowRight') { e.preventDefault(); editStartDateRef.current?.focus() }
+                  if (e.key === 'ArrowLeft') { e.preventDefault(); editGoalAmountRef.current?.focus() }
+                }}
                 placeholder="Current saved"
-              />
-            </div>
-            <div>
-              <label className="text-xs text-slate-400 mb-1 block">Deadline</label>
-              <input
-                type="date"
-                className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
-                value={editTargetForm.deadline}
-                onChange={e => setEditTargetForm(v => ({ ...v, deadline: e.target.value }))}
-                onBlur={() => saveEditTarget(t.id)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
               />
             </div>
             <div>
               <label className="text-xs text-slate-400 mb-1 block">Start Date</label>
               <input
+                ref={editStartDateRef}
                 type="date"
                 className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
                 value={editTargetForm.startDate}
                 onChange={e => setEditTargetForm(v => ({ ...v, startDate: e.target.value }))}
-                onBlur={() => saveEditTarget(t.id)}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) }
+                  if (e.key === 'ArrowRight') {
+                    editStartDateLeftArrowCount.current = 0
+                    editStartDateArrowCount.current += 1
+                    if (editStartDateArrowCount.current > 2) {
+                      e.preventDefault()
+                      editStartDateArrowCount.current = 0
+                      editDeadlineRef.current?.focus()
+                    }
+                  } else if (e.key === 'ArrowLeft') {
+                    editStartDateArrowCount.current = 0
+                    editStartDateLeftArrowCount.current += 1
+                    if (editStartDateLeftArrowCount.current > 2) {
+                      e.preventDefault()
+                      editStartDateLeftArrowCount.current = 0
+                      editCurrentSavedRef.current?.focus()
+                    }
+                  } else {
+                    editStartDateArrowCount.current = 0
+                    editStartDateLeftArrowCount.current = 0
+                  }
+                }}
+              />
+            </div>
+            <div>
+              <label className="text-xs text-slate-400 mb-1 block">Deadline</label>
+              <input
+                ref={editDeadlineRef}
+                type="date"
+                className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
+                value={editTargetForm.deadline}
+                onChange={e => setEditTargetForm(v => ({ ...v, deadline: e.target.value }))}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) }
+                  if (e.key === 'ArrowLeft') {
+                    editDeadlineArrowCount.current = 0
+                    editDeadlineLeftArrowCount.current += 1
+                    if (editDeadlineLeftArrowCount.current > 2) {
+                      e.preventDefault()
+                      editDeadlineLeftArrowCount.current = 0
+                      editStartDateRef.current?.focus()
+                    }
+                  } else if (e.key === 'ArrowRight') {
+                    editDeadlineLeftArrowCount.current = 0
+                    editDeadlineArrowCount.current += 1
+                    if (editDeadlineArrowCount.current > 2) {
+                      e.preventDefault()
+                      editDeadlineArrowCount.current = 0
+                      saveEditTarget(t.id)
+                    }
+                  } else {
+                    editDeadlineArrowCount.current = 0
+                    editDeadlineLeftArrowCount.current = 0
+                  }
+                }}
               />
             </div>
             <div className="flex gap-2 pt-1">
@@ -765,7 +834,7 @@ export default function App() {
                 <span className="text-xs text-slate-400">· {currency(req.remaining)} remaining</span>
               </div>
             </div>
-
+ 
             {/* PROGRESS BAR */}
             <div className="mb-1">
               <div className="h-3 bg-slate-700 rounded-full overflow-hidden">
@@ -776,7 +845,7 @@ export default function App() {
                 <span>Goal: {currency(t.goalAmount)}</span>
               </div>
             </div>
-
+ 
             {/* DEADLINE ROW */}
             <div className="flex items-center gap-3 mt-3 mb-3 text-sm">
               <span className="text-slate-400">Deadline</span>
@@ -784,7 +853,7 @@ export default function App() {
               <span className="text-slate-500">·</span>
               <span className="text-slate-400">{req.days} days left</span>
             </div>
-
+ 
             {/* REQUIRED SAVINGS SUMMARY */}
             <div className="grid grid-cols-3 gap-2 mb-3">
               <div className="rounded-lg bg-slate-700/50 border border-slate-600/50 px-3 py-2 text-center">
@@ -800,7 +869,7 @@ export default function App() {
                 <div className="text-sm font-semibold text-slate-100">{currency(req.monthly)}</div>
               </div>
             </div>
-
+ 
             {/* COLLAPSIBLE DETAILS */}
             <div className="mb-3">
               <button
@@ -885,7 +954,7 @@ export default function App() {
                 </div>
               )}
             </div>
-
+ 
             {/* LOG CONTRIBUTION */}
             {!t.completed && (
               <>
@@ -909,11 +978,13 @@ export default function App() {
                     onClick={() => {
                       const amount = period === 'weekly' ? req.weekly : period === 'bi-weekly' ? req.biWeekly : period === 'yearly' ? req.yearly : req.monthly
                       const monthlyAmt = convertToMonthly(amount, period)
+                      let isUpdate = false
                       setCategories(prev => {
                         const i = prev.findIndex(c => c.name.trim().toLowerCase() === t.name.trim().toLowerCase() && c.type === 'savings')
-                        if (i >= 0) { const cp = [...prev]; cp[i] = { ...cp[i], amount: monthlyAmt }; return cp }
+                        if (i >= 0) { isUpdate = true; const cp = [...prev]; cp[i] = { ...cp[i], amount: monthlyAmt }; return cp }
                         return [...prev, { id: crypto.randomUUID(), name: t.name, amount: monthlyAmt, type: 'savings' }]
                       })
+                      showToast(isUpdate ? `Updated ${t.name} in Budget` : `Added ${t.name} to Budget`)
                     }}
                   >
                     Add to Current Budget
@@ -1569,11 +1640,25 @@ export default function App() {
         )}
  
       </div>
+ 
+      {/* Toast notification */}
+      {toast && (
+        <div
+          className="fixed bottom-5 right-5 z-50 flex items-center gap-3 rounded-xl border border-slate-600 bg-slate-800 px-4 py-3 shadow-2xl text-sm text-slate-100 transition-all duration-300"
+          style={{ opacity: toast.visible ? 1 : 0 }}
+        >
+          <span>{toast.message}</span>
+          <button
+            className="ml-1 rounded bg-slate-700 hover:bg-slate-600 px-2 py-0.5 text-xs transition-colors"
+            onClick={() => setToast(null)}
+          >
+            OK
+          </button>
+        </div>
+      )}
     </div>
   )
-}
- 
-function Card({ title, children, className = '', style, headerAction, noHover = false }: { title: string; children: React.ReactNode; className?: string; style?: React.CSSProperties; headerAction?: React.ReactNode; noHover?: boolean }) {
+}({ title, children, className = '', style, headerAction, noHover = false }: { title: string; children: React.ReactNode; className?: string; style?: React.CSSProperties; headerAction?: React.ReactNode; noHover?: boolean }) {
   return (
     <div style={style} className={`rounded-2xl border border-slate-700 bg-slate-800/80 shadow-lg p-4 md:p-5 transition-all duration-200 ${noHover ? '' : 'hover:-translate-y-0.5'} ${className}`}>
       <div className="flex items-center justify-between mb-3">
@@ -1626,3 +1711,4 @@ function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; va
     </div>
   )
 }
+ 
