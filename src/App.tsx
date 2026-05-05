@@ -191,6 +191,8 @@ export default function App() {
   const editGoalAmountRef = useRef<HTMLInputElement>(null)
   const startDateArrowCount = useRef(0)
   const deadlineArrowCount = useRef(0)
+  const startDateLeftArrowCount = useRef(0)
+  const deadlineLeftArrowCount = useRef(0)
  
   const [tab, setTab] = useState<Tab>('Dashboard')
   const [period, setPeriod] = useState<Period>('monthly')
@@ -224,6 +226,7 @@ export default function App() {
   // Target edit state
   const [editTargetId, setEditTargetId] = useState<string | null>(null)
   const [editTargetForm, setEditTargetForm] = useState({ name: '', goalAmount: '', currentSaved: '', startDate: '', deadline: '' })
+  const [editTargetOriginal, setEditTargetOriginal] = useState<Target | null>(null)
  
   // Contribution edit state
   const [editContributionId, setEditContributionId] = useState<string | null>(null)
@@ -267,12 +270,14 @@ export default function App() {
  
   // localStorage
   useEffect(() => {
+    const savedTab = localStorage.getItem('v42-tab'); if (savedTab) setTab(savedTab as Tab)
     const c = localStorage.getItem('v42-cats'); if (c) setCategories(JSON.parse(c))
     const b = localStorage.getItem('v42-budgets'); if (b) setSavedBudgets(JSON.parse(b))
     const s = localStorage.getItem('v42-scenarios'); if (s) setSavedScenarios(JSON.parse(s))
     const t = localStorage.getItem('v42-targets'); if (t) setTargets(JSON.parse(t))
     const ts = localStorage.getItem('v42-target-sets'); if (ts) setSavedTargetSets(JSON.parse(ts))
   }, [])
+  useEffect(() => localStorage.setItem('v42-tab', tab), [tab])
   useEffect(() => localStorage.setItem('v42-cats', JSON.stringify(categories)), [categories])
   useEffect(() => localStorage.setItem('v42-budgets', JSON.stringify(savedBudgets)), [savedBudgets])
   useEffect(() => localStorage.setItem('v42-scenarios', JSON.stringify(savedScenarios)), [savedScenarios])
@@ -548,6 +553,16 @@ export default function App() {
       : t
     ))
     setEditTargetId(null)
+    setEditTargetOriginal(null)
+  }
+
+  const cancelEditTarget = (targetId: string) => {
+    // Restore original target values if any blur-saves already fired
+    if (editTargetOriginal && editTargetOriginal.id === targetId) {
+      setTargetsWithHistory(prev => prev.map(t => t.id === targetId ? editTargetOriginal : t))
+    }
+    setEditTargetId(null)
+    setEditTargetOriginal(null)
   }
  
   const startEditContribution = (targetId: string, c: Contribution) => {
@@ -615,7 +630,7 @@ export default function App() {
             {isEditingTarget ? (
               <button
                 className="text-xs text-slate-300 hover:text-slate-100 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
-                onClick={() => setEditTargetId(null)}
+                onClick={() => cancelEditTarget(t.id)}
               >
                 Cancel
               </button>
@@ -624,6 +639,7 @@ export default function App() {
                 className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
                 onClick={() => {
                   setEditTargetId(t.id)
+                  setEditTargetOriginal(t)
                   setEditTargetForm({
                     name: t.name,
                     goalAmount: String(t.goalAmount),
@@ -637,14 +653,12 @@ export default function App() {
                 Edit
               </button>
             )}
-            {!isEditingTarget && (
-              <button
-                className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
-                onClick={() => setTargetsWithHistory(prev => prev.filter(x => x.id !== t.id))}
-              >
-                Delete
-              </button>
-            )}
+            <button
+              className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
+              onClick={() => setTargetsWithHistory(prev => prev.filter(x => x.id !== t.id))}
+            >
+              Delete
+            </button>
           </div>
         }
       >
@@ -722,7 +736,7 @@ export default function App() {
               </button>
               <button
                 className="flex-1 rounded bg-slate-700 hover:bg-slate-600 px-3 py-2 text-sm transition-colors"
-                onClick={() => setEditTargetId(null)}
+                onClick={() => cancelEditTarget(t.id)}
               >
                 Cancel
               </button>
@@ -1331,23 +1345,29 @@ export default function App() {
                     onChange={(e) => setTargetForm((v) => ({ ...v, startDate: e.target.value }))}
                     onKeyDown={(e) => {
                       if (e.key === 'ArrowRight') {
-                        // Let browser move through M→D→Y segments; after 2 presses jump to Deadline
+                        startDateLeftArrowCount.current = 0
                         startDateArrowCount.current += 1
                         if (startDateArrowCount.current > 2) {
                           e.preventDefault()
                           startDateArrowCount.current = 0
                           targetDeadlineRef.current?.focus()
                         }
+                      } else if (e.key === 'ArrowLeft') {
+                        startDateArrowCount.current = 0
+                        startDateLeftArrowCount.current += 1
+                        if (startDateLeftArrowCount.current > 2) {
+                          e.preventDefault()
+                          startDateLeftArrowCount.current = 0
+                          targetSavedRef.current?.focus()
+                        }
                       } else if (e.key === 'Enter') {
                         e.preventDefault()
                         startDateArrowCount.current = 0
+                        startDateLeftArrowCount.current = 0
                         targetDeadlineRef.current?.focus()
-                      } else if (e.key === 'ArrowLeft') {
-                        startDateArrowCount.current = 0
-                        e.preventDefault()
-                        targetSavedRef.current?.focus()
                       } else {
                         startDateArrowCount.current = 0
+                        startDateLeftArrowCount.current = 0
                       }
                     }}
                   />
@@ -1363,6 +1383,7 @@ export default function App() {
                     onChange={(e) => setTargetForm((v) => ({ ...v, deadline: e.target.value }))}
                     onKeyDown={(e) => {
                       if (e.key === 'ArrowRight') {
+                        deadlineLeftArrowCount.current = 0
                         // Let browser move through M→D→Y segments; after 2 presses trigger Create
                         deadlineArrowCount.current += 1
                         if (deadlineArrowCount.current > 2) {
@@ -1370,16 +1391,22 @@ export default function App() {
                           deadlineArrowCount.current = 0
                           createTarget()
                         }
+                      } else if (e.key === 'ArrowLeft') {
+                        deadlineArrowCount.current = 0
+                        deadlineLeftArrowCount.current += 1
+                        if (deadlineLeftArrowCount.current > 2) {
+                          e.preventDefault()
+                          deadlineLeftArrowCount.current = 0
+                          targetStartDateRef.current?.focus()
+                        }
                       } else if (e.key === 'Enter') {
                         e.preventDefault()
                         deadlineArrowCount.current = 0
+                        deadlineLeftArrowCount.current = 0
                         createTarget()
-                      } else if (e.key === 'ArrowLeft') {
-                        deadlineArrowCount.current = 0
-                        e.preventDefault()
-                        targetStartDateRef.current?.focus()
                       } else {
                         deadlineArrowCount.current = 0
+                        deadlineLeftArrowCount.current = 0
                       }
                     }}
                   />
@@ -1546,7 +1573,6 @@ function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; va
     </div>
   )
 }
- 
  
  
  
