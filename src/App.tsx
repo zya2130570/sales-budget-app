@@ -98,7 +98,7 @@ function income(gp: number, adjustedSalary: number) {
 }
  
 const formatDate = (dateStr: string | undefined | null): string => {
-  if (!dateStr) return '—'
+  if (!dateStr) return 'â'
   const d = new Date(dateStr + 'T00:00:00')
   if (isNaN(d.getTime())) return dateStr
   // Format as "Sep 22, 2026"
@@ -121,7 +121,7 @@ function computeTargetStatus(t: Target): 'Complete' | 'Ahead' | 'On Track' | 'Be
  
   const todayMs = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() })()
  
-  // Resolve start date: startDate field → createdAt → today
+  // Resolve start date: startDate field â createdAt â today
   const startMs = (() => {
     if (t.startDate) { const ms = toMs(t.startDate); if (!isNaN(ms)) return ms }
     if (t.createdAt) { const ms = toMs(t.createdAt); if (!isNaN(ms)) return ms }
@@ -152,14 +152,14 @@ function computeTargetStatus(t: Target): 'Complete' | 'Ahead' | 'On Track' | 'Be
   const fundedPercent = t.goalAmount > 0 ? (t.currentSaved / t.goalAmount) * 100 : 0
  
   // Early-stage protection: first 7 days, use funded-percent tiers only
-  // This prevents brand-new targets from showing Ahead just because expectedSaved ≈ 0
+  // This prevents brand-new targets from showing Ahead just because expectedSaved â 0
   if (elapsedDays < 7) {
     if (fundedPercent >= 100) return 'Complete'
     if (fundedPercent >= 15) return 'Ahead'
     return 'On Track'
   }
  
-  // Normal time-based rule after 7 days with wider 70%–125% buffer
+  // Normal time-based rule after 7 days with wider 70%â125% buffer
   const expectedProgress = elapsedDays / totalDays
   const expectedSaved = t.goalAmount * expectedProgress
  
@@ -465,7 +465,7 @@ export default function App() {
         setTargetForm(prior)
         return next
       }
-      // No form history — undo the target list
+      // No form history â undo the target list
       setTargetHistory(h => {
         if (!h.length) return h
         const next = [...h]
@@ -868,7 +868,7 @@ export default function App() {
               <div className="flex items-center gap-2 flex-wrap">
                 <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${statusBadge}`}>{status}</span>
                 <span className="text-sm font-semibold text-slate-100">{progressPct.toFixed(1)}%</span>
-                <span className="text-xs text-slate-300 font-semibold">· {currency(req.remaining)} remaining</span>
+                <span className="text-xs text-slate-300 font-semibold">Â· {currency(req.remaining)} remaining</span>
               </div>
             </div>
  
@@ -887,7 +887,7 @@ export default function App() {
             <div className="flex items-center gap-3 mt-3 mb-3 text-sm">
               <span className="text-slate-400">Deadline</span>
               <span className="text-slate-100 font-medium">{formatDate(t.deadline)}</span>
-              <span className="text-slate-500">·</span>
+              <span className="text-slate-500">Â·</span>
               <span className="text-slate-400">{req.days} days left</span>
             </div>
  
@@ -913,7 +913,7 @@ export default function App() {
                 className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
                 onClick={toggleExpanded}
               >
-                {isExpanded ? 'Hide Details ▴' : 'Show Details ▾'}
+                {isExpanded ? 'Hide Details â´' : 'Show Details â¾'}
               </button>
               {isExpanded && (
                 <div className="mt-2 border-t border-slate-700/60 pt-2 space-y-0">
@@ -971,7 +971,7 @@ export default function App() {
                           }
                           return (
                             <div key={c.id} className="flex justify-between text-sm border-b border-slate-700 py-1">
-                              <span>{c.date} · {currency(c.amount)}{c.note ? ` · ${c.note}` : ''}</span>
+                              <span>{c.date} Â· {currency(c.amount)}{c.note ? ` Â· ${c.note}` : ''}</span>
                               <div className="flex gap-2">
                                 <button className="text-blue-300 hover:text-blue-200" onClick={() => startEditContribution(t.id, c)}>Edit</button>
                                 <button
@@ -1118,7 +1118,7 @@ export default function App() {
           </div>
         </header>
  
-        {/* ── DASHBOARD ── */}
+        {/* ââ DASHBOARD ââ */}
         {tab === 'Dashboard' && (
           <section className="space-y-4 transition-all duration-300">
             <Card title="Welcome back"><p className="text-slate-200">{welcome}</p></Card>
@@ -1170,7 +1170,7 @@ export default function App() {
           </Card>
         )}
  
-        {/* ── INCOME ── */}
+        {/* ââ INCOME ââ */}
         {tab === 'Income' && (
           <section className="space-y-4 transition-all duration-300">
             <Card title="Income Input">
@@ -1207,7 +1207,7 @@ export default function App() {
               )}
               {baseBumpsAchieved > 0 && eligibleBumps === baseBumpsAchieved && (
                 <p className="mt-2 text-xs text-green-400">
-                  {baseBumpsAchieved} base {baseBumpsAchieved === 1 ? 'bump' : 'bumps'} applied — salary is {currency(adjustedSalary)}
+                  {baseBumpsAchieved} base {baseBumpsAchieved === 1 ? 'bump' : 'bumps'} applied â salary is {currency(adjustedSalary)}
                 </p>
               )}
             </Card>
@@ -1237,7 +1237,7 @@ export default function App() {
           </section>
         )}
  
-        {/* ── BUDGET ── */}
+        {/* ââ BUDGET ââ */}
         {tab === 'Budget' && (
           <section className="space-y-4 transition-all duration-300">
             <Card title="Budget Summary">
@@ -1329,7 +1329,7 @@ export default function App() {
                 <button className="rounded-lg bg-blue-600" onClick={() => { const n = budgetTitle.trim(); if (!n) return; const ex = savedBudgets.find(x => x.name.toLowerCase() === n.toLowerCase()); if (ex && !window.confirm('Overwrite existing budget?')) return; setSavedBudgets([{ name: n, categories, savedAt: new Date().toISOString() }, ...savedBudgets.filter(x => x.name.toLowerCase() !== n.toLowerCase())]); if (ex) setChangeSummary([`Monthly expenses change: ${currency(monthlyBudget - (ex.categories.reduce((s, c) => s + c.amount, 0)))}`]) }}>Save Budget</button>
                 <div className="text-xs text-slate-400 self-center">Saved locally</div>
               </div>
-              {changeSummary.length > 0 && <div className="mt-2 text-sm rounded border border-slate-700 p-2">What Changed: {changeSummary.join(' • ')}</div>}
+              {changeSummary.length > 0 && <div className="mt-2 text-sm rounded border border-slate-700 p-2">What Changed: {changeSummary.join(' â¢ ')}</div>}
               <div className="mt-2 space-y-2">
                 {savedBudgets.map(b => (
                   <div key={b.name} className="rounded border border-slate-700 p-2 flex justify-between">
@@ -1376,7 +1376,7 @@ export default function App() {
           </section>
         )}
  
-        {/* ── SCENARIOS ── */}
+        {/* ââ SCENARIOS ââ */}
         {tab === 'Scenarios' && (
           <section className="space-y-4 transition-all duration-300">
             <Card title="Scenario Set Manager">
@@ -1428,7 +1428,7 @@ export default function App() {
           </section>
         )}
  
-        {/* ── SAVINGS GOALS ── */}
+        {/* ââ SAVINGS GOALS ââ */}
         {tab === 'Targets' && (
           <section className="space-y-4">
             <Card title="Create Savings Goal">
@@ -1569,7 +1569,7 @@ export default function App() {
                     onKeyDown={(e) => {
                       if (e.key === 'ArrowRight') {
                         deadlineLeftArrowCount.current = 0
-                        // Let browser move through M→D→Y segments; after 2 presses trigger Create
+                        // Let browser move through MâDâY segments; after 2 presses trigger Create
                         deadlineArrowCount.current += 1
                         if (deadlineArrowCount.current > 2) {
                           e.preventDefault()
@@ -1667,7 +1667,7 @@ export default function App() {
                 className="flex items-center gap-2 text-base font-semibold text-green-300 hover:text-green-200 transition-colors"
                 onClick={() => setFullyFundedOpen(v => !v)}
               >
-                <span>{fullyFundedOpen ? '▾' : '▸'}</span>
+                <span>{fullyFundedOpen ? 'â¾' : 'â¸'}</span>
                 <span>Fully Funded Savings Goals ({fullyFundedTargets.length})</span>
               </button>
               {fullyFundedOpen && (
@@ -1687,7 +1687,7 @@ export default function App() {
                 className="flex items-center gap-2 text-base font-semibold text-slate-400 hover:text-slate-300 transition-colors"
                 onClick={() => setCompletedOpen(v => !v)}
               >
-                <span>{completedOpen ? '▾' : '▸'}</span>
+                <span>{completedOpen ? 'â¾' : 'â¸'}</span>
                 <span>Completed Savings Goals ({completedTargets.length})</span>
               </button>
               {completedOpen && (
@@ -1722,7 +1722,9 @@ export default function App() {
       )}
     </div>
   )
-} function Card({ title, children, className = '', style, headerAction, noHover = false }: { title: string; children: React.ReactNode; className?: string; style?: React.CSSProperties; headerAction?: React.ReactNode; noHover?: boolean }) {
+}
+
+function Card({ title, children, className = '', style, headerAction, noHover = false }: { title: string; children: React.ReactNode; className?: string; style?: React.CSSProperties; headerAction?: React.ReactNode; noHover?: boolean }) {
   return (
     <div style={style} className={`rounded-2xl border border-slate-700 bg-slate-800/80 shadow-lg p-4 md:p-5 transition-all duration-200 ${noHover ? '' : 'hover:-translate-y-0.5'} ${className}`}>
       <div className="flex items-center justify-between mb-3">
