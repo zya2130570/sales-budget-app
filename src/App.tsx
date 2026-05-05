@@ -97,6 +97,13 @@ function income(gp: number, adjustedSalary: number) {
   }
 }
  
+const formatDate = (dateStr: string | undefined | null): string => {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr + 'T00:00:00')
+  if (isNaN(d.getTime())) return dateStr
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+}
+ 
 function computeTargetStatus(t: Target): 'Complete' | 'Ahead' | 'On Track' | 'Behind' {
   // Fully funded
   if (t.goalAmount > 0 && t.currentSaved >= t.goalAmount) return 'Complete'
@@ -177,6 +184,7 @@ export default function App() {
   const targetDeadlineRef = useRef<HTMLInputElement>(null)
   const targetStartDateRef = useRef<HTMLInputElement>(null)
   const targetAutocompleteWrapRef = useRef<HTMLDivElement>(null)
+  const editGoalAmountRef = useRef<HTMLInputElement>(null)
  
   const [tab, setTab] = useState<Tab>('Dashboard')
   const [period, setPeriod] = useState<Period>('monthly')
@@ -453,6 +461,13 @@ export default function App() {
     budgetNameRef.current?.focus()
   }
  
+  const cancelBudgetEdit = () => {
+    setEditId(null)
+    setForm({ name: '', amount: '', type: 'fixed bill' })
+    setBudgetFormHint('')
+    budgetNameRef.current?.focus()
+  }
+ 
   const requiredForTarget = (t: Target) => {
     const remaining = Math.max(0, t.goalAmount - t.currentSaved)
     const today = new Date()
@@ -603,6 +618,7 @@ export default function App() {
                     startDate: t.startDate ?? t.createdAt ?? '',
                     deadline: t.deadline,
                   })
+                  setTimeout(() => { editGoalAmountRef.current?.focus(); editGoalAmountRef.current?.select() }, 0)
                 }}
               >
                 Edit
@@ -635,6 +651,7 @@ export default function App() {
             <div>
               <label className="text-xs text-slate-400 mb-1 block">Goal Amount</label>
               <input
+                ref={editGoalAmountRef}
                 type="number"
                 min={0}
                 step={25}
@@ -699,8 +716,8 @@ export default function App() {
           <>
             <Row l="Goal amount" v={currency(t.goalAmount)} />
             <Row l="Current saved" v={currency(t.currentSaved)} />
-            <Row l="Start date" v={t.startDate ?? t.createdAt ?? '—'} />
-            <Row l="Deadline" v={t.deadline ?? '—'} />
+            <Row l="Start date" v={formatDate(t.startDate ?? t.createdAt)} />
+            <Row l="Deadline" v={formatDate(t.deadline)} />
             <Row l="Remaining amount" v={currency(req.remaining)} />
             <Row l="Progress" v={`${progressPct.toFixed(1)}%`} />
             <Row
@@ -757,6 +774,7 @@ export default function App() {
                       startDate: t.startDate ?? t.createdAt ?? new Date().toISOString().slice(0, 10),
                       deadline: t.deadline ?? '',
                     })
+                    setTab('Targets')
                     setTimeout(() => targetNameRef.current?.focus(), 50)
                   }}
                 >
@@ -1056,7 +1074,10 @@ export default function App() {
                   value={form.amount}
                   onBlur={commitFormCheckpoint}
                   onChange={e => { setForm(v => ({ ...v, amount: e.target.value })); setBudgetFormHint('') }}
-                  onKeyDown={e => { if (e.key === 'Enter') { commitFormCheckpoint(); budgetTypeRef.current?.focus() } }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); commitFormCheckpoint(); budgetTypeRef.current?.focus() }
+                    if (e.key === 'ArrowLeft') { e.preventDefault(); commitFormCheckpoint(); budgetNameRef.current?.focus() }
+                  }}
                 />
                 <select
                   ref={budgetTypeRef}
@@ -1065,6 +1086,7 @@ export default function App() {
                   onKeyDown={e => {
                     if (['1', '2', '3', '4'].includes(e.key)) { const m = { '1': 'fixed bill', '2': 'variable spending', '3': 'savings', '4': 'investing' } as const; setForm(v => ({ ...v, type: m[e.key as keyof typeof m] })) }
                     if (e.key === 'Enter') { e.preventDefault(); commitFormCheckpoint(); upsert() }
+                    if (e.key === 'ArrowLeft') { e.preventDefault(); commitFormCheckpoint(); budgetAmountRef.current?.focus() }
                   }}
                   onChange={e => { setForm(v => ({ ...v, type: e.target.value as CategoryType })); commitFormCheckpoint() }}
                 >
@@ -1073,7 +1095,12 @@ export default function App() {
                   <option value="savings">3 - Savings</option>
                   <option value="investing">4 - Investing</option>
                 </select>
-                <button onClick={upsert} className="rounded-lg bg-blue-600 hover:bg-blue-500">{editId ? 'Save Changes' : 'Add'}</button>
+                <div className="flex gap-2">
+                  <button onClick={upsert} className="flex-1 rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm transition-colors">{editId ? 'Save Changes' : 'Add'}</button>
+                  {editId && (
+                    <button onClick={cancelBudgetEdit} className="rounded-lg bg-slate-600 hover:bg-slate-500 px-3 py-2 text-sm transition-colors">Cancel</button>
+                  )}
+                </div>
               </div>
               <div className="mt-2 flex gap-2">
                 <button onClick={undoBudget} disabled={!budgetHistory.length} className={`rounded-lg px-3 py-1.5 ${budgetHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
@@ -1189,103 +1216,127 @@ export default function App() {
         {tab === 'Targets' && (
           <section className="space-y-4">
             <Card title="Create Target">
-              <div className="grid md:grid-cols-6 gap-2">
-                <div ref={targetAutocompleteWrapRef} className="relative">
-                  <input
-                    ref={targetNameRef}
-                    className="w-full p-2 rounded bg-slate-800 border border-slate-600"
-                    value={targetForm.name}
-                    placeholder="Target Name"
-                    onFocus={() => setShowTargetSuggestions(true)}
-                    onChange={(e) => { setTargetForm((v) => ({ ...v, name: e.target.value })); setTargetSuggestionIndex(-1); setShowTargetSuggestions(true) }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'ArrowDown') {
-                        e.preventDefault()
-                        if (targetSuggestionList.length) { setTargetSuggestionIndex((v) => Math.min(v + 1, targetSuggestionList.length - 1)); setShowTargetSuggestions(true) }
-                        return
-                      }
-                      if (e.key === 'ArrowUp') {
-                        e.preventDefault()
-                        if (targetSuggestionList.length) { setTargetSuggestionIndex((v) => Math.max(v - 1, 0)); setShowTargetSuggestions(true) }
-                        return
-                      }
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        if (targetSuggestionIndex >= 0 && targetSuggestionList.length) {
-                          setTargetForm((v) => ({ ...v, name: targetSuggestionList[targetSuggestionIndex] }))
-                          setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus(); return
+              <div className="grid md:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Target Name</label>
+                  <div ref={targetAutocompleteWrapRef} className="relative">
+                    <input
+                      ref={targetNameRef}
+                      className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600"
+                      value={targetForm.name}
+                      placeholder="e.g. Emergency Fund"
+                      onFocus={() => setShowTargetSuggestions(true)}
+                      onChange={(e) => { setTargetForm((v) => ({ ...v, name: e.target.value })); setTargetSuggestionIndex(-1); setShowTargetSuggestions(true) }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault()
+                          if (targetSuggestionList.length) { setTargetSuggestionIndex((v) => Math.min(v + 1, targetSuggestionList.length - 1)); setShowTargetSuggestions(true) }
+                          return
                         }
-                        if (targetSuggestionList.length === 1) {
-                          setTargetForm((v) => ({ ...v, name: targetSuggestionList[0] }))
-                          setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus(); return
+                        if (e.key === 'ArrowUp') {
+                          e.preventDefault()
+                          if (targetSuggestionList.length) { setTargetSuggestionIndex((v) => Math.max(v - 1, 0)); setShowTargetSuggestions(true) }
+                          return
                         }
-                        if (targetForm.name.trim()) { setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus() }
-                      }
-                    }}
-                  />
-                  {showTargetSuggestions && targetSuggestionList.length > 0 && (
-                    <div className="absolute z-10 w-full mt-1 max-h-48 overflow-y-auto bg-slate-800 border border-slate-600 rounded-lg">
-                      {targetSuggestionList.map((preset, i) => (
-                        <button
-                          key={preset}
-                          type="button"
-                          className={`w-full text-left px-2 py-1 ${i === targetSuggestionIndex ? 'bg-slate-700' : 'hover:bg-slate-700'}`}
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => { setTargetForm((v) => ({ ...v, name: preset })); setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus() }}
-                        >
-                          {preset}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          if (targetSuggestionIndex >= 0 && targetSuggestionList.length) {
+                            setTargetForm((v) => ({ ...v, name: targetSuggestionList[targetSuggestionIndex] }))
+                            setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus(); return
+                          }
+                          if (targetSuggestionList.length === 1) {
+                            setTargetForm((v) => ({ ...v, name: targetSuggestionList[0] }))
+                            setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus(); return
+                          }
+                          if (targetForm.name.trim()) { setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus() }
+                        }
+                      }}
+                    />
+                    {showTargetSuggestions && targetSuggestionList.length > 0 && (
+                      <div className="absolute z-10 w-full mt-1 max-h-48 overflow-y-auto bg-slate-800 border border-slate-600 rounded-lg">
+                        {targetSuggestionList.map((preset, i) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            className={`w-full text-left px-2 py-1 text-sm ${i === targetSuggestionIndex ? 'bg-slate-700' : 'hover:bg-slate-700'}`}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => { setTargetForm((v) => ({ ...v, name: preset })); setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus() }}
+                          >
+                            {preset}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <input
-                  ref={targetGoalRef}
-                  type="number"
-                  min={0}
-                  step={25}
-                  className="p-2 rounded bg-slate-800 border border-slate-600"
-                  value={targetForm.goalAmount}
-                  onChange={(e) => setTargetForm((v) => ({ ...v, goalAmount: e.target.value }))}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); targetSavedRef.current?.focus() } }}
-                  placeholder="Goal Amount"
-                />
-                <input
-                  ref={targetSavedRef}
-                  type="number"
-                  min={0}
-                  step={25}
-                  className="p-2 rounded bg-slate-800 border border-slate-600"
-                  value={targetForm.currentSaved}
-                  onChange={(e) => setTargetForm((v) => ({ ...v, currentSaved: e.target.value }))}
-                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); targetStartDateRef.current?.focus() } }}
-                  placeholder="Current Saved"
-                />
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Goal Amount</label>
+                  <input
+                    ref={targetGoalRef}
+                    type="number"
+                    min={0}
+                    step={25}
+                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600"
+                    value={targetForm.goalAmount}
+                    onChange={(e) => setTargetForm((v) => ({ ...v, goalAmount: e.target.value }))}
+                    onFocus={e => e.target.select()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); targetSavedRef.current?.focus() }
+                    }}
+                    placeholder="0"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Current Saved</label>
+                  <input
+                    ref={targetSavedRef}
+                    type="number"
+                    min={0}
+                    step={25}
+                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600"
+                    value={targetForm.currentSaved}
+                    onChange={(e) => setTargetForm((v) => ({ ...v, currentSaved: e.target.value }))}
+                    onFocus={e => e.target.select()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); targetStartDateRef.current?.focus() }
+                      if (e.key === 'ArrowLeft') { e.preventDefault(); targetGoalRef.current?.focus() }
+                    }}
+                    placeholder="0"
+                  />
+                </div>
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Start Date (when you began saving)</label>
                   <input
                     ref={targetStartDateRef}
                     type="date"
-                    className="w-full p-2 rounded bg-slate-800 border border-slate-600"
+                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600"
                     value={targetForm.startDate}
                     onChange={(e) => setTargetForm((v) => ({ ...v, startDate: e.target.value }))}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); targetDeadlineRef.current?.focus() } }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); targetDeadlineRef.current?.focus() }
+                      if (e.key === 'ArrowLeft') { e.preventDefault(); targetSavedRef.current?.focus() }
+                    }}
                   />
-                  <p className="text-xs text-slate-500 mt-1">Use a past date if you already started saving before creating this goal.</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Use a past date if you already started saving.</p>
                 </div>
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Deadline (when the goal is due)</label>
                   <input
                     ref={targetDeadlineRef}
                     type="date"
-                    className="w-full p-2 rounded bg-slate-800 border border-slate-600"
+                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600"
                     value={targetForm.deadline}
                     onChange={(e) => setTargetForm((v) => ({ ...v, deadline: e.target.value }))}
-                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createTarget() } }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); createTarget() }
+                      if (e.key === 'ArrowLeft') { e.preventDefault(); targetStartDateRef.current?.focus() }
+                    }}
                   />
-                  <p className="text-xs text-slate-500 mt-1">The date you want to reach your goal by.</p>
+                  <p className="text-xs text-slate-500 mt-0.5">The date you want to reach your goal by.</p>
                 </div>
-                <button className="rounded bg-blue-600" onClick={createTarget}>Create</button>
+                <div>
+                  <button className="w-full px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 transition-colors" onClick={createTarget}>Create</button>
+                </div>
               </div>
             </Card>
  
@@ -1438,12 +1489,13 @@ function Info({ title, value, className = '', tone = 'neutral', glow = false }: 
  
 function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; valueClass?: string }) {
   return (
-    <div className="py-1.5 border-b border-slate-700 last:border-b-0 flex justify-between text-sm">
-      <span className="text-slate-400">{l}</span>
-      <span className={`font-medium ${valueClass}`}>{v}</span>
+    <div className="py-1.5 border-b border-slate-700 last:border-b-0 flex justify-between gap-2 text-sm">
+      <span className="text-slate-400 shrink-0">{l}</span>
+      <span className={`font-medium text-right ${valueClass}`}>{v}</span>
     </div>
   )
 }
+ 
  
  
  
