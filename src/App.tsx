@@ -263,7 +263,7 @@ export default function App() {
   const showToast = (message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     setToast({ message, visible: true })
-    toastTimerRef.current = setTimeout(() => setToast(null), 7000)
+    toastTimerRef.current = setTimeout(() => setToast(null), 15000)
   }
  
   // Refs for edit-mode fields inside target cards
@@ -597,6 +597,7 @@ export default function App() {
       { id: crypto.randomUUID(), name, goalAmount, currentSaved, startDate: startDate || today, deadline, createdAt: today, type: 'savings', contributions: [], completed: false },
       ...prev,
     ])
+    setTargetFormHint('')
     setTargetForm({ name: '', goalAmount: '', currentSaved: '', startDate: new Date().toISOString().slice(0, 10), deadline: '' })
     setTimeout(() => targetNameRef.current?.focus(), 0)
   }
@@ -1817,13 +1818,14 @@ export default function App() {
       {/* Toast notification */}
       {toast && (
         <div
-          className="fixed bottom-5 right-5 z-50 flex items-center gap-3 rounded-xl border border-slate-600 bg-slate-800 px-4 py-3 shadow-2xl text-sm text-slate-100 transition-all duration-300"
+          className="fixed bottom-5 right-5 z-50 flex items-center gap-3 rounded-xl border border-slate-600 bg-slate-800 px-4 py-3 shadow-2xl text-sm text-slate-100 transition-all duration-300 cursor-pointer"
           style={{ opacity: toast.visible ? 1 : 0 }}
+          onClick={() => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); setToast(null) }}
         >
           <span>{toast.message}</span>
           <button
             className="ml-1 rounded bg-slate-700 hover:bg-slate-600 px-2 py-0.5 text-xs transition-colors"
-            onClick={() => setToast(null)}
+            onClick={e => { e.stopPropagation(); if (toastTimerRef.current) clearTimeout(toastTimerRef.current); setToast(null) }}
           >
             OK
           </button>
