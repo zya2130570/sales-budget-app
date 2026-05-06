@@ -263,7 +263,7 @@ export default function App() {
   const showToast = (message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     setToast({ message, visible: true })
-    toastTimerRef.current = setTimeout(() => setToast(null), 4000)
+    toastTimerRef.current = setTimeout(() => setToast(null), 7000)
   }
  
   // Refs for edit-mode fields inside target cards
@@ -274,6 +274,8 @@ export default function App() {
   const editDeadlineArrowCount = useRef(0)
   const editStartDateLeftArrowCount = useRef(0)
   const editDeadlineLeftArrowCount = useRef(0)
+  // Blur-save timer: delays save so focus moving between edit fields doesn't trigger premature save
+  const editBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
  
   // Refs for Log Contribution fields per target card (keyed by target id)
   const logDateRefs = useRef<Record<string, HTMLInputElement | null>>({})
@@ -574,13 +576,19 @@ export default function App() {
     const deadline = targetForm.deadline
     if (!name || goalAmount <= 0 || !deadline) return
  
-    // Block if same name + same deadline already exists (conflict rule)
-    const conflict = targets.find(
-      (t) => t.name.trim().toLowerCase() === name.toLowerCase() && t.deadline === deadline
-    )
-    if (conflict) {
-      setTargetFormHint('A savings goal with this name and deadline already exists.')
+    // Conflict detection: name + deadline + goalAmount
+    const sameName = (t: Target) => t.name.trim().toLowerCase() === name.toLowerCase()
+    const sameDeadline = (t: Target) => t.deadline === deadline
+    const sameGoal = (t: Target) => t.goalAmount === goalAmount
+    const hardConflict = targets.find(t => sameName(t) && sameDeadline(t) && sameGoal(t))
+    if (hardConflict) {
+      setTargetFormHint('A savings goal with this name, deadline, and goal amount already exists.')
       targetNameRef.current?.focus()
+      return
+    }
+    const softConflict = targets.find(t => (sameName(t) && sameDeadline(t)) || (sameName(t) && sameGoal(t)))
+    if (softConflict && !targetFormHint.startsWith('Possible duplicate')) {
+      setTargetFormHint('Possible duplicate: please confirm this is not the same savings goal.')
       return
     }
  
@@ -602,12 +610,19 @@ export default function App() {
     const startDate = editTargetForm.startDate
     const deadline = editTargetForm.deadline
     if (!name || goalAmount <= 0 || !deadline) return
-    // Block if same name + same deadline exists on a DIFFERENT goal
-    const conflict = targets.find(
-      (t) => t.id !== targetId && t.name.trim().toLowerCase() === name.toLowerCase() && t.deadline === deadline
-    )
-    if (conflict) {
-      setEditTargetHint('A savings goal with this name and deadline already exists.')
+    // Conflict detection: name + deadline + goalAmount on a DIFFERENT goal
+    const other = (t: Target) => t.id !== targetId
+    const sameName = (t: Target) => t.name.trim().toLowerCase() === name.toLowerCase()
+    const sameDeadline = (t: Target) => t.deadline === deadline
+    const sameGoal = (t: Target) => t.goalAmount === goalAmount
+    const hardConflict = targets.find(t => other(t) && sameName(t) && sameDeadline(t) && sameGoal(t))
+    if (hardConflict) {
+      setEditTargetHint('A savings goal with this name, deadline, and goal amount already exists.')
+      return
+    }
+    const softConflict = targets.find(t => other(t) && ((sameName(t) && sameDeadline(t)) || (sameName(t) && sameGoal(t))))
+    if (softConflict && !editTargetHint.startsWith('Possible duplicate')) {
+      setEditTargetHint('Possible duplicate: please confirm this is not the same savings goal.')
       return
     }
     setEditTargetHint('')
@@ -620,6 +635,8 @@ export default function App() {
   }
  
   const cancelEditTarget = (targetId: string) => {
+    // Clear any pending blur-save to prevent race with cancel
+    if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current)
     // Restore original target values without pushing to history.
     // Using setTargets directly (not setTargetsWithHistory) avoids creating a spurious
     // undo entry when blur-save fires before this cancel click resolves.
@@ -744,14 +761,24 @@ export default function App() {
         }
       >
         {isEditingTarget ? (
-          <div className="space-y-3">
+          <div
+            className="space-y-3"
+            onBlur={e => {
+              // Blur-save: save when focus leaves the entire edit form.
+              // relatedTarget is the element receiving focus next.
+              // If it's still inside this container, don't save yet.
+              if (e.currentTarget.contains(e.relatedTarget as Node)) return
+              if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current)
+              editBlurTimerRef.current = setTimeout(() => saveEditTarget(t.id), 0)
+            }}
+          >
             <div>
               <label className="text-xs text-slate-400 mb-1 block">Goal Name</label>
               <input
                 className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
                 value={editTargetForm.name}
                 onChange={e => setEditTargetForm(v => ({ ...v, name: e.target.value }))}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) } }}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current); saveEditTarget(t.id) } }}
                 placeholder="Goal name"
               />
             </div>
@@ -767,7 +794,7 @@ export default function App() {
                 onChange={e => setEditTargetForm(v => ({ ...v, goalAmount: e.target.value }))}
                 onFocus={e => e.target.select()}
                 onKeyDown={e => {
-                  if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) }
+                  if (e.key === 'Enter') { e.preventDefault(); if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current); saveEditTarget(t.id) }
                   if (e.key === 'ArrowRight') { e.preventDefault(); editCurrentSavedRef.current?.focus() }
                 }}
                 placeholder="Goal amount"
@@ -785,7 +812,7 @@ export default function App() {
                 onChange={e => setEditTargetForm(v => ({ ...v, currentSaved: e.target.value }))}
                 onFocus={e => e.target.select()}
                 onKeyDown={e => {
-                  if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) }
+                  if (e.key === 'Enter') { e.preventDefault(); if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current); saveEditTarget(t.id) }
                   if (e.key === 'ArrowRight') { e.preventDefault(); editStartDateRef.current?.focus() }
                   if (e.key === 'ArrowLeft') { e.preventDefault(); editGoalAmountRef.current?.focus() }
                 }}
@@ -801,7 +828,7 @@ export default function App() {
                 value={editTargetForm.startDate}
                 onChange={e => setEditTargetForm(v => ({ ...v, startDate: e.target.value }))}
                 onKeyDown={e => {
-                  if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) }
+                  if (e.key === 'Enter') { e.preventDefault(); if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current); saveEditTarget(t.id) }
                   if (e.key === 'ArrowRight') {
                     editStartDateLeftArrowCount.current = 0
                     editStartDateArrowCount.current += 1
@@ -834,7 +861,7 @@ export default function App() {
                 value={editTargetForm.deadline}
                 onChange={e => setEditTargetForm(v => ({ ...v, deadline: e.target.value }))}
                 onKeyDown={e => {
-                  if (e.key === 'Enter') { e.preventDefault(); saveEditTarget(t.id) }
+                  if (e.key === 'Enter') { e.preventDefault(); if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current); saveEditTarget(t.id) }
                   if (e.key === 'ArrowLeft') {
                     editDeadlineArrowCount.current = 0
                     editDeadlineLeftArrowCount.current += 1
@@ -849,6 +876,7 @@ export default function App() {
                     if (editDeadlineArrowCount.current > 2) {
                       e.preventDefault()
                       editDeadlineArrowCount.current = 0
+                      if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current)
                       saveEditTarget(t.id)
                     }
                   } else {
@@ -861,13 +889,13 @@ export default function App() {
             <div className="flex gap-2 pt-1">
               <button
                 className="flex-1 rounded bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm transition-colors"
-                onClick={() => saveEditTarget(t.id)}
+                onClick={() => { if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current); saveEditTarget(t.id) }}
               >
                 Save Changes
               </button>
               <button
                 className="flex-1 rounded bg-slate-700 hover:bg-slate-600 px-3 py-2 text-sm transition-colors"
-                onClick={() => { setEditTargetHint(''); cancelEditTarget(t.id) }}
+                onClick={() => { if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current); setEditTargetHint(''); cancelEditTarget(t.id) }}
               >
                 Cancel
               </button>
