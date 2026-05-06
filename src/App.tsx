@@ -574,12 +574,12 @@ export default function App() {
     const deadline = targetForm.deadline
     if (!name || goalAmount <= 0 || !deadline) return
  
-    const existing = targets.find(
-      (t) => t.name.trim().toLowerCase() === name.toLowerCase()
+    // Block if same name + same deadline already exists (conflict rule)
+    const conflict = targets.find(
+      (t) => t.name.trim().toLowerCase() === name.toLowerCase() && t.deadline === deadline
     )
- 
-    if (existing) {
-      setTargetFormHint('A savings goal with this name already exists. Use a different name.')
+    if (conflict) {
+      setTargetFormHint('A savings goal with this name and deadline already exists.')
       targetNameRef.current?.focus()
       return
     }
@@ -593,6 +593,8 @@ export default function App() {
     setTimeout(() => targetNameRef.current?.focus(), 0)
   }
  
+  const [editTargetHint, setEditTargetHint] = useState('')
+
   const saveEditTarget = (targetId: string) => {
     const name = editTargetForm.name.trim()
     const goalAmount = Number(editTargetForm.goalAmount) || 0
@@ -600,6 +602,15 @@ export default function App() {
     const startDate = editTargetForm.startDate
     const deadline = editTargetForm.deadline
     if (!name || goalAmount <= 0 || !deadline) return
+    // Block if same name + same deadline exists on a DIFFERENT goal
+    const conflict = targets.find(
+      (t) => t.id !== targetId && t.name.trim().toLowerCase() === name.toLowerCase() && t.deadline === deadline
+    )
+    if (conflict) {
+      setEditTargetHint('A savings goal with this name and deadline already exists.')
+      return
+    }
+    setEditTargetHint('')
     setTargetsWithHistory(prev => prev.map(t => t.id === targetId
       ? { ...t, name, goalAmount, currentSaved, startDate, deadline }
       : t
@@ -617,6 +628,7 @@ export default function App() {
     }
     setEditTargetId(null)
     setEditTargetOriginal(null)
+    setEditTargetHint('')
   }
  
   const startEditContribution = (targetId: string, c: Contribution) => {
@@ -855,11 +867,14 @@ export default function App() {
               </button>
               <button
                 className="flex-1 rounded bg-slate-700 hover:bg-slate-600 px-3 py-2 text-sm transition-colors"
-                onClick={() => cancelEditTarget(t.id)}
+                onClick={() => { setEditTargetHint(''); cancelEditTarget(t.id) }}
               >
                 Cancel
               </button>
             </div>
+            {editTargetHint && (
+              <p className="mt-2 text-sm text-amber-300">{editTargetHint}</p>
+            )}
           </div>
         ) : (
           <>
@@ -1050,7 +1065,11 @@ export default function App() {
                       onChange={(e) => setTargetLogForm(v => ({ ...v, [t.id]: { ...log, note: e.target.value } }))}
                       placeholder="Note"
                       onKeyDown={(e) => {
-                        if (e.key === 'ArrowLeft' && (e.target as HTMLInputElement).selectionStart === 0) {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          addTargetContribution(t.id, Number(log.amount) || 0, log.date, log.note)
+                          setTargetLogForm(v => ({ ...v, [t.id]: { ...log, amount: '', note: '' } }))
+                        } else if (e.key === 'ArrowLeft' && (e.target as HTMLInputElement).selectionStart === 0) {
                           e.preventDefault()
                           logAmountRefs.current[t.id]?.focus()
                         }
@@ -1071,30 +1090,37 @@ export default function App() {
                       const amount = period === 'weekly' ? req.weekly : period === 'bi-weekly' ? req.biWeekly : period === 'yearly' ? req.yearly : req.monthly
                       const monthlyAmt = convertToMonthly(amount, period)
                       const periodAmtDisplay = currency(amount)
-                      let toastMsg = ''
-                      let affectedId = ''
-                      setCategories(prev => {
-                        const i = prev.findIndex(c => c.name.trim().toLowerCase() === t.name.trim().toLowerCase() && c.type === 'savings')
-                        if (i >= 0) {
-                          const old = prev[i].amount
-                          const diff = monthlyAmt - old
-                          if (Math.abs(diff) < 0.005) {
-                            toastMsg = `No change: ${t.name} already matches ${periodAmtDisplay}`
-                          } else if (diff > 0) {
-                            toastMsg = `Updated: ${t.name} increased by ${currency(convertFromMonthly(diff, period))} to ${periodAmtDisplay}`
-                          } else {
-                            toastMsg = `Updated: ${t.name} decreased by ${currency(convertFromMonthly(Math.abs(diff), period))} to ${periodAmtDisplay}`
-                          }
-                          affectedId = prev[i].id
-                          const cp = [...prev]
-                          cp[i] = { ...cp[i], amount: monthlyAmt }
-                          return cp
+                      // Compute message and affected id BEFORE setCategories to avoid React batching closure issues
+                      const existingIdx = categories.findIndex(c => c.name.trim().toLowerCase() === t.name.trim().toLowerCase() && c.type === 'savings')
+                      let toastMsg: string
+                      let affectedId: string
+                      if (existingIdx >= 0) {
+                        const old = categories[existingIdx].amount
+                        const diff = monthlyAmt - old
+                        affectedId = categories[existingIdx].id
+                        if (Math.abs(diff) < 0.005) {
+                          toastMsg = `No change: ${t.name} already matches ${periodAmtDisplay}`
+                        } else if (diff > 0) {
+                          toastMsg = `Updated: ${t.name} increased by ${currency(convertFromMonthly(diff, period))} to ${periodAmtDisplay}`
+                        } else {
+                          toastMsg = `Updated: ${t.name} decreased by ${currency(convertFromMonthly(Math.abs(diff), period))} to ${periodAmtDisplay}`
                         }
-                        const newId = crypto.randomUUID()
-                        affectedId = newId
+                      } else {
+                        affectedId = crypto.randomUUID()
                         toastMsg = `New: ${t.name} added to Budget at ${periodAmtDisplay}`
-                        return [...prev, { id: newId, name: t.name, amount: monthlyAmt, type: 'savings' }]
-                      })
+                      }
+                      // Push budget history snapshot so this change is undoable from Budget tab
+                      pushBudgetHistory()
+                      // Apply the category change
+                      if (existingIdx >= 0) {
+                        setCategories(prev => {
+                          const cp = [...prev]
+                          cp[existingIdx] = { ...cp[existingIdx], amount: monthlyAmt }
+                          return cp
+                        })
+                      } else {
+                        setCategories(prev => [...prev, { id: affectedId, name: t.name, amount: monthlyAmt, type: 'savings' }])
+                      }
                       // Switch to Budget tab and highlight the affected row
                       setTab('Budget')
                       setTimeout(() => {
@@ -1830,4 +1856,3 @@ function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; va
     </div>
   )
 }
- 
