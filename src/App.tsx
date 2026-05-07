@@ -26,6 +26,7 @@ import {
   saveSavedScenarios,
   saveTargets,
   saveSavedTargetSets,
+  runMigrations,
 } from './utils/storage'
  
 const presetTypeMap: Record<string, CategoryType> = {
@@ -191,6 +192,7 @@ export default function App() {
  
   // localStorage
   useEffect(() => {
+    runMigrations()
     const savedTab = loadTab(); if (savedTab) setTab(savedTab)
     const c = loadCategories(); if (c) setCategories(c)
     const b = loadSavedBudgets(); if (b) setSavedBudgets(b)
