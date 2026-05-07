@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet } from './types'
+import { currency, labelPeriod, formatDate } from './utils/formatting'
  
 const BASE_SALARY = 40000
 const TAKE_HOME_RATE = 0.8243
@@ -26,8 +27,6 @@ const scenarioDefaults: Record<ScenarioName, number> = { Slow: 8000, Medium: 150
 const commissionBrackets = [{ upTo: 5000, rate: 0.04 }, { upTo: 10000, rate: 0.06 }, { upTo: 20000, rate: 0.08 }, { upTo: 40000, rate: 0.1 }, { upTo: 60000, rate: 0.11 }, { upTo: 100000, rate: 0.12 }, { upTo: Infinity, rate: 0.14 }]
 const BUMP_THRESHOLDS = [20000, 40000, 60000, 80000, 150000, 300000, 500000]
  
-const currency = (n: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
-const labelPeriod = (p: Period) => p === 'bi-weekly' ? 'Bi-weekly' : p[0].toUpperCase() + p.slice(1)
 const periods: Period[] = ['weekly', 'bi-weekly', 'monthly', 'yearly']
 const targetPresets = ['Bike', 'Emergency Fund', 'Long-term Savings', 'Tuition', 'Custom']
 const tabTips: Record<Tab, string> = {
@@ -84,17 +83,6 @@ function income(gp: number, adjustedSalary: number) {
     totalBiWeekly: ((adjustedSalary / 26) * TAKE_HOME_RATE) + c / 2,
     commissionPct: totalMonthly > 0 ? (c / totalMonthly) * 100 : 0,
   }
-}
- 
-const formatDate = (dateStr: string | undefined | null): string => {
-  if (!dateStr) return '—'
-  const d = new Date(dateStr + 'T00:00:00')
-  if (isNaN(d.getTime())) return dateStr
-  // Format as "Sep 22, 2026"
-  const mon = d.toLocaleDateString('en-US', { month: 'short' })
-  const day = d.getDate()
-  const yr = d.getFullYear()
-  return `${mon} ${day}, ${yr}`
 }
  
 function computeTargetStatus(t: Target): 'Complete' | 'Ahead' | 'On Track' | 'Behind' {
