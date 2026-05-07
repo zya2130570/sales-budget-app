@@ -1,16 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
- 
-type Tab = 'Dashboard' | 'Income' | 'Budget' | 'Scenarios' | 'Targets'
-type Period = 'weekly' | 'bi-weekly' | 'monthly' | 'yearly'
-type CategoryType = 'fixed bill' | 'variable spending' | 'savings' | 'investing'
-type Category = { id: string; name: string; amount: number; type: CategoryType }
-type ScenarioName = 'Slow' | 'Medium' | 'Fast' | 'Custom'
-type SavedBudget = { name: string; categories: Category[]; savedAt: string }
-type SavedScenarioSet = { name: string; scenarios: Record<ScenarioName, number>; period: Period; savedAt: string }
-type BudgetSnapshot = { categories: Category[]; form: { name: string; amount: string; type: CategoryType }; editId: string | null }
-type Contribution = { id: string; date: string; amount: number; note: string }
-type Target = { id: string; name: string; goalAmount: number; currentSaved: number; startDate?: string; deadline: string; createdAt?: string; type: 'savings'; contributions: Contribution[]; completed?: boolean }
-type SavedTargetSet = { name: string; targets: Target[]; savedAt: string }
+import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet } from './types'
  
 const BASE_SALARY = 40000
 const TAKE_HOME_RATE = 0.8243
