@@ -3,6 +3,7 @@ import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, Sa
 import { currency, labelPeriod, formatDate } from './utils/formatting'
 import {
   BASE_SALARY,
+  TAKE_HOME_RATE,
   HOURS_PER_WEEK,
   BUMP_THRESHOLDS,
   scenarioDefaults,
@@ -13,6 +14,20 @@ import {
   computeTargetStatus,
   requiredForTarget,
 } from './utils/calculations'
+import {
+  loadTab,
+  loadCategories,
+  loadSavedBudgets,
+  loadSavedScenarios,
+  loadTargets,
+  loadSavedTargetSets,
+  saveTab,
+  saveCategories,
+  saveSavedBudgets,
+  saveSavedScenarios,
+  saveTargets,
+  saveSavedTargetSets,
+} from './utils/storage'
  
 const presetTypeMap: Record<string, CategoryType> = {
   Bike: 'fixed bill',
@@ -177,19 +192,19 @@ export default function App() {
  
   // localStorage
   useEffect(() => {
-    const savedTab = localStorage.getItem('v42-tab'); if (savedTab) setTab(savedTab as Tab)
-    const c = localStorage.getItem('v42-cats'); if (c) setCategories(JSON.parse(c))
-    const b = localStorage.getItem('v42-budgets'); if (b) setSavedBudgets(JSON.parse(b))
-    const s = localStorage.getItem('v42-scenarios'); if (s) setSavedScenarios(JSON.parse(s))
-    const t = localStorage.getItem('v42-targets'); if (t) setTargets(JSON.parse(t))
-    const ts = localStorage.getItem('v42-target-sets'); if (ts) setSavedTargetSets(JSON.parse(ts))
+    const savedTab = loadTab(); if (savedTab) setTab(savedTab)
+    const c = loadCategories(); if (c) setCategories(c)
+    const b = loadSavedBudgets(); if (b) setSavedBudgets(b)
+    const s = loadSavedScenarios(); if (s) setSavedScenarios(s)
+    const t = loadTargets(); if (t) setTargets(t)
+    const ts = loadSavedTargetSets(); if (ts) setSavedTargetSets(ts)
   }, [])
-  useEffect(() => localStorage.setItem('v42-tab', tab), [tab])
-  useEffect(() => localStorage.setItem('v42-cats', JSON.stringify(categories)), [categories])
-  useEffect(() => localStorage.setItem('v42-budgets', JSON.stringify(savedBudgets)), [savedBudgets])
-  useEffect(() => localStorage.setItem('v42-scenarios', JSON.stringify(savedScenarios)), [savedScenarios])
-  useEffect(() => localStorage.setItem('v42-targets', JSON.stringify(targets)), [targets])
-  useEffect(() => localStorage.setItem('v42-target-sets', JSON.stringify(savedTargetSets)), [savedTargetSets])
+  useEffect(() => saveTab(tab), [tab])
+  useEffect(() => saveCategories(categories), [categories])
+  useEffect(() => saveSavedBudgets(savedBudgets), [savedBudgets])
+  useEffect(() => saveSavedScenarios(savedScenarios), [savedScenarios])
+  useEffect(() => saveTargets(targets), [targets])
+  useEffect(() => saveSavedTargetSets(savedTargetSets), [savedTargetSets])
  
   // Deadline-passed detection: show a one-time prompt per target when today is past the deadline
   // and the target is still active (not completed, not fully funded).
