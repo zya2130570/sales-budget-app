@@ -1,7 +1,7 @@
 export type Tab = 'Dashboard' | 'Income' | 'Budget' | 'Scenarios' | 'Targets'
 export type Period = 'weekly' | 'bi-weekly' | 'monthly' | 'yearly'
 export type CategoryType = 'fixed bill' | 'variable spending' | 'savings' | 'investing'
-export type Category = { id: string; name: string; amount: number; type: CategoryType }
+export type Category = { id: string; name: string; amount: number; actual?: number; type: CategoryType }
 export type ScenarioName = 'Slow' | 'Medium' | 'Fast' | 'Custom'
 export type SavedBudget = { name: string; categories: Category[]; savedAt: string }
 export type SavedScenarioSet = { name: string; scenarios: Record<ScenarioName, number>; period: Period; savedAt: string }
