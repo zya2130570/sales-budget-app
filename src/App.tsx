@@ -17,12 +17,14 @@ import {
 import type { DashboardStatus } from './utils/calculations'
 import {
   loadTab,
+  loadPeriod,
   loadCategories,
   loadSavedBudgets,
   loadSavedScenarios,
   loadTargets,
   loadSavedTargetSets,
   saveTab,
+  savePeriod,
   saveCategories,
   saveSavedBudgets,
   saveSavedScenarios,
@@ -80,7 +82,7 @@ export default function App() {
   const deadlineLeftArrowCount = useRef(0)
 
   const [tab, setTab] = useState<Tab>('Dashboard')
-  const [period, setPeriod] = useState<Period>('monthly')
+  const [period, setPeriod] = useState<Period>('weekly')
   const [gpInput, setGpInput] = useState('5000')
   const [categories, setCategories] = useState<Category[]>([])
   const [scenario, setScenario] = useState<Record<ScenarioName, number>>(scenarioDefaults)
@@ -196,6 +198,7 @@ export default function App() {
   useEffect(() => {
     runMigrations()
     const savedTab = loadTab(); if (savedTab) setTab(savedTab)
+    const savedPeriod = loadPeriod(); if (savedPeriod) setPeriod(savedPeriod)
     const c = loadCategories(); if (c) setCategories(c)
     const b = loadSavedBudgets(); if (b) setSavedBudgets(b)
     const s = loadSavedScenarios(); if (s) setSavedScenarios(s)
@@ -203,6 +206,7 @@ export default function App() {
     const ts = loadSavedTargetSets(); if (ts) setSavedTargetSets(ts)
   }, [])
   useEffect(() => saveTab(tab), [tab])
+  useEffect(() => savePeriod(period), [period])
   useEffect(() => saveCategories(categories), [categories])
   useEffect(() => saveSavedBudgets(savedBudgets), [savedBudgets])
   useEffect(() => saveSavedScenarios(savedScenarios), [savedScenarios])
@@ -1280,7 +1284,8 @@ export default function App() {
                   onBlur={commitFormCheckpoint}
                   onChange={e => { setForm(v => ({ ...v, amount: e.target.value })); setBudgetFormHint('') }}
                   onKeyDown={e => {
-                    if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); commitFormCheckpoint(); budgetTypeRef.current?.focus() }
+                    if (e.key === 'Enter') { e.preventDefault(); commitFormCheckpoint(); upsert() }
+                    if (e.key === 'ArrowRight') { e.preventDefault(); commitFormCheckpoint(); budgetTypeRef.current?.focus() }
                     if (e.key === 'ArrowLeft') { e.preventDefault(); commitFormCheckpoint(); budgetNameRef.current?.focus() }
                   }}
                 />
@@ -1290,7 +1295,8 @@ export default function App() {
                   value={form.type}
                   onKeyDown={e => {
                     if (['1', '2', '3', '4'].includes(e.key)) { const m = { '1': 'fixed bill', '2': 'variable spending', '3': 'savings', '4': 'investing' } as const; setForm(v => ({ ...v, type: m[e.key as keyof typeof m] })) }
-                    if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); commitFormCheckpoint(); upsert() }
+                    if (e.key === 'Enter') { e.preventDefault(); commitFormCheckpoint(); upsert() }
+                    if (e.key === 'ArrowRight') { e.preventDefault() }
                     if (e.key === 'ArrowLeft') { e.preventDefault(); commitFormCheckpoint(); budgetAmountRef.current?.focus() }
                   }}
                   onChange={e => { setForm(v => ({ ...v, type: e.target.value as CategoryType })); commitFormCheckpoint() }}
