@@ -161,6 +161,8 @@ export default function App() {
   const pressureFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Keyed by category id → ref to that row's actual input
   const actualInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  // Captures the actuals value at focus time so blur can push ONE batched undo entry
+  const actualsSessionStart = useRef<Record<string, string>>({})
   // Snapshot of actuals at the moment an actual input is focused (for correct undo on blur)
   const actualsBeforeFocusRef = useRef<Record<string, string> | null>(null)
 
@@ -1659,7 +1661,7 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                         {/* Actual input + per-row Clear */}
                         <td className="py-1 pr-2">
                           <div className="flex items-center gap-1">
-                            <input
+                                                        <input
                               ref={el => { actualInputRefs.current[c.id] = el }}
                               type="number"
                               inputMode="decimal"
@@ -1669,48 +1671,45 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                               placeholder="—"
                               value={rawActual ?? ''}
                               onFocus={e => {
-                                // Capture the actuals state before any edits in this focus session
-                                actualsBeforeFocusRef.current = { ...actuals }
+                                actualsSessionStart.current[c.id] = rawActual ?? ''
                                 if (e.target.value !== '') e.target.select()
                               }}
                               onChange={e => {
-                                const raw = e.target.value
-                                // Strip any non-numeric characters except decimal point
-                                const cleaned = raw.replace(/[^0-9.]/g, '')
-                                if (cleaned === '' || Number(cleaned) === 0) {
-                                  setActuals(prev => ({ ...prev, [c.id]: '' }))
-                                } else {
-                                  setActuals(prev => ({ ...prev, [c.id]: cleaned }))
-                                }
+                                const cleaned = e.target.value.replace(/[^0-9.]/g, '')
+                                setActuals(prev => ({ ...prev, [c.id]: cleaned === '0' ? '' : cleaned }))
                               }}
                               onBlur={() => {
-                                // Push the pre-focus snapshot so undo reverts to state before typing
-                                const before = actualsBeforeFocusRef.current
-                                actualsBeforeFocusRef.current = null
-                                if (before !== null) {
-                                  const afterVal = actuals[c.id] ?? ''
-                                  const beforeVal = before[c.id] ?? ''
-                                  // Only record if something actually changed
-                                  if (afterVal !== beforeVal) {
-                                    pushActualsHistory(before)
-                                  }
+                                const startVal = actualsSessionStart.current[c.id] ?? ''
+                                const endVal = rawActual ?? ''
+                                if (endVal !== startVal) {
+                                  pushActualsHistory({ ...actuals, [c.id]: startVal })
                                 }
                               }}
                               onKeyDown={e => {
+                                if (['e', 'E', '+', '-'].includes(e.key)) {
+                                  e.preventDefault()
+                                  return
+                                }
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  const idx = top.findIndex(x => x.id === c.id)
+                                  const nextCat = top[idx + 1]
+                                  if (nextCat) {
+                                    actualInputRefs.current[nextCat.id]?.focus()
+                                  } else {
+                                    e.currentTarget.blur()
+                                  }
+                                  return
+                                }
                                 if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                   e.preventDefault()
-                                  // Capture before-state for undo if not already in a focus session
-                                  const before = actualsBeforeFocusRef.current ?? { ...actuals }
                                   const cur = Number(rawActual) || 0
                                   const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
                                   setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
-                                  // Each arrow step is its own undo entry
-                                  pushActualsHistory(before)
-                                  // Update the focus snapshot so next arrow push reflects new baseline
-                                  actualsBeforeFocusRef.current = { ...actuals, [c.id]: next === 0 ? '' : String(next) }
                                 }
                               }}
                             />
+
                             {hasActual && (
                               <button
                                 className="rounded px-1.5 py-0.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-700 hover:bg-slate-600 transition-colors"
