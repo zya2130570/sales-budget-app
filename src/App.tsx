@@ -111,6 +111,15 @@ export default function App() {
   const [budgetRedo, setBudgetRedo] = useState<BudgetSnapshot[]>([])
   const [form, setForm] = useState({ name: '', amount: '', type: 'fixed bill' as CategoryType })
 
+  // ── V7.5 Plan vs Actual ──────────────────────────────────────────────────────
+  // Keyed by category id → raw string so blank stays blank, never forced to "0"
+  const [actuals, setActuals] = useState<Record<string, string>>({})
+
+  // Persist actuals to localStorage
+  useEffect(() => {
+    try { localStorage.setItem('flow_actuals', JSON.stringify(actuals)) } catch { /* ignore */ }
+  }, [actuals])
+
   // Target edit state
   const [editTargetId, setEditTargetId] = useState<string | null>(null)
   const [editTargetForm, setEditTargetForm] = useState({ name: '', goalAmount: '', currentSaved: '', startDate: '', deadline: '' })
@@ -225,6 +234,7 @@ export default function App() {
     const s = loadSavedScenarios(); if (s) setSavedScenarios(s)
     const t = loadTargets(); if (t) setTargets(t)
     const ts = loadSavedTargetSets(); if (ts) setSavedTargetSets(ts)
+    try { const a = localStorage.getItem('flow_actuals'); if (a) setActuals(JSON.parse(a)) } catch { /* ignore */ }
   }, [])
   useEffect(() => saveTab(tab), [tab])
   useEffect(() => savePeriod(period), [period])
@@ -306,30 +316,67 @@ export default function App() {
   const biggestExpenseTone: 'neutral' | 'good' | 'warn' | 'danger' = top[0] && selectedPeriodTotalNet > 0 && convertFromMonthly(top[0].amount, period) > selectedPeriodTotalNet * 0.5 ? 'danger' : 'neutral'
   const totalBudgetTone: 'neutral' = 'neutral'
 
+  // ── V7.5 Actuals computations ────────────────────────────────────────────────
   // Period-aware variance coloring: small misses should not look dangerous
-  const varianceTone = (variance: number, p: Period): 'good' | 'neutral' | 'warn' | 'danger' => {
+  const varianceTone = (overspendAmt: number, p: Period): 'good' | 'neutral' | 'warn' | 'danger' => {
     const threshold = p === 'weekly' ? 50 : p === 'bi-weekly' ? 100 : p === 'monthly' ? 216 : 2600
-    if (variance <= 0) return 'good'
-    if (variance <= threshold) return 'neutral'
-    if (variance <= threshold * 2) return 'warn'
+    if (overspendAmt <= 0) return 'good'
+    if (overspendAmt <= threshold) return 'neutral'
+    if (overspendAmt <= threshold * 2) return 'warn'
     return 'danger'
   }
 
+  // Planned total for the selected period (sum of all categories)
+  const plannedPeriodTotal = convertFromMonthly(monthlyBudget, period)
+
+  // Actual total: sum of entered actuals for the selected period; blank = 0 for totals
+  const actualPeriodTotal = categories.reduce((sum, c) => {
+    const raw = actuals[c.id]
+    if (raw === '' || raw === undefined) return sum
+    return sum + (Number(raw) || 0)
+  }, 0)
+
+  // Whether any actual has been entered at all
+  const hasAnyActual = categories.some(c => actuals[c.id] !== '' && actuals[c.id] !== undefined)
+
+  // Variance total (actual - planned); positive = overspend
+  const variancePeriodTotal = hasAnyActual ? actualPeriodTotal - plannedPeriodTotal : 0
+
+  // actualOverspendPct: how far over plan we are as a % of planned (for dashboard)
+  const actualOverspendPct = hasAnyActual && plannedPeriodTotal > 0
+    ? Math.max(0, (variancePeriodTotal / plannedPeriodTotal) * 100)
+    : 0
+
   // ── V7.3 Dashboard Status Engine ───────────────────────────────────────────
   const activeTargets = targets.filter(t => !t.completed && (t.goalAmount <= 0 || t.currentSaved < t.goalAmount))
-  const dashboardStatus: DashboardStatus = useMemo(() => computeDashboardStatus({
-    totalMonthly: inc.totalMonthly,
-    monthlyBudget,
-    monthlyLeft,
-    savingsRate,
-    fixedRatio,
-    commissionPct: inc.commissionPct,
-    categories,
-    activeTargets,
-    period,
-    budgetHealthTier: !hasBudgetData ? 'No Data' : selectedPeriodRemaining < 0 ? 'Over Budget' : remainingTier.label,
+  const dashboardStatus: DashboardStatus = useMemo(() => {
+    const base = computeDashboardStatus({
+      totalMonthly: inc.totalMonthly,
+      monthlyBudget,
+      monthlyLeft,
+      savingsRate,
+      fixedRatio,
+      commissionPct: inc.commissionPct,
+      categories,
+      activeTargets,
+      period,
+      budgetHealthTier: !hasBudgetData ? 'No Data' : selectedPeriodRemaining < 0 ? 'Over Budget' : remainingTier.label,
+    })
+    // If actuals show meaningful overspend, surface it in the dashboard explanation
+    if (actualOverspendPct > 5 && base.tone !== 'danger') {
+      const severity: DashboardStatus['tone'] = actualOverspendPct > 20 ? 'risk' : 'warn'
+      const toneOrder: DashboardStatus['tone'][] = ['excellent', 'good', 'warn', 'risk', 'danger']
+      const baseIdx = toneOrder.indexOf(base.tone)
+      const sevIdx  = toneOrder.indexOf(severity)
+      return {
+        ...base,
+        tone: sevIdx > baseIdx ? severity : base.tone,
+        context: `Actuals are running ${actualOverspendPct.toFixed(0)}% over plan this period. ${base.context}`,
+      }
+    }
+    return base
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [inc.totalMonthly, monthlyBudget, monthlyLeft, savingsRate, fixedRatio, inc.commissionPct, categories, activeTargets, period, hasBudgetData, selectedPeriodRemaining, remainingTier.label])
+  }, [inc.totalMonthly, monthlyBudget, monthlyLeft, savingsRate, fixedRatio, inc.commissionPct, categories, activeTargets, period, hasBudgetData, selectedPeriodRemaining, remainingTier.label, actualOverspendPct])
 
   const createSnapshot = (): BudgetSnapshot => ({ categories: categories.map((c) => ({ ...c })), form: { ...form }, editId })
   const pushBudgetHistory = () => { setBudgetHistory((prev) => [...prev.slice(-19), createSnapshot()]); setBudgetRedo([]) }
@@ -1265,10 +1312,28 @@ export default function App() {
               <div className="flex gap-2 flex-wrap mb-4">{periods.map(p => <Pill key={p} active={period === p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div>
               <div className="grid md:grid-cols-4 gap-3">
                 <Metric title="Total available income" value={currency(selectedPeriodTotalNet)} />
-                <Metric title="Total planned expenses" value={currency(convertFromMonthly(monthlyBudget, period))} />
+                <Metric title="Total planned expenses" value={currency(plannedPeriodTotal)} />
                 <Metric title="Remaining amount" value={currency(selectedPeriodRemaining)} tone={remainingTone} glow={selectedPeriodRemaining < 0} />
                 <Metric title="Budget status" value={statusLabel} tone={statusTone} glow={selectedPeriodRemaining < 0} />
               </div>
+              {hasAnyActual && (
+                <div className="grid md:grid-cols-3 gap-3 mt-3 pt-3 border-t border-slate-700/60">
+                  <Metric title={`Actual spending (${labelPeriod(period)})`} value={currency(actualPeriodTotal)} />
+                  <Metric
+                    title={`Variance vs plan (${labelPeriod(period)})`}
+                    value={(variancePeriodTotal >= 0 ? '+' : '') + currency(variancePeriodTotal)}
+                    tone={(() => {
+                      const t = varianceTone(variancePeriodTotal, period)
+                      return t === 'danger' ? 'danger' : t === 'warn' ? 'warn' : t === 'good' ? 'good' : 'neutral'
+                    })()}
+                  />
+                  <Metric
+                    title="Overspend vs plan"
+                    value={actualOverspendPct > 0 ? `${actualOverspendPct.toFixed(1)}% over` : 'Under / on plan'}
+                    tone={actualOverspendPct > 20 ? 'danger' : actualOverspendPct > 5 ? 'warn' : 'good'}
+                  />
+                </div>
+              )}
             </Card>
             <Card title="Budget Categories">
               <div className="grid md:grid-cols-4 gap-2">
@@ -1378,30 +1443,83 @@ export default function App() {
               <table className="w-full text-sm mt-3">
                 <thead>
                   <tr className="text-left text-slate-400 border-b border-slate-700">
-                    <th>Name</th>
-                    <th>Type</th>
-                    {period === 'weekly' && <><th>Weekly</th><th>Monthly</th></>}
-                    {period === 'bi-weekly' && <><th>Bi-weekly</th><th>Monthly</th></>}
-                    {period === 'monthly' && <th>Monthly</th>}
-                    {period === 'yearly' && <><th>Monthly</th><th>Yearly</th></>}
-                    <th />
+                    <th className="pb-1.5 pr-2">Name</th>
+                    <th className="pb-1.5 pr-2">Type</th>
+                    {period === 'weekly'    && <th className="pb-1.5 pr-2">Weekly</th>}
+                    {period === 'bi-weekly' && <th className="pb-1.5 pr-2">Bi-weekly</th>}
+                    {period === 'monthly'   && <th className="pb-1.5 pr-2">Monthly</th>}
+                    {period === 'yearly'    && <th className="pb-1.5 pr-2">Yearly</th>}
+                    {(period === 'weekly' || period === 'bi-weekly') && <th className="pb-1.5 pr-2">Monthly</th>}
+                    {period === 'yearly'    && <th className="pb-1.5 pr-2">Monthly</th>}
+                    <th className="pb-1.5 pr-2">{labelPeriod(period)} Actual</th>
+                    <th className="pb-1.5 pr-2">Variance</th>
+                    <th className="pb-1.5" />
                   </tr>
                 </thead>
                 <tbody>
-                  {top.map(c => (
-                    <tr key={c.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedCategoryId === c.id ? 'bg-blue-600/20' : ''}`}>
-                      <td>{c.name}</td>
-                      <td>{c.type === 'fixed bill' ? 'Fixed Bill' : c.type === 'variable spending' ? 'Variable Spending' : c.type === 'savings' ? 'Savings' : 'Investing'}</td>
-                      {period === 'weekly' && <><td>{currency(convertFromMonthly(c.amount, 'weekly'))}</td><td>{currency(c.amount)}</td></>}
-                      {period === 'bi-weekly' && <><td>{currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td><td>{currency(c.amount)}</td></>}
-                      {period === 'monthly' && <td>{currency(c.amount)}</td>}
-                      {period === 'yearly' && <><td>{currency(c.amount)}</td><td>{currency(convertFromMonthly(c.amount, 'yearly'))}</td></>}
-                      <td className="space-x-2">
-                        <button className="text-blue-300" onClick={() => { setForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type }); setEditId(c.id); budgetNameRef.current?.focus() }}>Edit</button>
-                        <button className="text-red-300" onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
-                      </td>
-                    </tr>
-                  ))}
+                  {top.map(c => {
+                    const planned = convertFromMonthly(c.amount, period)
+                    const rawActual = actuals[c.id]
+                    const hasActual = rawActual !== '' && rawActual !== undefined
+                    const actualVal = hasActual ? (Number(rawActual) || 0) : null
+                    const variance = actualVal !== null ? actualVal - planned : null
+                    const vTone = variance !== null ? varianceTone(variance, period) : 'neutral'
+                    const varClass =
+                      variance === null ? 'text-slate-500' :
+                      vTone === 'good' ? 'text-green-400' :
+                      vTone === 'neutral' ? 'text-slate-300' :
+                      vTone === 'warn' ? 'text-yellow-300' : 'text-red-400'
+                    return (
+                      <tr key={c.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedCategoryId === c.id ? 'bg-blue-600/20' : ''}`}>
+                        <td className="py-1.5 pr-2">{c.name}</td>
+                        <td className="py-1.5 pr-2 text-slate-400 text-xs">{c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}</td>
+                        {/* Primary period planned */}
+                        {period === 'weekly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'weekly'))}</td>}
+                        {period === 'bi-weekly' && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td>}
+                        {period === 'monthly'   && <td className="py-1.5 pr-2">{currency(c.amount)}</td>}
+                        {period === 'yearly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'yearly'))}</td>}
+                        {/* Monthly reference column for weekly/bi-weekly/yearly */}
+                        {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
+                        {period === 'yearly'    && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
+                        {/* Actual input */}
+                        <td className="py-1 pr-2">
+                          <input
+                            type="number"
+                            min={0}
+                            step={25}
+                            className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
+                            placeholder="—"
+                            value={rawActual ?? ''}
+                            onChange={e => {
+                              const raw = e.target.value
+                              if (raw === '' || raw === '0') {
+                                setActuals(prev => ({ ...prev, [c.id]: '' }))
+                              } else {
+                                setActuals(prev => ({ ...prev, [c.id]: raw }))
+                              }
+                            }}
+                            onKeyDown={e => {
+                              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                e.preventDefault()
+                                const cur = Number(rawActual) || 0
+                                const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
+                                setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
+                              }
+                            }}
+                            onFocus={e => { if (e.target.value !== '') e.target.select() }}
+                          />
+                        </td>
+                        {/* Variance */}
+                        <td className={`py-1.5 pr-2 font-medium ${varClass}`}>
+                          {variance === null ? '—' : (variance >= 0 ? '+' : '') + currency(variance)}
+                        </td>
+                        <td className="py-1.5 space-x-2 whitespace-nowrap">
+                          <button className="text-blue-300 hover:text-blue-200" onClick={() => { setForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type }); setEditId(c.id); budgetNameRef.current?.focus() }}>Edit</button>
+                          <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </Card>
