@@ -340,7 +340,7 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
     return {
       label: 'Strong Month',
       tone: 'good',
-      explanation: 'There's a ${cushionPct.toFixed(0)}% cushion remaining and a ${savingsRate.toFixed(0)}% savings rate — the budget is in good shape.',
+      explanation: `There's a ${cushionPct.toFixed(0)}% cushion remaining and a ${savingsRate.toFixed(0)}% savings rate — the budget is in good shape.`,
       context: imperfection,
     }
   }
