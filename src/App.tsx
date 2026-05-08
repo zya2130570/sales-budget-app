@@ -162,11 +162,8 @@ export default function App() {
   const pressureFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Keyed by category id → ref to that row's actual input
   const actualInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
-  // Captures the actuals value at focus time so blur can push ONE batched undo entry
-  const actualsSessionStart = useRef<Record<string, string>>({})
   // Snapshot of actuals at the moment an actual input is focused (for correct undo on blur)
   const actualsBeforeFocusRef = useRef<Record<string, string> | null>(null)
-
   // V7.7.1: Parallel undo/redo stacks for actuals (mirrors budget history timing)
   const [, setActualsHistory] = useState<Array<Record<string, string>>>([])
 const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
