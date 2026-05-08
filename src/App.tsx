@@ -276,8 +276,22 @@ export default function App() {
   const selectedPeriodTotalNet = convertFromMonthly(inc.totalMonthly, period)
   const remainingTier = remainingTierFromPeriodValue(selectedPeriodRemaining, period)
   const remainingTone = remainingTier.tone
+  const periodPhrase = period === 'weekly' ? 'this week' : period === 'bi-weekly' ? 'this pay period' : period === 'monthly' ? 'this month' : 'this year'
   const statusLabel = !hasBudgetData ? 'No Data' : selectedPeriodRemaining < 0 ? 'Over Budget' : remainingTier.label
   const statusTone: 'good' | 'warn' | 'risk' | 'danger' = !hasBudgetData ? 'warn' : selectedPeriodRemaining < 0 ? 'danger' : statusLabel === 'Moderate' ? 'warn' : statusLabel === 'Risk' ? 'risk' : 'good'
+  const topVariable = [...categories].filter((c) => c.type === 'variable spending').sort((a, b) => b.amount - a.amount)[0]
+  const topBill = [...categories].filter((c) => c.type !== 'savings' && c.type !== 'investing').sort((a, b) => b.amount - a.amount)[0]
+  const welcome = !hasBudgetData
+    ? 'No budget data yet. Add expenses to see your financial health.'
+    : selectedPeriodRemaining < 0
+      ? topVariable
+        ? `You are over budget by ${currency(Math.abs(selectedPeriodRemaining))} ${periodPhrase}. Start by reviewing ${topVariable.name}, your largest flexible expense.`
+        : `You are over budget by ${currency(Math.abs(selectedPeriodRemaining))} ${periodPhrase}. ${fixedRatio.toFixed(1)}% of your spending is fixed, so review your largest bill first: ${topBill?.name ?? 'your top bill'}.`
+      : statusLabel === 'Moderate' || statusLabel === 'Risk'
+        ? topVariable
+          ? `Your cushion is tight ${periodPhrase}. Reviewing ${topVariable.name} could give you more breathing room.`
+          : `Your cushion is tight ${periodPhrase}. Review your biggest bill to improve breathing room.`
+        : `You have a healthy cushion ${periodPhrase} and your savings rate is strong.`
   const remainingCushionPct = selectedPeriodTotalNet > 0 ? (selectedPeriodRemaining / selectedPeriodTotalNet) * 100 : 0
   const savingsTone: 'good' | 'warn' | 'danger' = savingsRate >= 35 ? 'good' : savingsRate >= 20 ? 'warn' : 'danger'
   const cushionTone: 'good' | 'warn' | 'risk' | 'danger' = remainingTone
@@ -285,7 +299,7 @@ export default function App() {
   const totalBudgetRatio = selectedPeriodTotalNet > 0 ? convertFromMonthly(monthlyBudget, period) / selectedPeriodTotalNet : 0
   const totalBudgetTone: 'neutral' | 'warn' | 'danger' = totalBudgetRatio > 0.9 ? 'danger' : totalBudgetRatio > 0.7 ? 'warn' : 'neutral'
 
-  // ── V7.1 Dashboard Status Engine ───────────────────────────────────────────
+  // ── V7.3 Dashboard Status Engine ───────────────────────────────────────────
   const activeTargets = targets.filter(t => !t.completed && (t.goalAmount <= 0 || t.currentSaved < t.goalAmount))
   const dashboardStatus: DashboardStatus = useMemo(() => computeDashboardStatus({
     totalMonthly: inc.totalMonthly,
@@ -1081,7 +1095,7 @@ export default function App() {
         {tab === 'Dashboard' && (
           <section className="space-y-4 transition-all duration-300">
 
-            {/* ── V7.2 Dashboard Status Banner ── */}
+            {/* ── V7.3 Dashboard Status Banner ── */}
             <DashboardStatusBanner status={dashboardStatus} />
 
             {/* ── Action Cards ── */}
@@ -1710,44 +1724,49 @@ export default function App() {
   )
 }
 
-// ── V7.1 Dashboard Status Banner ─────────────────────────────────────────────
+// ── V7.3 Dashboard Status Banner ─────────────────────────────────────────────
 
 function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
-  const toneStyles: Record<string, { border: string; bg: string; labelColor: string; dot: string; badge: string }> = {
+  const toneStyles: Record<string, { border: string; bg: string; labelColor: string; dot: string; badgeBg: string; badgeText: string; badgeBorder: string; signal: string }> = {
     excellent: {
       border: 'border-emerald-500/60',
       bg: 'bg-gradient-to-r from-emerald-900/40 via-slate-800/80 to-slate-800/80',
       labelColor: 'text-emerald-300',
       dot: 'bg-emerald-400',
-      badge: 'bg-emerald-900/60 text-emerald-300 border-emerald-500/40',
+      badgeBg: 'bg-emerald-900/60', badgeText: 'text-emerald-300', badgeBorder: 'border-emerald-500/40',
+      signal: 'All signals clear',
     },
     good: {
       border: 'border-green-500/50',
       bg: 'bg-gradient-to-r from-green-900/30 via-slate-800/80 to-slate-800/80',
       labelColor: 'text-green-300',
       dot: 'bg-green-400',
-      badge: 'bg-green-900/60 text-green-300 border-green-500/40',
+      badgeBg: 'bg-green-900/60', badgeText: 'text-green-300', badgeBorder: 'border-green-500/40',
+      signal: 'On track',
     },
     warn: {
       border: 'border-yellow-500/50',
       bg: 'bg-gradient-to-r from-yellow-900/30 via-slate-800/80 to-slate-800/80',
       labelColor: 'text-yellow-300',
       dot: 'bg-yellow-400',
-      badge: 'bg-yellow-900/60 text-yellow-300 border-yellow-500/40',
+      badgeBg: 'bg-yellow-900/60', badgeText: 'text-yellow-300', badgeBorder: 'border-yellow-500/40',
+      signal: 'Worth watching',
     },
     risk: {
       border: 'border-orange-500/50',
       bg: 'bg-gradient-to-r from-orange-900/30 via-slate-800/80 to-slate-800/80',
       labelColor: 'text-orange-300',
       dot: 'bg-orange-400',
-      badge: 'bg-orange-900/60 text-orange-300 border-orange-500/40',
+      badgeBg: 'bg-orange-900/60', badgeText: 'text-orange-300', badgeBorder: 'border-orange-500/40',
+      signal: 'Needs attention',
     },
     danger: {
       border: 'border-red-500/60',
       bg: 'bg-gradient-to-r from-red-900/40 via-slate-800/80 to-slate-800/80',
       labelColor: 'text-red-300',
       dot: 'bg-red-400',
-      badge: 'bg-red-900/60 text-red-300 border-red-500/40',
+      badgeBg: 'bg-red-900/60', badgeText: 'text-red-300', badgeBorder: 'border-red-500/40',
+      signal: 'Action required',
     },
   }
   const s = toneStyles[status.tone] ?? toneStyles.warn
@@ -1756,15 +1775,15 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
       <div className="flex items-start gap-3">
         <span className={`mt-1.5 shrink-0 h-2.5 w-2.5 rounded-full ${s.dot}`} />
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap mb-1.5">
             <div className={`text-xl font-bold tracking-tight ${s.labelColor}`}>{status.label}</div>
-            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${s.badge}`}>
-              Financial Health
+            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${s.badgeBg} ${s.badgeText} ${s.badgeBorder}`}>
+              {s.signal}
             </span>
           </div>
-          <p className="mt-1 text-slate-200 text-sm leading-relaxed">{status.explanation}</p>
+          <p className="text-sm text-slate-200 leading-relaxed">{status.explanation}</p>
           {status.context && (
-            <p className="mt-1.5 text-slate-400 text-xs leading-relaxed">{status.context}</p>
+            <p className="mt-2 text-xs text-slate-400 leading-relaxed border-t border-slate-700/60 pt-2">{status.context}</p>
           )}
         </div>
       </div>
