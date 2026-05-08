@@ -1311,27 +1311,36 @@ export default function App() {
             <Card title="Budget Summary">
               <div className="flex gap-2 flex-wrap mb-4">{periods.map(p => <Pill key={p} active={period === p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div>
               <div className="grid md:grid-cols-4 gap-3">
-                <Metric title="Total available income" value={currency(selectedPeriodTotalNet)} />
-                <Metric title="Total planned expenses" value={currency(plannedPeriodTotal)} />
-                <Metric title="Remaining amount" value={currency(selectedPeriodRemaining)} tone={remainingTone} glow={selectedPeriodRemaining < 0} />
+                <Metric title="Available income" value={currency(selectedPeriodTotalNet)} />
+                <Metric title="Total planned" value={currency(plannedPeriodTotal)} />
+                <Metric title="Remaining" value={currency(selectedPeriodRemaining)} tone={remainingTone} glow={selectedPeriodRemaining < 0} />
                 <Metric title="Budget status" value={statusLabel} tone={statusTone} glow={selectedPeriodRemaining < 0} />
               </div>
               {hasAnyActual && (
-                <div className="grid md:grid-cols-3 gap-3 mt-3 pt-3 border-t border-slate-700/60">
-                  <Metric title={`Actual spending (${labelPeriod(period)})`} value={currency(actualPeriodTotal)} />
-                  <Metric
-                    title={`Variance vs plan (${labelPeriod(period)})`}
-                    value={(variancePeriodTotal >= 0 ? '+' : '') + currency(variancePeriodTotal)}
-                    tone={(() => {
-                      const t = varianceTone(variancePeriodTotal, period)
-                      return t === 'danger' ? 'danger' : t === 'warn' ? 'warn' : t === 'good' ? 'good' : 'neutral'
-                    })()}
-                  />
-                  <Metric
-                    title="Overspend vs plan"
-                    value={actualOverspendPct > 0 ? `${actualOverspendPct.toFixed(1)}% over` : 'Under / on plan'}
-                    tone={actualOverspendPct > 20 ? 'danger' : actualOverspendPct > 5 ? 'warn' : 'good'}
-                  />
+                <div className="mt-3 pt-3 border-t border-slate-700/60">
+                  <div className="grid md:grid-cols-3 gap-3">
+                    <Metric title="Total actual" value={currency(actualPeriodTotal)} />
+                    <Metric
+                      title="Total variance"
+                      value={
+                        Math.abs(variancePeriodTotal) < 0.005
+                          ? 'On plan'
+                          : variancePeriodTotal < 0
+                            ? `Under by ${currency(Math.abs(variancePeriodTotal))}`
+                            : `Over by ${currency(variancePeriodTotal)}`
+                      }
+                      tone={(() => {
+                        const t = varianceTone(variancePeriodTotal, period)
+                        return t === 'danger' ? 'danger' : t === 'warn' ? 'warn' : t === 'good' ? 'good' : 'neutral'
+                      })()}
+                    />
+                    <Metric
+                      title="Overspend %"
+                      value={actualOverspendPct > 0 ? `${actualOverspendPct.toFixed(1)}% over plan` : 'Under / on plan'}
+                      tone={actualOverspendPct > 20 ? 'danger' : actualOverspendPct > 5 ? 'warn' : 'good'}
+                    />
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">Actuals are manual entries for now. Transactions and CSV import come later.</p>
                 </div>
               )}
             </Card>
@@ -1445,13 +1454,16 @@ export default function App() {
                   <tr className="text-left text-slate-400 border-b border-slate-700">
                     <th className="pb-1.5 pr-2">Name</th>
                     <th className="pb-1.5 pr-2">Type</th>
-                    {period === 'weekly'    && <th className="pb-1.5 pr-2">Weekly</th>}
-                    {period === 'bi-weekly' && <th className="pb-1.5 pr-2">Bi-weekly</th>}
-                    {period === 'monthly'   && <th className="pb-1.5 pr-2">Monthly</th>}
-                    {period === 'yearly'    && <th className="pb-1.5 pr-2">Yearly</th>}
+                    {period === 'weekly'    && <th className="pb-1.5 pr-2">Weekly Planned</th>}
+                    {period === 'bi-weekly' && <th className="pb-1.5 pr-2">Bi-weekly Planned</th>}
+                    {period === 'monthly'   && <th className="pb-1.5 pr-2">Planned</th>}
+                    {period === 'yearly'    && <th className="pb-1.5 pr-2">Yearly Planned</th>}
                     {(period === 'weekly' || period === 'bi-weekly') && <th className="pb-1.5 pr-2">Monthly</th>}
                     {period === 'yearly'    && <th className="pb-1.5 pr-2">Monthly</th>}
-                    <th className="pb-1.5 pr-2">{labelPeriod(period)} Actual</th>
+                    {period === 'weekly'    && <th className="pb-1.5 pr-2">Weekly Actual</th>}
+                    {period === 'bi-weekly' && <th className="pb-1.5 pr-2">Bi-weekly Actual</th>}
+                    {period === 'monthly'   && <th className="pb-1.5 pr-2">Actual</th>}
+                    {period === 'yearly'    && <th className="pb-1.5 pr-2">Yearly Actual</th>}
                     <th className="pb-1.5 pr-2">Variance</th>
                     <th className="pb-1.5" />
                   </tr>
@@ -1511,7 +1523,13 @@ export default function App() {
                         </td>
                         {/* Variance */}
                         <td className={`py-1.5 pr-2 font-medium ${varClass}`}>
-                          {variance === null ? '—' : (variance >= 0 ? '+' : '') + currency(variance)}
+                          {variance === null
+                            ? '—'
+                            : Math.abs(variance) < 0.005
+                              ? 'On plan'
+                              : variance < 0
+                                ? `Under by ${currency(Math.abs(variance))}`
+                                : `Over by ${currency(variance)}`}
                         </td>
                         <td className="py-1.5 space-x-2 whitespace-nowrap">
                           <button className="text-blue-300 hover:text-blue-200" onClick={() => { setForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type }); setEditId(c.id); budgetNameRef.current?.focus() }}>Edit</button>
