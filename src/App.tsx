@@ -14,6 +14,7 @@ import {
   requiredForTarget,
   computeDashboardStatus,
 } from './utils/calculations'
+import type { DashboardStatus } from './utils/calculations'
 import {
   loadTab,
   loadCategories,
@@ -57,18 +58,6 @@ const tabTips: Record<Tab, string> = {
   Budget: 'Plan your spending, savings, and investing.',
   Scenarios: 'Compare different income levels like slow, medium, fast, or custom.',
   Targets: 'Set savings goals, deadlines, and track what you actually save. Use goal cards to log contributions and monitor progress.',
-}
-
-// ─── Dashboard status tone → visual style mapping ─────────────────────────────
-
-function statusToneStyles(tone: 'strong' | 'stable' | 'watch' | 'act' | 'recover') {
-  switch (tone) {
-    case 'strong':  return { border: 'border-emerald-600/50', bg: 'bg-emerald-950/40', badge: 'bg-emerald-900/70 text-emerald-300 border border-emerald-700/60', dot: 'bg-emerald-400' }
-    case 'stable':  return { border: 'border-sky-600/40',     bg: 'bg-sky-950/30',     badge: 'bg-sky-900/60 text-sky-300 border border-sky-700/50',         dot: 'bg-sky-400' }
-    case 'watch':   return { border: 'border-amber-600/40',   bg: 'bg-amber-950/30',   badge: 'bg-amber-900/60 text-amber-300 border border-amber-700/50',   dot: 'bg-amber-400' }
-    case 'act':     return { border: 'border-orange-600/40',  bg: 'bg-orange-950/30',  badge: 'bg-orange-900/60 text-orange-300 border border-orange-700/50', dot: 'bg-orange-400' }
-    case 'recover': return { border: 'border-rose-600/40',    bg: 'bg-rose-950/30',    badge: 'bg-rose-900/60 text-rose-300 border border-rose-700/50',       dot: 'bg-rose-400' }
-  }
 }
 
 export default function App() {
@@ -220,7 +209,8 @@ export default function App() {
   useEffect(() => saveTargets(targets), [targets])
   useEffect(() => saveSavedTargetSets(savedTargetSets), [savedTargetSets])
 
-  // Deadline-passed detection
+  // Deadline-passed detection: show a one-time prompt per target when today is past the deadline
+  // and the target is still active (not completed, not fully funded).
   useEffect(() => {
     const todayMs = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() })()
     const overdue = targets.filter(t => {
@@ -309,28 +299,20 @@ export default function App() {
   const totalBudgetRatio = selectedPeriodTotalNet > 0 ? convertFromMonthly(monthlyBudget, period) / selectedPeriodTotalNet : 0
   const totalBudgetTone: 'neutral' | 'warn' | 'danger' = totalBudgetRatio > 0.9 ? 'danger' : totalBudgetRatio > 0.7 ? 'warn' : 'neutral'
 
-  // ─── Dashboard Status Engine (V7.1) ───────────────────────────────────────
+  // ── V7.1 Dashboard Status Engine ───────────────────────────────────────────
   const activeTargets = targets.filter(t => !t.completed && (t.goalAmount <= 0 || t.currentSaved < t.goalAmount))
-  const fullyFundedTargets = targets.filter(t => !t.completed && t.goalAmount > 0 && t.currentSaved >= t.goalAmount)
-  const completedTargets = targets.filter(t => t.completed)
-
-  const dashboardStatus = useMemo(() => computeDashboardStatus({
-    totalMonthlyIncome: inc.totalMonthly,
+  const dashboardStatus: DashboardStatus = useMemo(() => computeDashboardStatus({
+    totalMonthly: inc.totalMonthly,
     monthlyBudget,
     monthlyLeft,
-    fixedRatio,
     savingsRate,
-    commissionPct: dep,
+    fixedRatio,
+    commissionPct: inc.commissionPct,
     categories,
     activeTargets,
-    hasBudgetData,
-  }), [inc.totalMonthly, monthlyBudget, monthlyLeft, fixedRatio, savingsRate, dep, categories, activeTargets, hasBudgetData])
-
-  const dsStyles = statusToneStyles(dashboardStatus.tone)
-
-  // Goals needing attention for lower dashboard layer
-  const behindTargets = activeTargets.filter(t => computeTargetStatus(t) === 'Behind')
-  const aheadTargets = activeTargets.filter(t => computeTargetStatus(t) === 'Ahead')
+    period,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [inc.totalMonthly, monthlyBudget, monthlyLeft, savingsRate, fixedRatio, inc.commissionPct, categories, activeTargets, period])
 
   const createSnapshot = (): BudgetSnapshot => ({ categories: categories.map((c) => ({ ...c })), form: { ...form }, editId })
   const pushBudgetHistory = () => { setBudgetHistory((prev) => [...prev.slice(-19), createSnapshot()]); setBudgetRedo([]) }
@@ -375,7 +357,6 @@ export default function App() {
     setTargetFormRedo([])
   }
   const undoTarget = () => {
-    // First drain any form history (Duplicate preloads) before undoing target list changes
     setTargetFormHistory(fh => {
       if (fh.length > 0) {
         const next = [...fh]
@@ -384,7 +365,6 @@ export default function App() {
         setTargetForm(prior)
         return next
       }
-      // No form history — undo the target list
       setTargetHistory(h => {
         if (!h.length) return h
         const next = [...h]
@@ -474,7 +454,6 @@ export default function App() {
     const deadline = targetForm.deadline
     if (!name || goalAmount <= 0 || !deadline) return
 
-    // Conflict detection: name + deadline + goalAmount
     const sameName = (t: Target) => t.name.trim().toLowerCase() === name.toLowerCase()
     const sameDeadline = (t: Target) => t.deadline === deadline
     const sameGoal = (t: Target) => t.goalAmount === goalAmount
@@ -509,7 +488,6 @@ export default function App() {
     const startDate = editTargetForm.startDate
     const deadline = editTargetForm.deadline
     if (!name || goalAmount <= 0 || !deadline) return
-    // Conflict detection on a DIFFERENT goal
     const other = (t: Target) => t.id !== targetId
     const sameName = (t: Target) => t.name.trim().toLowerCase() === name.toLowerCase()
     const sameDeadline = (t: Target) => t.deadline === deadline
@@ -580,6 +558,10 @@ export default function App() {
     setTab('Income')
     setTimeout(() => incomeRef.current?.focus(), 80)
   }
+
+  // Target sections
+  const fullyFundedTargets = targets.filter(t => !t.completed && t.goalAmount > 0 && t.currentSaved >= t.goalAmount)
+  const completedTargets = targets.filter(t => t.completed)
 
   const renderTargetCard = (t: Target) => {
     const req = requiredForTarget(t)
@@ -859,13 +841,13 @@ export default function App() {
                           const isEditingThis = editContributionId === c.id && editContributionTargetId === t.id
                           if (isEditingThis) {
                             return (
-                              <div key={c.id} className="border border-slate-600 rounded p-2 space-y-2 bg-slate-700/50">
+                              <div key={c.id} className="rounded border border-slate-600 bg-slate-800 p-2 space-y-2">
                                 <div className="grid grid-cols-3 gap-2">
                                   <div>
                                     <label className="text-xs text-slate-400 block mb-0.5">Date</label>
                                     <input
                                       type="date"
-                                      className="w-full p-1.5 rounded bg-slate-800 border border-slate-600 text-sm"
+                                      className="w-full p-1.5 rounded bg-slate-700 border border-slate-500 text-sm"
                                       value={editContributionForm.date}
                                       onChange={e => setEditContributionForm(v => ({ ...v, date: e.target.value }))}
                                     />
@@ -876,7 +858,7 @@ export default function App() {
                                       type="number"
                                       min={0}
                                       step={25}
-                                      className="w-full p-1.5 rounded bg-slate-800 border border-slate-600 text-sm"
+                                      className="w-full p-1.5 rounded bg-slate-700 border border-slate-500 text-sm"
                                       value={editContributionForm.amount}
                                       onChange={e => setEditContributionForm(v => ({ ...v, amount: e.target.value }))}
                                       onFocus={e => e.target.select()}
@@ -1113,184 +1095,40 @@ export default function App() {
         {tab === 'Dashboard' && (
           <section className="space-y-4 transition-all duration-300">
 
-            {/* ── TOP LAYER: Primary status + explanation ── */}
-            <div className={`rounded-2xl border ${dsStyles.border} ${dsStyles.bg} p-5 shadow-lg`}>
-              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3 mb-3">
-                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${dsStyles.dot}`} />
-                    <span className={`text-xs font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full ${dsStyles.badge}`}>
-                      {dashboardStatus.label}
-                    </span>
-                  </div>
-                  <p className="text-slate-200 text-base leading-relaxed">
-                    {dashboardStatus.explanation}
-                  </p>
-                  {dashboardStatus.insight && (
-                    <p className="mt-2 text-sm text-slate-400 leading-relaxed">
-                      {dashboardStatus.insight}
-                    </p>
-                  )}
-                </div>
-                {/* Quick financial pulse — period-aware */}
-                <div className="shrink-0 flex flex-col gap-1.5 min-w-[160px]">
-                  <div className="flex gap-2 mb-2">{periods.map(p => <Pill key={p} active={period === p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div>
-                  <div className="text-xs text-slate-400">Net income</div>
-                  <div
-                    className="text-lg font-bold text-sky-200 cursor-pointer hover:opacity-75 transition-opacity"
-                    onClick={goToIncomeAndFocus}
-                    title="Click to edit in Income tab"
-                  >
-                    {currency(convertFromMonthly(inc.totalMonthly, period))}
-                  </div>
-                  <div className="text-xs text-slate-400 mt-1">Remaining</div>
-                  <div className={`text-lg font-bold ${selectedPeriodRemaining < 0 ? 'text-rose-300' : remainingCushionPct > 25 ? 'text-emerald-300' : 'text-amber-300'}`}>
-                    {currency(selectedPeriodRemaining)}
-                  </div>
-                </div>
-              </div>
-            </div>
+            {/* ── V7.1 Dashboard Status Banner ── */}
+            <DashboardStatusBanner status={dashboardStatus} />
 
-            {/* ── MIDDLE LAYER: Core financial metrics ── */}
-            <div className="grid md:grid-cols-2 gap-4">
-              {/* Income & Cushion card */}
-              <Card title="Income & Cushion" noHover>
-                <div className="grid grid-cols-2 gap-3">
-                  <Metric title="Total Net Income" value={currency(convertFromMonthly(inc.totalMonthly, period))} featured />
-                  <Metric title="Remaining After Budget" value={currency(selectedPeriodRemaining)} tone={remainingTone} glow={selectedPeriodRemaining < 0} />
-                  <Metric title="Total Budget" value={currency(convertFromMonthly(monthlyBudget, period))} tone={totalBudgetTone} />
-                  <Metric title="Cushion" value={`${remainingCushionPct.toFixed(1)}%`} tone={cushionTone} />
-                </div>
-              </Card>
-
-              {/* Plan health card */}
-              <Card title="Plan Health" noHover>
-                <div className="grid grid-cols-2 gap-3">
-                  <Info title="Savings Rate" value={`${savingsRate.toFixed(1)}%`} tone={savingsTone} />
-                  <Info title="Fixed Bills Load" value={`${fixedRatio.toFixed(1)}%`} tone={fixedRatio > 60 ? 'warn' : 'neutral'} />
-                  <Info title="Commission Dependency" value={`${dep.toFixed(1)}%`} className={depColor} />
-                  <Info title="Budget Status" value={statusLabel} tone={statusTone} glow={selectedPeriodRemaining < 0} />
-                </div>
-              </Card>
-            </div>
-
-            {/* ── LOWER LAYER: Actionable signals ── */}
-            {hasBudgetData && (
+            <Card title="Dashboard Summary">
+              <div className="flex gap-2 mb-4">{periods.map(p => <Pill key={p} active={period === p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div>
+              <p className="mb-4">
+                Monthly Gross Profit Reference:{' '}
+                <span
+                  className={`${gp > 10000 ? 'text-green-400' : ''} font-semibold underline cursor-pointer hover:opacity-75 transition-opacity`}
+                  onClick={goToIncomeAndFocus}
+                  title="Click to edit in Income tab"
+                >
+                  {currency(gp)}
+                </span>
+              </p>
               <div className="grid md:grid-cols-3 gap-3">
-                {/* Spending pressure */}
-                <Card title="Spending Signals" noHover>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-400">Biggest expense</span>
-                      <span className="font-medium text-slate-100 text-right max-w-[55%] truncate">
-                        {top[0] ? `${top[0].name}` : '—'}
-                      </span>
-                    </div>
-                    {top[0] && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-400">&nbsp;</span>
-                        <span className={`font-medium ${biggestExpenseTone === 'danger' ? 'text-rose-300' : 'text-slate-300'}`}>
-                          {currency(convertFromMonthly(top[0].amount, period))} / {labelPeriod(period).toLowerCase()}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex justify-between text-sm pt-1 border-t border-slate-700/60">
-                      <span className="text-slate-400">Variable spending</span>
-                      <span className="font-medium text-slate-100">{currency(convertFromMonthly(byType.variable, period))}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-400">Fixed bills</span>
-                      <span className="font-medium text-slate-100">{currency(convertFromMonthly(byType.fixed, period))}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-400">Savings + investing</span>
-                      <span className="font-medium text-slate-100">{currency(convertFromMonthly(byType.savings + byType.investing, period))}</span>
-                    </div>
-                  </div>
-                </Card>
-
-                {/* Goals needing attention */}
-                <Card title="Goals Needing Attention" noHover>
-                  {behindTargets.length === 0 && aheadTargets.length === 0 && (
-                    <p className="text-sm text-slate-400">
-                      {activeTargets.length === 0
-                        ? 'No active savings goals yet.'
-                        : 'All active goals are on track.'}
-                    </p>
-                  )}
-                  <div className="space-y-2">
-                    {behindTargets.map(t => {
-                      const req = requiredForTarget(t)
-                      const pct = t.goalAmount > 0 ? (t.currentSaved / t.goalAmount) * 100 : 0
-                      return (
-                        <div key={t.id} className="rounded-lg bg-rose-950/40 border border-rose-800/40 px-3 py-2">
-                          <div className="flex justify-between items-center">
-                            <span className="text-sm font-medium text-rose-200 truncate max-w-[60%]">{t.name}</span>
-                            <span className="text-xs text-rose-400">{pct.toFixed(0)}% funded</span>
-                          </div>
-                          <div className="text-xs text-slate-400 mt-0.5">{currency(req.biWeekly)} / pay period needed</div>
-                        </div>
-                      )
-                    })}
-                    {aheadTargets.map(t => {
-                      const pct = t.goalAmount > 0 ? (t.currentSaved / t.goalAmount) * 100 : 0
-                      return (
-                        <div key={t.id} className="rounded-lg bg-emerald-950/40 border border-emerald-800/40 px-3 py-2">
-                          <div className="flex justify-between items-center">
-                            <span className="text-sm font-medium text-emerald-200 truncate max-w-[60%]">{t.name}</span>
-                            <span className="text-xs text-emerald-400">{pct.toFixed(0)}% — ahead</span>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </Card>
-
-                {/* Income composition */}
-                <Card title="Income Composition" noHover>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-400">Base salary (net)</span>
-                      <span className="font-medium text-slate-100">{currency(convertFromMonthly(inc.baseMonthly, period))}</span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-400">Commission (net)</span>
-                      <span className="font-medium text-slate-100">{currency(convertFromMonthly(inc.cMonthly, period))}</span>
-                    </div>
-                    <div className="pt-2 border-t border-slate-700/60">
-                      {/* Mini bar showing base vs commission split */}
-                      <div className="text-xs text-slate-400 mb-1.5">Income mix</div>
-                      <div className="h-2 rounded-full bg-slate-700 overflow-hidden flex">
-                        <div
-                          className="h-2 bg-sky-500 rounded-l-full"
-                          style={{ width: `${inc.totalMonthly > 0 ? (inc.baseMonthly / inc.totalMonthly) * 100 : 100}%` }}
-                        />
-                        <div
-                          className="h-2 bg-violet-500"
-                          style={{ width: `${inc.totalMonthly > 0 ? (inc.cMonthly / inc.totalMonthly) * 100 : 0}%` }}
-                        />
-                      </div>
-                      <div className="flex justify-between mt-1 text-xs text-slate-500">
-                        <span className="text-sky-400">Base {inc.totalMonthly > 0 ? (100 - dep).toFixed(0) : 100}%</span>
-                        <span className="text-violet-400">Commission {dep.toFixed(0)}%</span>
-                      </div>
-                    </div>
-                    <div className="pt-1 border-t border-slate-700/60">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-400">GP this month</span>
-                        <span
-                          className={`font-medium cursor-pointer hover:opacity-75 transition-opacity ${gp > 10000 ? 'text-emerald-400' : 'text-slate-100'}`}
-                          onClick={goToIncomeAndFocus}
-                          title="Click to edit in Income tab"
-                        >
-                          {currency(gp)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </Card>
+                <Metric title="Base Gross Income (salary only)" value={currency(convertFromMonthly(inc.baseGrossMonthly, period))} />
+                <Metric title="Base Net Income (salary take-home)" value={currency(baseNetByPeriod)} />
+                <Metric title="Commission Income (net)" value={currency(convertFromMonthly(inc.cMonthly, period))} />
+                <Metric title="Total Net Income (salary + commission take-home)" value={currency(convertFromMonthly(inc.totalMonthly, period))} featured />
+                <Metric title="Total Budget" value={currency(convertFromMonthly(monthlyBudget, period))} tone={totalBudgetTone} />
+                <Metric title="Remaining After Budget" value={currency(selectedPeriodRemaining)} tone={remainingTone} glow={selectedPeriodRemaining < 0} />
               </div>
-            )}
+            </Card>
+            <Card title="Financial Intelligence">
+              <div className="grid md:grid-cols-3 gap-3">
+                <Info title="Biggest Expense" value={top[0] ? `${top[0].name} (${currency(convertFromMonthly(top[0].amount, period))} ${labelPeriod(period)})` : 'None'} tone={biggestExpenseTone} />
+                <Info title="Fixed Bills Ratio" value={`${fixedRatio.toFixed(1)}%`} />
+                <Info title="Savings Rate" value={`${savingsRate.toFixed(1)}%`} tone={savingsTone} />
+                <Info title="Commission Dependency" value={`${dep.toFixed(1)}%`} className={depColor} />
+                <Info title="Remaining Cushion" value={`${remainingCushionPct.toFixed(1)}%`} tone={cushionTone} />
+                <Info title="Budget Status / Health Tier" value={statusLabel} tone={statusTone} glow={selectedPeriodRemaining < 0} />
+              </div>
+            </Card>
           </section>
         )}
 
@@ -1493,10 +1331,7 @@ export default function App() {
                 </thead>
                 <tbody>
                   {top.map(c => (
-                    <tr
-                      key={c.id}
-                      className={`border-b border-slate-800 transition-colors duration-700 ${highlightedCategoryId === c.id ? 'bg-sky-900/30' : ''}`}
-                    >
+                    <tr key={c.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedCategoryId === c.id ? 'bg-blue-600/20' : ''}`}>
                       <td>{c.name}</td>
                       <td>{c.type === 'fixed bill' ? 'Fixed Bill' : c.type === 'variable spending' ? 'Variable Spending' : c.type === 'savings' ? 'Savings' : 'Investing'}</td>
                       {period === 'weekly' && <><td>{currency(convertFromMonthly(c.amount, 'weekly'))}</td><td>{currency(c.amount)}</td></>}
@@ -1570,7 +1405,7 @@ export default function App() {
         {/* ── SAVINGS GOALS ── */}
         {tab === 'Targets' && (
           <section className="space-y-4">
-            <Card title="Create Savings Goal">
+            <Card title="Create Savings Goal" noHover>
               <div className="grid md:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Goal Name</label>
@@ -1605,7 +1440,6 @@ export default function App() {
                           }
                           if (targetForm.name.trim()) { setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus() }
                         }
-                        if (e.key === 'ArrowRight') { e.preventDefault(); targetGoalRef.current?.focus() }
                       }}
                     />
                     {showTargetSuggestions && targetSuggestionList.length > 0 && (
@@ -1638,7 +1472,6 @@ export default function App() {
                     onFocus={e => e.target.select()}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); targetSavedRef.current?.focus() }
-                      if (e.key === 'ArrowLeft') { e.preventDefault(); targetNameRef.current?.focus() }
                     }}
                     placeholder="e.g. 1000"
                   />
@@ -1662,7 +1495,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Start Date</label>
+                  <label className="block text-xs text-slate-400 mb-1">Start Date (when you began saving)</label>
                   <input
                     ref={targetStartDateRef}
                     type="date"
@@ -1670,7 +1503,6 @@ export default function App() {
                     value={targetForm.startDate}
                     onChange={(e) => setTargetForm((v) => ({ ...v, startDate: e.target.value }))}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') { e.preventDefault(); targetDeadlineRef.current?.focus() }
                       if (e.key === 'ArrowRight') {
                         startDateLeftArrowCount.current = 0
                         startDateArrowCount.current += 1
@@ -1687,6 +1519,11 @@ export default function App() {
                           startDateLeftArrowCount.current = 0
                           targetSavedRef.current?.focus()
                         }
+                      } else if (e.key === 'Enter') {
+                        e.preventDefault()
+                        startDateArrowCount.current = 0
+                        startDateLeftArrowCount.current = 0
+                        targetDeadlineRef.current?.focus()
                       } else {
                         startDateArrowCount.current = 0
                         startDateLeftArrowCount.current = 0
@@ -1695,7 +1532,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Deadline</label>
+                  <label className="block text-xs text-slate-400 mb-1">Deadline (when the goal is due)</label>
                   <input
                     ref={targetDeadlineRef}
                     type="date"
@@ -1703,16 +1540,7 @@ export default function App() {
                     value={targetForm.deadline}
                     onChange={(e) => setTargetForm((v) => ({ ...v, deadline: e.target.value }))}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter') { e.preventDefault(); createTarget() }
-                      if (e.key === 'ArrowLeft') {
-                        deadlineArrowCount.current = 0
-                        deadlineLeftArrowCount.current += 1
-                        if (deadlineLeftArrowCount.current > 2) {
-                          e.preventDefault()
-                          deadlineLeftArrowCount.current = 0
-                          targetStartDateRef.current?.focus()
-                        }
-                      } else if (e.key === 'ArrowRight') {
+                      if (e.key === 'ArrowRight') {
                         deadlineLeftArrowCount.current = 0
                         deadlineArrowCount.current += 1
                         if (deadlineArrowCount.current > 2) {
@@ -1720,6 +1548,19 @@ export default function App() {
                           deadlineArrowCount.current = 0
                           createTarget()
                         }
+                      } else if (e.key === 'ArrowLeft') {
+                        deadlineArrowCount.current = 0
+                        deadlineLeftArrowCount.current += 1
+                        if (deadlineLeftArrowCount.current > 2) {
+                          e.preventDefault()
+                          deadlineLeftArrowCount.current = 0
+                          targetStartDateRef.current?.focus()
+                        }
+                      } else if (e.key === 'Enter') {
+                        e.preventDefault()
+                        deadlineArrowCount.current = 0
+                        deadlineLeftArrowCount.current = 0
+                        createTarget()
                       } else {
                         deadlineArrowCount.current = 0
                         deadlineLeftArrowCount.current = 0
@@ -1853,7 +1694,63 @@ export default function App() {
       )}
     </div>
   )
-} function Card({ title, children, className = '', style, headerAction, noHover = false }: { title: string; children: React.ReactNode; className?: string; style?: React.CSSProperties; headerAction?: React.ReactNode; noHover?: boolean }) {
+}
+
+// ── V7.1 Dashboard Status Banner ─────────────────────────────────────────────
+
+function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
+  const toneStyles: Record<string, { border: string; bg: string; labelColor: string; dot: string }> = {
+    excellent: {
+      border: 'border-emerald-500/60',
+      bg: 'bg-gradient-to-r from-emerald-900/40 via-slate-800/80 to-slate-800/80',
+      labelColor: 'text-emerald-300',
+      dot: 'bg-emerald-400',
+    },
+    good: {
+      border: 'border-green-500/50',
+      bg: 'bg-gradient-to-r from-green-900/30 via-slate-800/80 to-slate-800/80',
+      labelColor: 'text-green-300',
+      dot: 'bg-green-400',
+    },
+    warn: {
+      border: 'border-yellow-500/50',
+      bg: 'bg-gradient-to-r from-yellow-900/30 via-slate-800/80 to-slate-800/80',
+      labelColor: 'text-yellow-300',
+      dot: 'bg-yellow-400',
+    },
+    risk: {
+      border: 'border-orange-500/50',
+      bg: 'bg-gradient-to-r from-orange-900/30 via-slate-800/80 to-slate-800/80',
+      labelColor: 'text-orange-300',
+      dot: 'bg-orange-400',
+    },
+    danger: {
+      border: 'border-red-500/60',
+      bg: 'bg-gradient-to-r from-red-900/40 via-slate-800/80 to-slate-800/80',
+      labelColor: 'text-red-300',
+      dot: 'bg-red-400',
+    },
+  }
+  const s = toneStyles[status.tone] ?? toneStyles.warn
+  return (
+    <div className={`rounded-2xl border ${s.border} ${s.bg} shadow-lg p-4 md:p-5`}>
+      <div className="flex items-start gap-3">
+        <span className={`mt-1.5 shrink-0 h-2.5 w-2.5 rounded-full ${s.dot}`} />
+        <div>
+          <div className={`text-xl font-bold tracking-tight ${s.labelColor}`}>{status.label}</div>
+          <p className="mt-1 text-slate-200 text-sm leading-relaxed">{status.explanation}</p>
+          {status.context && (
+            <p className="mt-1.5 text-slate-400 text-xs leading-relaxed">{status.context}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Shared UI primitives ──────────────────────────────────────────────────────
+
+function Card({ title, children, className = '', style, headerAction, noHover = false }: { title: string; children: React.ReactNode; className?: string; style?: React.CSSProperties; headerAction?: React.ReactNode; noHover?: boolean }) {
   return (
     <div style={style} className={`rounded-2xl border border-slate-700 bg-slate-800/80 shadow-lg p-4 md:p-5 transition-all duration-200 ${noHover ? '' : 'hover:-translate-y-0.5'} ${className}`}>
       <div className="flex items-center justify-between mb-3">
