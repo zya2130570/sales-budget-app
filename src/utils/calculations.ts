@@ -229,7 +229,7 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
 
   const hasBudget = monthlyBudget > 0
 
-  // Derived ratios - all as % of totalMonthly so they are comparable across income levels
+  // Derived ratios
   const cushionPct      = totalMonthly > 0 ? (monthlyLeft / totalMonthly) * 100 : 0
   const variableMonthly = categories.filter(c => c.type === 'variable spending').reduce((s, c) => s + c.amount, 0)
   const variableRatio   = totalMonthly > 0 ? (variableMonthly / totalMonthly) * 100 : 0
@@ -250,12 +250,18 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
   const onTrackCount = activeTargets.filter(t => computeTargetStatus(t) === 'On Track').length
   const totalGoals   = activeTargets.length
 
-  // Tier classification
-  // Resilience: strong >= 30% | moderate 15-30% | thin 5-15% | none <5%
+  // ── Resilience tier: anchored directly to the Budget health tier ──────────
+  // This ensures Dashboard severity never contradicts the Budget tab's
+  // remainingTierFromPeriodValue classification for the same remaining amount.
+  //   budgetHealthTier Healthy     => strong resilience (green-safe zone)
+  //   budgetHealthTier Moderate    => moderate resilience (yellow-caution zone)
+  //   budgetHealthTier Risk        => thin resilience (orange-risk zone)
+  //   budgetHealthTier Over Budget => none (red danger)
+  //   budgetHealthTier No Data     => none (treat as unknown / no cushion)
   const resilienceTier: 'strong' | 'moderate' | 'thin' | 'none' =
-    cushionPct >= 30 ? 'strong'   :
-    cushionPct >= 15 ? 'moderate' :
-    cushionPct >= 5  ? 'thin'     : 'none'
+    budgetHealthTier === 'Healthy'     ? 'strong'   :
+    budgetHealthTier === 'Moderate'    ? 'moderate' :
+    budgetHealthTier === 'Risk'        ? 'thin'     : 'none'
 
   // Sustainability: healthy >= 20% | developing 10-20% | low <10%
   const sustainTier: 'healthy' | 'developing' | 'low' =
