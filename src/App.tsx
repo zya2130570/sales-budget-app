@@ -347,6 +347,23 @@ export default function App() {
     ? Math.max(0, (variancePeriodTotal / plannedPeriodTotal) * 100)
     : 0
 
+  // Biggest over-plan category: category with the largest positive variance (actual > planned)
+  const biggestOverPlanCategory: { name: string; overBy: number } | null = (() => {
+    if (!hasAnyActual) return null
+    let best: { name: string; overBy: number } | null = null
+    for (const c of categories) {
+      const raw = actuals[c.id]
+      if (raw === '' || raw === undefined) continue
+      const planned = convertFromMonthly(c.amount, period)
+      const actual = Number(raw) || 0
+      const overBy = actual - planned
+      if (overBy > 0.005 && (best === null || overBy > best.overBy)) {
+        best = { name: c.name, overBy }
+      }
+    }
+    return best
+  })()
+
   // ── V7.3 Dashboard Status Engine ───────────────────────────────────────────
   const activeTargets = targets.filter(t => !t.completed && (t.goalAmount <= 0 || t.currentSaved < t.goalAmount))
   const dashboardStatus: DashboardStatus = useMemo(() => {
@@ -1166,9 +1183,13 @@ export default function App() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <ActionCard
                 title="Review Budget"
-                description="See how your income is allocated across bills, spending, and savings."
+                description={
+                  actualOverspendPct >= 10
+                    ? `Actual spending is above plan. Review the largest variance first.`
+                    : "See how your income is allocated across bills, spending, and savings."
+                }
                 onClick={() => setTab('Budget')}
-                tone="neutral"
+                tone={actualOverspendPct >= 10 ? 'warn' : 'neutral'}
               />
               <ActionCard
                 title="Check Savings Goals"
@@ -1341,6 +1362,27 @@ export default function App() {
                     />
                   </div>
                   <p className="mt-2 text-xs text-slate-500">Actuals are manual entries for now. Transactions and CSV import come later.</p>
+                  {/* ── V7.6 Plan vs Actual pressure interpretation ── */}
+                  <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-1">
+                    <p className="text-sm text-slate-300">
+                      {!hasAnyActual
+                        ? 'Enter actuals to see spending pressure.'
+                        : actualOverspendPct >= 20
+                          ? 'Actual spending is significantly over plan.'
+                          : actualOverspendPct >= 5
+                            ? 'Actual spending is running over plan.'
+                            : variancePeriodTotal > 0
+                              ? 'Actual spending is close to plan.'
+                              : 'Actual spending is currently under plan.'}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {!hasAnyActual
+                        ? null
+                        : biggestOverPlanCategory
+                          ? `Biggest over-plan category: ${biggestOverPlanCategory.name} (+${currency(biggestOverPlanCategory.overBy)})`
+                          : 'No category is currently over plan.'}
+                    </p>
+                  </div>
                 </div>
               )}
             </Card>
