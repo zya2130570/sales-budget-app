@@ -156,9 +156,17 @@ export default function App() {
   const [highlightedCategoryId, setHighlightedCategoryId] = useState<string | null>(null)
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Highlighted budget row from Budget Pressure Focus card
+  // V7.7: Budget Pressure Focus — highlights the over-plan row and focuses its actual input
   const [pressureFocusCategoryId, setPressureFocusCategoryId] = useState<string | null>(null)
   const pressureFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Keyed by category id → ref to that row's actual input
+  const actualInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  // Snapshot of actuals at the moment an actual input is focused (for correct undo on blur)
+  const actualsBeforeFocusRef = useRef<Record<string, string> | null>(null)
+
+  // V7.7.1: Parallel undo/redo stacks for actuals (mirrors budget history timing)
+  const [actualsHistory, setActualsHistory] = useState<Array<Record<string, string>>>([])
+  const [actualsRedo, setActualsRedo] = useState<Array<Record<string, string>>>([])
 
   const showToast = (message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
@@ -400,14 +408,33 @@ export default function App() {
   }, [inc.totalMonthly, monthlyBudget, monthlyLeft, savingsRate, fixedRatio, inc.commissionPct, categories, activeTargets, period, hasBudgetData, selectedPeriodRemaining, remainingTier.label, actualOverspendPct])
 
   const createSnapshot = (): BudgetSnapshot => ({ categories: categories.map((c) => ({ ...c })), form: { ...form }, editId })
-  const pushBudgetHistory = () => { setBudgetHistory((prev) => [...prev.slice(-19), createSnapshot()]); setBudgetRedo([]) }
+
+  // Push budget snapshot + matching actuals snapshot together so undo/redo stays in sync
+  const pushBudgetHistory = (prevActuals?: Record<string, string>) => {
+    const snap = createSnapshot()
+    const aSnap = prevActuals ?? { ...actuals }
+    setBudgetHistory((prev) => [...prev.slice(-19), snap])
+    setActualsHistory((prev) => [...prev.slice(-19), aSnap])
+    setBudgetRedo([])
+    setActualsRedo([])
+  }
+
   const commitFormCheckpoint = () => {
     const snap = createSnapshot()
     setBudgetHistory((prev) => {
       const last = prev[prev.length - 1]
       if (last && JSON.stringify(last.form) === JSON.stringify(snap.form) && last.editId === snap.editId) return prev
+      setActualsHistory((aPrev) => [...aPrev.slice(-19), { ...actuals }])
       return [...prev.slice(-19), snap]
     })
+  }
+
+  // Push only actuals snapshot (for actual edits that don't change categories/form)
+  const pushActualsHistory = (prevActuals: Record<string, string>) => {
+    setBudgetHistory((prev) => [...prev.slice(-19), createSnapshot()])
+    setActualsHistory((prev) => [...prev.slice(-19), prevActuals])
+    setBudgetRedo([])
+    setActualsRedo([])
   }
 
   const undoBudget = () => {
@@ -416,6 +443,13 @@ export default function App() {
       const next = [...prev]
       const prior = next.pop()!
       setBudgetRedo((redo) => [...redo.slice(-19), createSnapshot()])
+      setActualsRedo((redo) => [...redo.slice(-19), { ...actuals }])
+      setActualsHistory((aPrev) => {
+        const aNext = [...aPrev]
+        const priorActuals = aNext.pop()
+        setActuals(priorActuals ?? {})
+        return aNext
+      })
       setCategories(prior.categories)
       setForm(prior.form)
       setEditId(prior.editId)
@@ -428,6 +462,13 @@ export default function App() {
       const next = [...prev]
       const snapshot = next.pop()!
       setBudgetHistory((undo) => [...undo.slice(-19), createSnapshot()])
+      setActualsHistory((undo) => [...undo.slice(-19), { ...actuals }])
+      setActualsRedo((aRedo) => {
+        const aNext = [...aRedo]
+        const redoActuals = aNext.pop()
+        setActuals(redoActuals ?? {})
+        return aNext
+      })
       setCategories(snapshot.categories)
       setForm(snapshot.form)
       setEditId(snapshot.editId)
@@ -1348,7 +1389,12 @@ export default function App() {
                   {hasAnyActual && (
                     <button
                       className="rounded px-2 py-0.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
-                      onClick={() => { setActuals({}); setPressureFocusCategoryId(null) }}
+                      onClick={() => {
+                        actualsBeforeFocusRef.current = null
+                        pushActualsHistory({ ...actuals })
+                        setActuals({})
+                        setPressureFocusCategoryId(null)
+                      }}
                     >
                       Clear All Actuals
                     </button>
@@ -1389,7 +1435,7 @@ export default function App() {
                 </div>
                 <p className="mt-2 text-xs text-slate-500">Actuals are manual entries. Transactions and CSV import come later.</p>
 
-                {/* ── V7.7 Pressure interpretation + focus card ── */}
+                {/* ── V7.7 Budget Pressure Focus card ── */}
                 <div className="mt-3 pt-3 border-t border-slate-700/50">
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">What should I look at first?</p>
                   {!hasAnyActual ? (
@@ -1413,6 +1459,10 @@ export default function App() {
                         onClick={() => {
                           if (pressureFocusTimerRef.current) clearTimeout(pressureFocusTimerRef.current)
                           setPressureFocusCategoryId(biggestOverPlanCategory.id)
+                          // Focus the actual input for that row
+                          setTimeout(() => {
+                            actualInputRefs.current[biggestOverPlanCategory.id]?.focus()
+                          }, 50)
                           pressureFocusTimerRef.current = setTimeout(() => setPressureFocusCategoryId(null), 2500)
                         }}
                       >
@@ -1546,11 +1596,24 @@ export default function App() {
                     <th className="pb-1.5 pr-2">
                       <span className="inline-flex items-center gap-2">
                         <span>
-                          {period === 'weekly' && 'Weekly Actual'}
+                          {period === 'weekly'    && 'Weekly Actual'}
                           {period === 'bi-weekly' && 'Bi-weekly Actual'}
-                          {period === 'monthly' && 'Actual'}
-                          {period === 'yearly' && 'Yearly Actual'}
+                          {period === 'monthly'   && 'Actual'}
+                          {period === 'yearly'    && 'Yearly Actual'}
                         </span>
+                        {hasAnyActual && (
+                          <button
+                            className="rounded px-1.5 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 text-slate-300 font-normal normal-case tracking-normal transition-colors"
+                            onClick={() => {
+                              actualsBeforeFocusRef.current = null
+                              pushActualsHistory({ ...actuals })
+                              setActuals({})
+                              setPressureFocusCategoryId(null)
+                            }}
+                          >
+                            Clear All
+                          </button>
+                        )}
                       </span>
                     </th>
                     <th className="pb-1.5 pr-2">Variance</th>
@@ -1570,51 +1633,97 @@ export default function App() {
                       vTone === 'good' ? 'text-green-400' :
                       vTone === 'neutral' ? 'text-slate-300' :
                       vTone === 'warn' ? 'text-yellow-300' : 'text-red-400'
+                    const isPressure = pressureFocusCategoryId === c.id
                     return (
-                      <tr key={c.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedCategoryId === c.id ? 'bg-blue-600/20' : pressureFocusCategoryId === c.id ? 'bg-amber-500/15' : ''}`}>
+                      <tr
+                        key={c.id}
+                        className={`border-b border-slate-800 transition-colors duration-300 ${
+                          highlightedCategoryId === c.id
+                            ? 'bg-blue-600/20'
+                            : isPressure
+                              ? 'bg-amber-500/15'
+                              : ''
+                        }`}
+                      >
                         <td className="py-1.5 pr-2">{c.name}</td>
-                        <td className="py-1.5 pr-2 text-slate-400 text-xs">{c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}</td>
+                        <td className="py-1.5 pr-2 text-slate-400 text-xs">
+                          {c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}
+                        </td>
                         {/* Primary period planned */}
                         {period === 'weekly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'weekly'))}</td>}
                         {period === 'bi-weekly' && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td>}
                         {period === 'monthly'   && <td className="py-1.5 pr-2">{currency(c.amount)}</td>}
                         {period === 'yearly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'yearly'))}</td>}
-                        {/* Monthly reference column for weekly/bi-weekly/yearly */}
+                        {/* Monthly reference column */}
                         {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
-                        {period === 'yearly'    && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
+                        {period === 'yearly' && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
                         {/* Actual input + per-row Clear */}
                         <td className="py-1 pr-2">
                           <div className="flex items-center gap-1">
                             <input
+                              ref={el => { actualInputRefs.current[c.id] = el }}
                               type="number"
+                              inputMode="decimal"
                               min={0}
                               step={25}
                               className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
                               placeholder="—"
                               value={rawActual ?? ''}
+                              onFocus={e => {
+                                // Capture the actuals state before any edits in this focus session
+                                actualsBeforeFocusRef.current = { ...actuals }
+                                if (e.target.value !== '') e.target.select()
+                              }}
                               onChange={e => {
                                 const raw = e.target.value
-                                if (raw === '' || raw === '0') {
+                                // Strip any non-numeric characters except decimal point
+                                const cleaned = raw.replace(/[^0-9.]/g, '')
+                                if (cleaned === '' || Number(cleaned) === 0) {
                                   setActuals(prev => ({ ...prev, [c.id]: '' }))
                                 } else {
-                                  setActuals(prev => ({ ...prev, [c.id]: raw }))
+                                  setActuals(prev => ({ ...prev, [c.id]: cleaned }))
+                                }
+                              }}
+                              onBlur={() => {
+                                // Push the pre-focus snapshot so undo reverts to state before typing
+                                const before = actualsBeforeFocusRef.current
+                                actualsBeforeFocusRef.current = null
+                                if (before !== null) {
+                                  const afterVal = actuals[c.id] ?? ''
+                                  const beforeVal = before[c.id] ?? ''
+                                  // Only record if something actually changed
+                                  if (afterVal !== beforeVal) {
+                                    pushActualsHistory(before)
+                                  }
                                 }
                               }}
                               onKeyDown={e => {
                                 if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                   e.preventDefault()
+                                  // Capture before-state for undo if not already in a focus session
+                                  const before = actualsBeforeFocusRef.current ?? { ...actuals }
                                   const cur = Number(rawActual) || 0
                                   const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
                                   setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
+                                  // Each arrow step is its own undo entry
+                                  pushActualsHistory(before)
+                                  // Update the focus snapshot so next arrow push reflects new baseline
+                                  actualsBeforeFocusRef.current = { ...actuals, [c.id]: next === 0 ? '' : String(next) }
                                 }
                               }}
-                              onFocus={e => { if (e.target.value !== '') e.target.select() }}
                             />
                             {hasActual && (
                               <button
                                 className="rounded px-1.5 py-0.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-700 hover:bg-slate-600 transition-colors"
                                 title="Clear actual"
-                                onClick={() => setActuals(prev => ({ ...prev, [c.id]: '' }))}
+                                onMouseDown={() => {
+                                  // Prevent onBlur from also pushing a spurious undo entry
+                                  actualsBeforeFocusRef.current = null
+                                }}
+                                onClick={() => {
+                                  pushActualsHistory({ ...actuals })
+                                  setActuals(prev => ({ ...prev, [c.id]: '' }))
+                                }}
                               >
                                 ×
                               </button>
