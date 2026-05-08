@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet } from './types'
 import { currency, labelPeriod, formatDate } from './utils/formatting'
 import {
@@ -1621,131 +1622,174 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                     <th className="pb-1.5" />
                   </tr>
                 </thead>
-                <tbody>
-                  {top.map(c => {
-                    const planned = convertFromMonthly(c.amount, period)
-                    const rawActual = actuals[c.id]
-                    const hasActual = rawActual !== '' && rawActual !== undefined
-                    const actualVal = hasActual ? (Number(rawActual) || 0) : null
-                    const variance = actualVal !== null ? actualVal - planned : null
-                    const vTone = variance !== null ? varianceTone(variance, period) : 'neutral'
-                    const varClass =
-                      variance === null ? 'text-slate-500' :
-                      vTone === 'good' ? 'text-green-400' :
-                      vTone === 'neutral' ? 'text-slate-300' :
-                      vTone === 'warn' ? 'text-yellow-300' : 'text-red-400'
-                    const isPressure = pressureFocusCategoryId === c.id
-                    return (
-                      <tr
-                        key={c.id}
-                        className={`border-b border-slate-800 transition-colors duration-300 ${
-                          highlightedCategoryId === c.id
-                            ? 'bg-blue-600/20'
-                            : isPressure
-                              ? 'bg-amber-500/15'
-                              : ''
-                        }`}
-                      >
-                        <td className="py-1.5 pr-2">{c.name}</td>
-                        <td className="py-1.5 pr-2 text-slate-400 text-xs">
-                          {c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}
-                        </td>
-                        {/* Primary period planned */}
-                        {period === 'weekly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'weekly'))}</td>}
-                        {period === 'bi-weekly' && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td>}
-                        {period === 'monthly'   && <td className="py-1.5 pr-2">{currency(c.amount)}</td>}
-                        {period === 'yearly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'yearly'))}</td>}
-                        {/* Monthly reference column */}
-                        {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
-                        {period === 'yearly' && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
-                        {/* Actual input + per-row Clear */}
-                        <td className="py-1 pr-2">
-                          <div className="flex items-center gap-1">
-                                                        <input
-                              ref={el => { actualInputRefs.current[c.id] = el }}
-                              type="number"
-                              inputMode="decimal"
-                              min={0}
-                              step={25}
-                              className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
-                              placeholder="—"
-                              value={rawActual ?? ''}
-                              onFocus={e => {
-                                actualsSessionStart.current[c.id] = rawActual ?? ''
-                                if (e.target.value !== '') e.target.select()
-                              }}
-                              onChange={e => {
-                                const cleaned = e.target.value.replace(/[^0-9.]/g, '')
-                                setActuals(prev => ({ ...prev, [c.id]: cleaned === '0' ? '' : cleaned }))
-                              }}
-                              onBlur={() => {
-                                const startVal = actualsSessionStart.current[c.id] ?? ''
-                                const endVal = rawActual ?? ''
-                                if (endVal !== startVal) {
-                                  pushActualsHistory({ ...actuals, [c.id]: startVal })
-                                }
-                              }}
-                              onKeyDown={e => {
-                                if (['e', 'E', '+', '-'].includes(e.key)) {
-                                  e.preventDefault()
-                                  return
-                                }
-                                if (e.key === 'Enter') {
-                                  e.preventDefault()
-                                  const idx = top.findIndex(x => x.id === c.id)
-                                  const nextCat = top[idx + 1]
-                                  if (nextCat) {
-                                    actualInputRefs.current[nextCat.id]?.focus()
-                                  } else {
-                                    e.currentTarget.blur()
-                                  }
-                                  return
-                                }
-                                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                                  e.preventDefault()
-                                  const cur = Number(rawActual) || 0
-                                  const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
-                                  setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
-                                }
-                              }}
-                            />
+                                <tbody>
+                  {(
+                    [
+                      { type: 'fixed bill',        label: 'Fixed Bills'       },
+                      { type: 'variable spending', label: 'Flexible Spending' },
+                      { type: 'savings',           label: 'Savings'           },
+                      { type: 'investing',         label: 'Investing'         },
+                    ] as { type: CategoryType; label: string }[]
+                  ).map(({ type, label }) => {
+                    const rows = top.filter(c => c.type === type)
+                    if (!rows.length) return null
 
-                            {hasActual && (
-                              <button
-                                className="rounded px-1.5 py-0.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-700 hover:bg-slate-600 transition-colors"
-                                title="Clear actual"
-                                onMouseDown={() => {
-                                  // Prevent onBlur from also pushing a spurious undo entry
-                                  actualsBeforeFocusRef.current = null
-                                }}
-                                onClick={() => {
-                                  pushActualsHistory({ ...actuals })
-                                  setActuals(prev => ({ ...prev, [c.id]: '' }))
-                                }}
-                              >
-                                ×
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        {/* Variance */}
-                        <td className={`py-1.5 pr-2 font-medium ${varClass}`}>
-                          {variance === null
-                            ? '—'
-                            : Math.abs(variance) < 0.005
-                              ? 'On plan'
-                              : variance < 0
-                                ? `Under by ${currency(Math.abs(variance))}`
-                                : `Over by ${currency(variance)}`}
-                        </td>
-                        <td className="py-1.5 space-x-2 whitespace-nowrap">
-                          <button className="text-blue-300 hover:text-blue-200" onClick={() => { setForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type }); setEditId(c.id); budgetNameRef.current?.focus() }}>Edit</button>
-                          <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
-                        </td>
-                      </tr>
+                    const hasMonthlyCol = period !== 'monthly'
+                    const totalCols = hasMonthlyCol ? 7 : 6
+
+                    const sectionPlannedTotal = rows.reduce((s, c) => s + convertFromMonthly(c.amount, period), 0)
+                    const sectionMonthlyTotal = rows.reduce((s, c) => s + c.amount, 0)
+                    const sectionHasActual = rows.some(c => actuals[c.id] !== '' && actuals[c.id] !== undefined)
+                    const sectionActualTotal = sectionHasActual
+                      ? rows.reduce((s, c) => {
+                          const r = actuals[c.id]
+                          if (r === '' || r === undefined) return s
+                          return s + (Number(r) || 0)
+                        }, 0)
+                      : null
+                    const sectionVarianceTotal = sectionActualTotal !== null ? sectionActualTotal - sectionPlannedTotal : null
+                    const svTone = sectionVarianceTotal !== null ? varianceTone(sectionVarianceTotal, period) : 'neutral'
+                    const svClass =
+                      sectionVarianceTotal === null ? 'text-slate-500' :
+                      svTone === 'good'    ? 'text-green-400' :
+                      svTone === 'neutral' ? 'text-slate-300' :
+                      svTone === 'warn'    ? 'text-yellow-300' : 'text-red-400'
+
+                    return (
+                      <Fragment key={type}>
+                        {/* ── Section header ── */}
+                        <tr>
+                          <td
+                            colSpan={totalCols}
+                            className="pt-4 pb-1 pl-0.5 text-[11px] font-semibold uppercase tracking-widest text-slate-500 select-none"
+                          >
+                            {label}
+                          </td>
+                        </tr>
+
+                        {/* ── Category rows ── */}
+                        {rows.map(c => {
+                          const planned = convertFromMonthly(c.amount, period)
+                          const rawActual = actuals[c.id]
+                          const hasActual = rawActual !== '' && rawActual !== undefined
+                          const actualVal = hasActual ? (Number(rawActual) || 0) : null
+                          const variance = actualVal !== null ? actualVal - planned : null
+                          const vTone = variance !== null ? varianceTone(variance, period) : 'neutral'
+                          const varClass =
+                            variance === null ? 'text-slate-500' :
+                            vTone === 'good'    ? 'text-green-400' :
+                            vTone === 'neutral' ? 'text-slate-300' :
+                            vTone === 'warn'    ? 'text-yellow-300' : 'text-red-400'
+                          const isPressure = pressureFocusCategoryId === c.id
+                          return (
+                            <tr
+                              key={c.id}
+                              className={`border-b border-slate-800 transition-colors duration-300 ${
+                                highlightedCategoryId === c.id
+                                  ? 'bg-blue-600/20'
+                                  : isPressure
+                                    ? 'bg-amber-500/15'
+                                    : ''
+                              }`}
+                            >
+                              <td className="py-1.5 pr-2">{c.name}</td>
+                              <td className="py-1.5 pr-2 text-slate-400 text-xs">
+                                {c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}
+                              </td>
+                              {period === 'weekly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'weekly'))}</td>}
+                              {period === 'bi-weekly' && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td>}
+                              {period === 'monthly'   && <td className="py-1.5 pr-2">{currency(c.amount)}</td>}
+                              {period === 'yearly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'yearly'))}</td>}
+                              {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
+                              {period === 'yearly' && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
+                              <td className="py-1 pr-2">
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    ref={el => { actualInputRefs.current[c.id] = el }}
+                                    type="number"
+                                    inputMode="decimal"
+                                    min={0}
+                                    step={25}
+                                    className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
+                                    placeholder="—"
+                                    value={rawActual ?? ''}
+                                    onFocus={e => { if (e.target.value !== '') e.target.select() }}
+                                    onChange={e => {
+                                      const raw = e.target.value
+                                      const cleaned = raw.replace(/[^0-9.]/g, '')
+                                      if (cleaned === '' || Number(cleaned) === 0) {
+                                        setActuals(prev => ({ ...prev, [c.id]: '' }))
+                                      } else {
+                                        setActuals(prev => ({ ...prev, [c.id]: cleaned }))
+                                      }
+                                    }}
+                                    onBlur={() => {
+                                      pushActualsHistory({ ...actuals })
+                                    }}
+                                    onKeyDown={e => {
+                                      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                        e.preventDefault()
+                                        const cur = Number(rawActual) || 0
+                                        const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
+                                        setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
+                                      }
+                                    }}
+                                  />
+                                  {hasActual && (
+                                    <button
+                                      className="rounded px-1.5 py-0.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-700 hover:bg-slate-600 transition-colors"
+                                      title="Clear actual"
+                                      onClick={() => {
+                                        pushActualsHistory({ ...actuals })
+                                        setActuals(prev => ({ ...prev, [c.id]: '' }))
+                                      }}
+                                    >
+                                      ×
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                              <td className={`py-1.5 pr-2 font-medium ${varClass}`}>
+                                {variance === null
+                                  ? '—'
+                                  : Math.abs(variance) < 0.005
+                                    ? 'On plan'
+                                    : variance < 0
+                                      ? `Under by ${currency(Math.abs(variance))}`
+                                      : `Over by ${currency(variance)}`}
+                              </td>
+                              <td className="py-1.5 space-x-2 whitespace-nowrap">
+                                <button className="text-blue-300 hover:text-blue-200" onClick={() => { setForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type }); setEditId(c.id); budgetNameRef.current?.focus() }}>Edit</button>
+                                <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+
+                        {/* ── Section subtotal ── */}
+                        <tr className="border-b border-slate-700">
+                          <td colSpan={2} className="py-1.5 pl-0.5 pr-2 text-xs text-slate-500 italic">{label} total</td>
+                          <td className="py-1.5 pr-2 text-xs font-medium text-slate-400">{currency(sectionPlannedTotal)}</td>
+                          {hasMonthlyCol && <td className="py-1.5 pr-2 text-xs text-slate-500">{currency(sectionMonthlyTotal)}</td>}
+                          <td className="py-1.5 pr-2 text-xs font-medium text-slate-400">
+                            {sectionActualTotal !== null ? currency(sectionActualTotal) : '—'}
+                          </td>
+                          <td className={`py-1.5 pr-2 text-xs font-medium ${svClass}`}>
+                            {sectionVarianceTotal === null
+                              ? '—'
+                              : Math.abs(sectionVarianceTotal) < 0.005
+                                ? 'On plan'
+                                : sectionVarianceTotal < 0
+                                  ? `Under by ${currency(Math.abs(sectionVarianceTotal))}`
+                                  : `Over by ${currency(sectionVarianceTotal)}`}
+                          </td>
+                          <td />
+                        </tr>
+                      </Fragment>
                     )
                   })}
                 </tbody>
+
               </table>
             </Card>
           </section>
