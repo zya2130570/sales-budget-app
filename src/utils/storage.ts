@@ -9,6 +9,7 @@ export const KEYS = {
   scenarios:  'v42-scenarios',
   targets:    'v42-targets',
   targetSets: 'v42-target-sets',
+  period:     'v42-period',
 } as const
 
 // ─── Schema versioning ────────────────────────────────────────────────────────
@@ -146,6 +147,18 @@ export function loadTab(): Tab | null {
   }
 }
 
+export function loadPeriod(): Period | null {
+  try {
+    const raw = localStorage.getItem(KEYS.period)
+    if (raw === null) return null
+    const valid: Period[] = ['weekly', 'bi-weekly', 'monthly', 'yearly']
+    if ((valid as string[]).includes(raw)) return raw as Period
+    return null
+  } catch {
+    return null
+  }
+}
+
 export function loadCategories(): Category[] | null {
   return storageGet<Category[]>(KEYS.cats)
 }
@@ -170,6 +183,10 @@ export function loadSavedTargetSets(): SavedTargetSet[] | null {
 
 export function saveTab(tab: Tab): void {
   storageSetRaw(KEYS.tab, tab)
+}
+
+export function savePeriod(p: Period): void {
+  storageSetRaw(KEYS.period, p)
 }
 
 export function saveCategories(categories: Category[]): void {
