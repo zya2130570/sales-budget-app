@@ -164,6 +164,27 @@ export default function App() {
   // Blur-save timer: delays save so focus moving between edit fields doesn't trigger premature save
   const editBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Auto-clear timers for inline hint/warning messages
+  const budgetHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const targetHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const editTargetHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const setTimedBudgetFormHint = (msg: string) => {
+    setBudgetFormHint(msg)
+    if (budgetHintTimerRef.current) clearTimeout(budgetHintTimerRef.current)
+    if (msg) budgetHintTimerRef.current = setTimeout(() => setBudgetFormHint(''), 10000)
+  }
+  const setTimedTargetFormHint = (msg: string) => {
+    setTargetFormHint(msg)
+    if (targetHintTimerRef.current) clearTimeout(targetHintTimerRef.current)
+    if (msg) targetHintTimerRef.current = setTimeout(() => setTargetFormHint(''), 10000)
+  }
+  const setTimedEditTargetHint = (msg: string) => {
+    setEditTargetHint(msg)
+    if (editTargetHintTimerRef.current) clearTimeout(editTargetHintTimerRef.current)
+    if (msg) editTargetHintTimerRef.current = setTimeout(() => setEditTargetHint(''), 10000)
+  }
+
   // Refs for Log Contribution fields per target card (keyed by target id)
   const logDateRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const logAmountRefs = useRef<Record<string, HTMLInputElement | null>>({})
@@ -400,7 +421,7 @@ export default function App() {
     const monthlyAmt = convertToMonthly(amt, period)
     const n = form.name.trim()
     if (!n || monthlyAmt <= 0) {
-      setBudgetFormHint('Enter a category and amount.')
+      setTimedBudgetFormHint('Enter a category and amount.')
       setShowSuggestions(true)
       budgetNameRef.current?.focus()
       return
@@ -449,13 +470,13 @@ export default function App() {
     const sameGoal = (t: Target) => t.goalAmount === goalAmount
     const hardConflict = targets.find(t => sameName(t) && sameDeadline(t) && sameGoal(t))
     if (hardConflict) {
-      setTargetFormHint('A savings goal with this name, deadline, and goal amount already exists.')
+      setTimedTargetFormHint('A savings goal with this name, deadline, and goal amount already exists.')
       targetNameRef.current?.focus()
       return
     }
     const softConflict = targets.find(t => (sameName(t) && sameDeadline(t)) || (sameName(t) && sameGoal(t)))
     if (softConflict && !targetFormHint.startsWith('Possible duplicate')) {
-      setTargetFormHint('Possible duplicate: please confirm this is not the same savings goal.')
+      setTimedTargetFormHint('Possible duplicate: please confirm this is not the same savings goal.')
       return
     }
 
@@ -484,12 +505,12 @@ export default function App() {
     const sameGoal = (t: Target) => t.goalAmount === goalAmount
     const hardConflict = targets.find(t => other(t) && sameName(t) && sameDeadline(t) && sameGoal(t))
     if (hardConflict) {
-      setEditTargetHint('A savings goal with this name, deadline, and goal amount already exists.')
+      setTimedEditTargetHint('A savings goal with this name, deadline, and goal amount already exists.')
       return
     }
     const softConflict = targets.find(t => other(t) && ((sameName(t) && sameDeadline(t)) || (sameName(t) && sameGoal(t))))
     if (softConflict && !editTargetHint.startsWith('Possible duplicate')) {
-      setEditTargetHint('Possible duplicate: please confirm this is not the same savings goal.')
+      setTimedEditTargetHint('Possible duplicate: please confirm this is not the same savings goal.')
       return
     }
     setEditTargetHint('')
