@@ -1,4 +1,4 @@
-import type { Period, Target } from '../types'
+import type { Period, Target, Category } from '../types'
 
 // ─── Income / salary constants ────────────────────────────────────────────────
 
@@ -54,9 +54,9 @@ export const remainingTierFromPeriodValue = (
     yearly:      { redMax: 2600,   yellowMax: 7800 },
   }
   const t = thresholds[period]
-  if (remaining < 0)         return { tone: 'danger', label: 'Risk' }
-  if (remaining < t.redMax)  return { tone: 'risk',   label: 'Risk' }
-  if (remaining < t.yellowMax) return { tone: 'warn', label: 'Moderate' }
+  if (remaining < 0)           return { tone: 'danger', label: 'Risk' }
+  if (remaining < t.redMax)    return { tone: 'risk',   label: 'Risk' }
+  if (remaining < t.yellowMax) return { tone: 'warn',   label: 'Moderate' }
   return { tone: 'good', label: 'Healthy' }
 }
 
@@ -142,22 +142,19 @@ export function computeTargetStatus(t: Target): 'Complete' | 'Ahead' | 'On Track
   const fundedPercent = t.goalAmount > 0 ? (t.currentSaved / t.goalAmount) * 100 : 0
 
   // Early-stage protection: first 7 days, use funded-percent tiers only
-  // This prevents brand-new targets from showing Ahead just because expectedSaved ≈ 0
   if (elapsedDays < 7) {
     if (fundedPercent >= 100) return 'Complete'
     if (fundedPercent >= 15)  return 'Ahead'
     return 'On Track'
   }
 
-  // Normal time-based rule after 7 days with wider 70%–125% buffer
+  // Normal time-based rule after 7 days
   const expectedProgress = elapsedDays / totalDays
   const expectedSaved = t.goalAmount * expectedProgress
 
-  // If nothing is expected yet (shouldn't reach here after the elapsedDays < 7 guard, but be safe)
   if (expectedSaved <= 0) return 'On Track'
 
-  // Use rounded cents to avoid floating-point weirdness (e.g. 69.9 appearing as Ahead)
-  const savedCents          = Math.round(t.currentSaved * 100)
+  const savedCents           = Math.round(t.currentSaved * 100)
   const behindThresholdCents = Math.round(expectedSaved * 0.70 * 100)
   const aheadThresholdCents  = Math.round(expectedSaved * 1.07 * 100)
   if (savedCents < behindThresholdCents) return 'Behind'
@@ -183,5 +180,219 @@ export function requiredForTarget(t: Target) {
     monthly:    remaining / (days / 30.4375),
     yearly:     remaining / Math.max(1, days / 365),
     payPeriods: Math.max(1, Math.ceil(days / 14)),
+  }
+}
+
+// ─── Dashboard Status Engine ──────────────────────────────────────────────────
+//
+// Derives a single interpreted financial state from the user's current numbers.
+// All inputs are monthly figures or ratios, so the engine is period-agnostic.
+//
+// Tone scale (for UI color):
+//   'strong'  → calm green  (things are going well)
+//   'stable'  → neutral     (on track, no action needed)
+//   'watch'   → warm amber  (worth keeping an eye on)
+//   'act'     → soft orange (something needs attention)
+//   'recover' → muted red   (clear pressure, but not catastrophic)
+
+export type DashboardStatusKey =
+  | 'VeryStrongMonth'
+  | 'StrongMonth'
+  | 'FinanciallyStable'
+  | 'TightButStable'
+  | 'CushionShrinking'
+  | 'GoalPressureAhead'
+  | 'OverspendingTrend'
+  | 'RecoveryMonth'
+  | 'AttentionNeeded'
+
+export type DashboardStatusTone = 'strong' | 'stable' | 'watch' | 'act' | 'recover'
+
+export interface DashboardStatus {
+  key: DashboardStatusKey
+  label: string
+  tone: DashboardStatusTone
+  explanation: string
+  /** Secondary supporting insight (optional, shown in middle layer) */
+  insight?: string
+}
+
+export interface DashboardStatusInput {
+  // Monthly figures
+  totalMonthlyIncome: number
+  monthlyBudget: number
+  monthlyLeft: number
+  // Ratios (0–100)
+  fixedRatio: number       // fixed bills as % of income
+  savingsRate: number      // (savings + investing) as % of income
+  commissionPct: number    // commission as % of total income
+  // Budget composition
+  categories: Category[]
+  // Goal signals
+  activeTargets: Target[]
+  // Whether enough data exists to give a meaningful status
+  hasBudgetData: boolean
+}
+
+export function computeDashboardStatus(input: DashboardStatusInput): DashboardStatus {
+  const {
+    totalMonthlyIncome,
+    monthlyLeft,
+    fixedRatio,
+    savingsRate,
+    commissionPct,
+    activeTargets,
+    hasBudgetData,
+  } = input
+
+  // ── No data state ─────────────────────────────────────────────────────────
+  if (!hasBudgetData || totalMonthlyIncome <= 0) {
+    return {
+      key: 'FinanciallyStable',
+      label: 'Getting Started',
+      tone: 'stable',
+      explanation: 'Add your expenses in the Budget tab to see your financial picture here.',
+    }
+  }
+
+  const cushionPct = totalMonthlyIncome > 0 ? (monthlyLeft / totalMonthlyIncome) * 100 : 0
+  const isOverBudget = monthlyLeft < 0
+
+  // ── Goal pressure signals ─────────────────────────────────────────────────
+  const behindTargets = activeTargets.filter(t => computeTargetStatus(t) === 'Behind')
+  const hasBehindGoals = behindTargets.length > 0
+  const behindGoalNames = behindTargets.slice(0, 2).map(t => t.name).join(', ')
+
+  // ── Over budget ───────────────────────────────────────────────────────────
+  if (isOverBudget) {
+    const overBy = Math.abs(monthlyLeft)
+    const overPct = totalMonthlyIncome > 0 ? (overBy / totalMonthlyIncome) * 100 : 0
+    if (overPct >= 10) {
+      return {
+        key: 'OverspendingTrend',
+        label: 'Spending Exceeds Income',
+        tone: 'recover',
+        explanation: `Your planned expenses are running ${overPct.toFixed(0)}% above your current income. Reducing variable costs or increasing income will stabilize the plan.`,
+        insight: fixedRatio > 60
+          ? `Fixed bills are consuming ${fixedRatio.toFixed(0)}% of income, which limits how much you can adjust quickly.`
+          : undefined,
+      }
+    }
+    return {
+      key: 'AttentionNeeded',
+      label: 'Slightly Over Budget',
+      tone: 'act',
+      explanation: `Your plan is running a small deficit. A minor adjustment — trimming one variable expense or adding a commission month — should bring it back to balance.`,
+    }
+  }
+
+  // ── Recovery: budget is technically positive but under significant pressure ─
+  if (cushionPct < 3 && cushionPct >= 0) {
+    return {
+      key: 'RecoveryMonth',
+      label: 'Very Tight Cushion',
+      tone: 'recover',
+      explanation: `Almost all of your income is allocated. Even a modest unexpected expense could push this month over budget. Review your largest flexible line items first.`,
+      insight: hasBehindGoals
+        ? `Savings goal${behindTargets.length > 1 ? 's' : ''} behind pace: ${behindGoalNames}.`
+        : undefined,
+    }
+  }
+
+  // ── Tight but not broken ──────────────────────────────────────────────────
+  if (cushionPct < 12) {
+    if (hasBehindGoals) {
+      return {
+        key: 'GoalPressureAhead',
+        label: 'Goal Pressure Ahead',
+        tone: 'act',
+        explanation: `Your budget is tight and some savings goals are falling behind pace. You may need to increase contributions or extend a deadline to stay on track.`,
+        insight: `Behind: ${behindGoalNames}.`,
+      }
+    }
+    return {
+      key: 'TightButStable',
+      label: 'Tight but Stable',
+      tone: 'watch',
+      explanation: `Your cushion is slim this period. The plan is holding, but there's limited room for unexpected costs. Look for one area to create a little more breathing room.`,
+      insight: fixedRatio > 55
+        ? `Fixed bills are at ${fixedRatio.toFixed(0)}% of income — consider reviewing recurring commitments over time.`
+        : undefined,
+    }
+  }
+
+  // ── Cushion shrinking signal: income heavily commission-dependent ──────────
+  // If cushion is reasonable but commission dependency is very high, flag the fragility
+  if (commissionPct >= 65 && cushionPct < 25) {
+    return {
+      key: 'CushionShrinking',
+      label: 'Income Fragility Risk',
+      tone: 'watch',
+      explanation: `Your current cushion depends heavily on commission income (${commissionPct.toFixed(0)}% of take-home). A slower month could compress this quickly. Building a buffer in savings will help stabilize the plan.`,
+    }
+  }
+
+  // ── Healthy range: 12–30% cushion ────────────────────────────────────────
+  if (cushionPct < 30) {
+    if (savingsRate < 10) {
+      return {
+        key: 'TightButStable',
+        label: 'Stable with Low Savings',
+        tone: 'watch',
+        explanation: `Your expenses are covered and you have a workable cushion, but your savings allocation is low. Even a small increase now builds meaningful momentum over time.`,
+      }
+    }
+    if (hasBehindGoals) {
+      return {
+        key: 'GoalPressureAhead',
+        label: 'Goals Need Attention',
+        tone: 'watch',
+        explanation: `Your overall budget looks stable, but some savings goals are behind their expected pace. A focused contribution boost could get them back on track.`,
+        insight: `Behind: ${behindGoalNames}.`,
+      }
+    }
+    return {
+      key: 'FinanciallyStable',
+      label: 'Financially Stable',
+      tone: 'stable',
+      explanation: `Your income covers all planned expenses with a healthy cushion. Savings goals are progressing on schedule.`,
+    }
+  }
+
+  // ── Strong range: 30–50% cushion ─────────────────────────────────────────
+  if (cushionPct < 50) {
+    if (savingsRate >= 25) {
+      return {
+        key: 'StrongMonth',
+        label: 'Strong Month',
+        tone: 'strong',
+        explanation: `Good income coverage, solid cushion, and a meaningful savings rate. Your plan is running well — this is a good time to review whether any goals can be accelerated.`,
+        insight: hasBehindGoals
+          ? `One area to watch: ${behindGoalNames} ${behindTargets.length > 1 ? 'are' : 'is'} behind pace.`
+          : undefined,
+      }
+    }
+    return {
+      key: 'FinanciallyStable',
+      label: 'Financially Stable',
+      tone: 'stable',
+      explanation: `Your income is covering all expenses comfortably. Increasing your savings allocation slightly would further strengthen the plan.`,
+    }
+  }
+
+  // ── Very strong: 50%+ cushion ─────────────────────────────────────────────
+  if (savingsRate >= 20) {
+    return {
+      key: 'VeryStrongMonth',
+      label: 'Very Strong Month',
+      tone: 'strong',
+      explanation: `Excellent income coverage with a large cushion and healthy savings. This is an ideal month to front-load goal contributions or build your financial buffer further.`,
+    }
+  }
+  return {
+    key: 'StrongMonth',
+    label: 'Strong Month',
+    tone: 'strong',
+    explanation: `Your income significantly exceeds planned expenses this period. Consider directing more of the surplus toward savings goals or an emergency buffer.`,
   }
 }
