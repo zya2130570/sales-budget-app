@@ -165,7 +165,8 @@ export default function App() {
   const actualsBeforeFocusRef = useRef<Record<string, string> | null>(null)
 
   // V7.7.1: Parallel undo/redo stacks for actuals (mirrors budget history timing)
-  
+  const [, setActualsHistory] = useState<Array<Record<string, string>>>([])
+const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
   const showToast = (message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     setToast({ message, visible: true })
