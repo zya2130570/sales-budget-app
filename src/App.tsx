@@ -12,6 +12,7 @@ import {
   income,
   computeTargetStatus,
   requiredForTarget,
+  computeDashboardStatus,
 } from './utils/calculations'
 import {
   loadTab,
@@ -28,7 +29,7 @@ import {
   saveSavedTargetSets,
   runMigrations,
 } from './utils/storage'
- 
+
 const presetTypeMap: Record<string, CategoryType> = {
   Bike: 'fixed bill',
   Braiding: 'fixed bill',
@@ -47,7 +48,7 @@ const presetTypeMap: Record<string, CategoryType> = {
   Tuition: 'fixed bill',
 }
 const categorySuggestions = Object.keys(presetTypeMap).sort((a, b) => a.localeCompare(b))
- 
+
 const periods: Period[] = ['weekly', 'bi-weekly', 'monthly', 'yearly']
 const targetPresets = ['Bike', 'Emergency Fund', 'Long-term Savings', 'Tuition', 'Custom']
 const tabTips: Record<Tab, string> = {
@@ -57,7 +58,19 @@ const tabTips: Record<Tab, string> = {
   Scenarios: 'Compare different income levels like slow, medium, fast, or custom.',
   Targets: 'Set savings goals, deadlines, and track what you actually save. Use goal cards to log contributions and monitor progress.',
 }
- 
+
+// ─── Dashboard status tone → visual style mapping ─────────────────────────────
+
+function statusToneStyles(tone: 'strong' | 'stable' | 'watch' | 'act' | 'recover') {
+  switch (tone) {
+    case 'strong':  return { border: 'border-emerald-600/50', bg: 'bg-emerald-950/40', badge: 'bg-emerald-900/70 text-emerald-300 border border-emerald-700/60', dot: 'bg-emerald-400' }
+    case 'stable':  return { border: 'border-sky-600/40',     bg: 'bg-sky-950/30',     badge: 'bg-sky-900/60 text-sky-300 border border-sky-700/50',         dot: 'bg-sky-400' }
+    case 'watch':   return { border: 'border-amber-600/40',   bg: 'bg-amber-950/30',   badge: 'bg-amber-900/60 text-amber-300 border border-amber-700/50',   dot: 'bg-amber-400' }
+    case 'act':     return { border: 'border-orange-600/40',  bg: 'bg-orange-950/30',  badge: 'bg-orange-900/60 text-orange-300 border border-orange-700/50', dot: 'bg-orange-400' }
+    case 'recover': return { border: 'border-rose-600/40',    bg: 'bg-rose-950/30',    badge: 'bg-rose-900/60 text-rose-300 border border-rose-700/50',       dot: 'bg-rose-400' }
+  }
+}
+
 export default function App() {
   const incomeRef = useRef<HTMLInputElement>(null)
   const budgetNameRef = useRef<HTMLInputElement>(null)
@@ -76,7 +89,7 @@ export default function App() {
   const deadlineArrowCount = useRef(0)
   const startDateLeftArrowCount = useRef(0)
   const deadlineLeftArrowCount = useRef(0)
- 
+
   const [tab, setTab] = useState<Tab>('Dashboard')
   const [period, setPeriod] = useState<Period>('monthly')
   const [gpInput, setGpInput] = useState('5000')
@@ -106,49 +119,49 @@ export default function App() {
   const [budgetHistory, setBudgetHistory] = useState<BudgetSnapshot[]>([])
   const [budgetRedo, setBudgetRedo] = useState<BudgetSnapshot[]>([])
   const [form, setForm] = useState({ name: '', amount: '', type: 'fixed bill' as CategoryType })
- 
+
   // Target edit state
   const [editTargetId, setEditTargetId] = useState<string | null>(null)
   const [editTargetForm, setEditTargetForm] = useState({ name: '', goalAmount: '', currentSaved: '', startDate: '', deadline: '' })
   const [editTargetOriginal, setEditTargetOriginal] = useState<Target | null>(null)
- 
+
   // Contribution edit state
   const [editContributionId, setEditContributionId] = useState<string | null>(null)
   const [editContributionTargetId, setEditContributionTargetId] = useState<string | null>(null)
   const [editContributionForm, setEditContributionForm] = useState({ date: '', amount: '', note: '' })
- 
+
   // Target undo/redo
   const [targetHistory, setTargetHistory] = useState<Target[][]>([])
   const [targetRedo, setTargetRedo] = useState<Target[][]>([])
- 
+
   // Form-level undo history for Create Savings Goal form (for Duplicate preload undo)
   const [targetFormHistory, setTargetFormHistory] = useState<Array<{ name: string; goalAmount: string; currentSaved: string; startDate: string; deadline: string }>>([])
   const [targetFormRedo, setTargetFormRedo] = useState<Array<{ name: string; goalAmount: string; currentSaved: string; startDate: string; deadline: string }>>([])
- 
+
   // Collapsible sections for Fully Funded and Completed
   const [fullyFundedOpen, setFullyFundedOpen] = useState(true)
   const [completedOpen, setCompletedOpen] = useState(true)
- 
+
   // Track which targets have already been shown the deadline-passed popup
   const [deadlinePassedPrompted, setDeadlinePassedPrompted] = useState<Set<string>>(new Set())
- 
+
   // Track which goal cards have expanded details visible
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set())
- 
+
   // Toast notification state
   const [toast, setToast] = useState<{ message: string; visible: boolean } | null>(null)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
- 
+
   // Highlighted budget category (after Add to Current Budget)
   const [highlightedCategoryId, setHighlightedCategoryId] = useState<string | null>(null)
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
- 
+
   const showToast = (message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     setToast({ message, visible: true })
     toastTimerRef.current = setTimeout(() => setToast(null), 15000)
   }
- 
+
   // Refs for edit-mode fields inside target cards
   const editCurrentSavedRef = useRef<HTMLInputElement>(null)
   const editStartDateRef = useRef<HTMLInputElement>(null)
@@ -159,25 +172,25 @@ export default function App() {
   const editDeadlineLeftArrowCount = useRef(0)
   // Blur-save timer: delays save so focus moving between edit fields doesn't trigger premature save
   const editBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
- 
+
   // Refs for Log Contribution fields per target card (keyed by target id)
   const logDateRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const logAmountRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const logNoteRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const logDateArrowCounts = useRef<Record<string, number>>({})
- 
+
   const gp = Math.max(0, Number(gpInput) || 0)
   const adjustedSalary = BASE_SALARY + (baseBumpsAchieved * 5000)
   const eligibleBumps = BUMP_THRESHOLDS.filter(t => gp >= t).length
   const nextUnreachedThreshold = BUMP_THRESHOLDS[eligibleBumps]
   const inc = useMemo(() => income(gp, adjustedSalary), [gp, adjustedSalary])
   const grossSalary = adjustedSalary + (inc.cMonthly * 12)
- 
+
   // Reset base bumps if GP drops below 20000
   useEffect(() => {
     if (gp < 20000 && baseBumpsAchieved > 0) setBaseBumpsAchieved(0)
   }, [gp, baseBumpsAchieved])
- 
+
   // Prevent scroll-wheel from changing number input values
   useEffect(() => {
     const handler = (e: WheelEvent) => {
@@ -189,7 +202,7 @@ export default function App() {
     document.addEventListener('wheel', handler, { passive: false })
     return () => document.removeEventListener('wheel', handler)
   }, [])
- 
+
   // localStorage
   useEffect(() => {
     runMigrations()
@@ -206,9 +219,8 @@ export default function App() {
   useEffect(() => saveSavedScenarios(savedScenarios), [savedScenarios])
   useEffect(() => saveTargets(targets), [targets])
   useEffect(() => saveSavedTargetSets(savedTargetSets), [savedTargetSets])
- 
-  // Deadline-passed detection: show a one-time prompt per target when today is past the deadline
-  // and the target is still active (not completed, not fully funded).
+
+  // Deadline-passed detection
   useEffect(() => {
     const todayMs = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() })()
     const overdue = targets.filter(t => {
@@ -221,7 +233,6 @@ export default function App() {
       return dl.getTime() < todayMs && !deadlinePassedPrompted.has(t.id)
     })
     if (!overdue.length) return
-    // Process one at a time so multiple prompts don't stack confusingly
     const t = overdue[0]
     setDeadlinePassedPrompted(prev => new Set([...prev, t.id]))
     const choice = window.confirm(
@@ -230,10 +241,9 @@ export default function App() {
     if (choice) {
       setTargetsWithHistory(prev => prev.map(x => x.id === t.id ? { ...x, completed: true } : x))
     }
-    // If user cancels, target stays active; prompt won't show again this session
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targets])
- 
+
   // Tab focus
   useEffect(() => {
     if (tab === 'Income') incomeRef.current?.focus()
@@ -241,7 +251,7 @@ export default function App() {
     if (tab === 'Scenarios') scenarioSlowRef.current?.focus()
     if (tab === 'Targets') { targetNameRef.current?.focus(); setShowTargetSuggestions(true) }
   }, [tab])
- 
+
   // Close autocomplete on outside click
   useEffect(() => {
     const onDocClick = (e: MouseEvent) => {
@@ -251,14 +261,14 @@ export default function App() {
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
   }, [])
- 
+
   const byType = useMemo(() => ({
     fixed: categories.filter(x => x.type === 'fixed bill').reduce((s, x) => s + x.amount, 0),
     variable: categories.filter(x => x.type === 'variable spending').reduce((s, x) => s + x.amount, 0),
     savings: categories.filter(x => x.type === 'savings').reduce((s, x) => s + x.amount, 0),
     investing: categories.filter(x => x.type === 'investing').reduce((s, x) => s + x.amount, 0),
   }), [categories])
- 
+
   const monthlyBudget = byType.fixed + byType.variable + byType.savings + byType.investing
   const monthlyLeft = inc.totalMonthly - monthlyBudget
   const fixedRatio = inc.totalMonthly > 0 ? (byType.fixed / inc.totalMonthly) * 100 : 0
@@ -266,11 +276,11 @@ export default function App() {
   const dep = inc.commissionPct
   const depColor = dep <= 35 ? 'text-green-400' : dep <= 55 ? 'text-yellow-300' : 'text-red-400'
   const baseNetByPeriod = period === 'weekly' ? inc.baseWeekly : period === 'bi-weekly' ? inc.baseBiWeekly : period === 'yearly' ? inc.baseMonthly * 12 : inc.baseMonthly
- 
+
   const top = [...categories].sort((a, b) => b.amount - a.amount)
   const suggestionList = form.name.trim() ? categorySuggestions.filter(s => s.toLowerCase().includes(form.name.toLowerCase())) : categorySuggestions
   const targetSuggestionList = targetForm.name.trim() ? targetPresets.filter(s => s.toLowerCase().includes(targetForm.name.toLowerCase())) : targetPresets
- 
+
   const hasBudgetData = monthlyBudget > 0
   const selectedPeriodRemaining = convertFromMonthly(monthlyLeft, period)
   const selectedPeriodTotalNet = convertFromMonthly(inc.totalMonthly, period)
@@ -298,7 +308,30 @@ export default function App() {
   const biggestExpenseTone: 'neutral' | 'good' | 'warn' | 'danger' = top[0] && selectedPeriodTotalNet > 0 && convertFromMonthly(top[0].amount, period) > selectedPeriodTotalNet * 0.5 ? 'danger' : 'neutral'
   const totalBudgetRatio = selectedPeriodTotalNet > 0 ? convertFromMonthly(monthlyBudget, period) / selectedPeriodTotalNet : 0
   const totalBudgetTone: 'neutral' | 'warn' | 'danger' = totalBudgetRatio > 0.9 ? 'danger' : totalBudgetRatio > 0.7 ? 'warn' : 'neutral'
- 
+
+  // ─── Dashboard Status Engine (V7.1) ───────────────────────────────────────
+  const activeTargets = targets.filter(t => !t.completed && (t.goalAmount <= 0 || t.currentSaved < t.goalAmount))
+  const fullyFundedTargets = targets.filter(t => !t.completed && t.goalAmount > 0 && t.currentSaved >= t.goalAmount)
+  const completedTargets = targets.filter(t => t.completed)
+
+  const dashboardStatus = useMemo(() => computeDashboardStatus({
+    totalMonthlyIncome: inc.totalMonthly,
+    monthlyBudget,
+    monthlyLeft,
+    fixedRatio,
+    savingsRate,
+    commissionPct: dep,
+    categories,
+    activeTargets,
+    hasBudgetData,
+  }), [inc.totalMonthly, monthlyBudget, monthlyLeft, fixedRatio, savingsRate, dep, categories, activeTargets, hasBudgetData])
+
+  const dsStyles = statusToneStyles(dashboardStatus.tone)
+
+  // Goals needing attention for lower dashboard layer
+  const behindTargets = activeTargets.filter(t => computeTargetStatus(t) === 'Behind')
+  const aheadTargets = activeTargets.filter(t => computeTargetStatus(t) === 'Ahead')
+
   const createSnapshot = (): BudgetSnapshot => ({ categories: categories.map((c) => ({ ...c })), form: { ...form }, editId })
   const pushBudgetHistory = () => { setBudgetHistory((prev) => [...prev.slice(-19), createSnapshot()]); setBudgetRedo([]) }
   const commitFormCheckpoint = () => {
@@ -309,7 +342,7 @@ export default function App() {
       return [...prev.slice(-19), snap]
     })
   }
- 
+
   const undoBudget = () => {
     setBudgetHistory((prev) => {
       if (!prev.length) return prev
@@ -334,7 +367,7 @@ export default function App() {
       return next
     })
   }
- 
+
   // Target undo/redo helpers
   const pushTargetHistory = (prev: Target[]) => {
     setTargetHistory(h => [...h.slice(-19), prev])
@@ -383,7 +416,7 @@ export default function App() {
       return fr
     })
   }
- 
+
   const setTargetsWithHistory = (updater: (prev: Target[]) => Target[]) => {
     setTargets(prev => {
       const next = updater(prev)
@@ -391,7 +424,7 @@ export default function App() {
       return next
     })
   }
- 
+
   const upsert = () => {
     const amt = Math.max(0, Number(form.amount) || 0)
     const monthlyAmt = convertToMonthly(amt, period)
@@ -417,14 +450,14 @@ export default function App() {
     setForm({ name: '', amount: '', type: 'fixed bill' })
     budgetNameRef.current?.focus()
   }
- 
+
   const cancelBudgetEdit = () => {
     setEditId(null)
     setForm({ name: '', amount: '', type: 'fixed bill' })
     setBudgetFormHint('')
     budgetNameRef.current?.focus()
   }
- 
+
   const addTargetContribution = (targetId: string, amount: number, date: string, note: string) => {
     if (amount <= 0) return
     setTargetsWithHistory(prev => prev.map((t) => t.id === targetId
@@ -432,7 +465,7 @@ export default function App() {
       : t
     ))
   }
- 
+
   const createTarget = () => {
     const name = targetForm.name.trim()
     const goalAmount = Number(targetForm.goalAmount) || 0
@@ -440,7 +473,7 @@ export default function App() {
     const startDate = targetForm.startDate
     const deadline = targetForm.deadline
     if (!name || goalAmount <= 0 || !deadline) return
- 
+
     // Conflict detection: name + deadline + goalAmount
     const sameName = (t: Target) => t.name.trim().toLowerCase() === name.toLowerCase()
     const sameDeadline = (t: Target) => t.deadline === deadline
@@ -456,7 +489,7 @@ export default function App() {
       setTargetFormHint('Possible duplicate: please confirm this is not the same savings goal.')
       return
     }
- 
+
     const today = new Date().toISOString().slice(0, 10)
     setTargetsWithHistory(prev => [
       { id: crypto.randomUUID(), name, goalAmount, currentSaved, startDate: startDate || today, deadline, createdAt: today, type: 'savings', contributions: [], completed: false },
@@ -466,7 +499,7 @@ export default function App() {
     setTargetForm({ name: '', goalAmount: '', currentSaved: '', startDate: new Date().toISOString().slice(0, 10), deadline: '' })
     setTimeout(() => targetNameRef.current?.focus(), 0)
   }
- 
+
   const [editTargetHint, setEditTargetHint] = useState('')
 
   const saveEditTarget = (targetId: string) => {
@@ -476,7 +509,7 @@ export default function App() {
     const startDate = editTargetForm.startDate
     const deadline = editTargetForm.deadline
     if (!name || goalAmount <= 0 || !deadline) return
-    // Conflict detection: name + deadline + goalAmount on a DIFFERENT goal
+    // Conflict detection on a DIFFERENT goal
     const other = (t: Target) => t.id !== targetId
     const sameName = (t: Target) => t.name.trim().toLowerCase() === name.toLowerCase()
     const sameDeadline = (t: Target) => t.deadline === deadline
@@ -499,13 +532,9 @@ export default function App() {
     setEditTargetId(null)
     setEditTargetOriginal(null)
   }
- 
+
   const cancelEditTarget = (targetId: string) => {
-    // Clear any pending blur-save to prevent race with cancel
     if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current)
-    // Restore original target values without pushing to history.
-    // Using setTargets directly (not setTargetsWithHistory) avoids creating a spurious
-    // undo entry when blur-save fires before this cancel click resolves.
     if (editTargetOriginal && editTargetOriginal.id === targetId) {
       setTargets(prev => prev.map(t => t.id === targetId ? editTargetOriginal! : t))
     }
@@ -513,13 +542,13 @@ export default function App() {
     setEditTargetOriginal(null)
     setEditTargetHint('')
   }
- 
+
   const startEditContribution = (targetId: string, c: Contribution) => {
     setEditContributionId(c.id)
     setEditContributionTargetId(targetId)
     setEditContributionForm({ date: c.date, amount: String(c.amount), note: c.note })
   }
- 
+
   const saveEditContribution = () => {
     if (!editContributionId || !editContributionTargetId) return
     const newAmount = Number(editContributionForm.amount) || 0
@@ -540,23 +569,18 @@ export default function App() {
     setEditContributionTargetId(null)
     setEditContributionForm({ date: '', amount: '', note: '' })
   }
- 
+
   const cancelEditContribution = () => {
     setEditContributionId(null)
     setEditContributionTargetId(null)
     setEditContributionForm({ date: '', amount: '', note: '' })
   }
- 
+
   const goToIncomeAndFocus = () => {
     setTab('Income')
     setTimeout(() => incomeRef.current?.focus(), 80)
   }
- 
-  // Target sections
-  const activeTargets = targets.filter(t => !t.completed && (t.goalAmount <= 0 || t.currentSaved < t.goalAmount))
-  const fullyFundedTargets = targets.filter(t => !t.completed && t.goalAmount > 0 && t.currentSaved >= t.goalAmount)
-  const completedTargets = targets.filter(t => t.completed)
- 
+
   const renderTargetCard = (t: Target) => {
     const req = requiredForTarget(t)
     const progressPct = t.goalAmount > 0 ? Math.min(100, (t.currentSaved / t.goalAmount) * 100) : 0
@@ -570,21 +594,21 @@ export default function App() {
       else next.add(t.id)
       return next
     })
- 
+
     const statusBadge =
       status === 'Complete' || status === 'Ahead'
         ? 'bg-green-900/60 text-green-300 border border-green-700/50'
         : status === 'Behind'
           ? 'bg-red-900/60 text-red-300 border border-red-700/50'
           : 'bg-slate-700/80 text-slate-200 border border-slate-600/50'
- 
+
     const barColor =
       status === 'Complete' || status === 'Ahead'
         ? 'bg-green-500'
         : status === 'Behind'
           ? 'bg-red-500'
           : 'bg-blue-500'
- 
+
     return (
       <Card
         key={t.id}
@@ -630,9 +654,6 @@ export default function App() {
           <div
             className="space-y-3"
             onBlur={e => {
-              // Blur-save: save when focus leaves the entire edit form.
-              // relatedTarget is the element receiving focus next.
-              // If it's still inside this container, don't save yet.
               if (e.currentTarget.contains(e.relatedTarget as Node)) return
               if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current)
               editBlurTimerRef.current = setTimeout(() => saveEditTarget(t.id), 0)
@@ -780,7 +801,7 @@ export default function App() {
                 <span className="text-xs text-slate-300 font-semibold">· {currency(req.remaining)} remaining</span>
               </div>
             </div>
- 
+
             {/* PROGRESS BAR */}
             <div className="mb-1">
               <div className="h-3 bg-slate-700 rounded-full overflow-hidden">
@@ -791,7 +812,7 @@ export default function App() {
                 <span>Goal: {currency(t.goalAmount)}</span>
               </div>
             </div>
- 
+
             {/* DEADLINE ROW */}
             <div className="flex items-center gap-3 mt-3 mb-3 text-sm">
               <span className="text-slate-400">Deadline</span>
@@ -799,7 +820,7 @@ export default function App() {
               <span className="text-slate-500">·</span>
               <span className="text-slate-400">{req.days} days left</span>
             </div>
- 
+
             {/* REQUIRED SAVINGS SUMMARY */}
             <div className="grid grid-cols-3 gap-2 mb-3">
               <div className="rounded-lg bg-slate-700/50 border border-slate-600/50 px-3 py-2 text-center">
@@ -815,7 +836,7 @@ export default function App() {
                 <div className="text-sm font-semibold text-slate-100">{currency(req.monthly)}</div>
               </div>
             </div>
- 
+
             {/* COLLAPSIBLE DETAILS */}
             <div className="mb-3">
               <button
@@ -900,7 +921,7 @@ export default function App() {
                 </div>
               )}
             </div>
- 
+
             {/* LOG CONTRIBUTION */}
             {!t.completed && (
               <>
@@ -984,7 +1005,6 @@ export default function App() {
                       const amount = period === 'weekly' ? req.weekly : period === 'bi-weekly' ? req.biWeekly : period === 'yearly' ? req.yearly : req.monthly
                       const monthlyAmt = convertToMonthly(amount, period)
                       const periodAmtDisplay = currency(amount)
-                      // Compute message and affected id BEFORE setCategories to avoid React batching closure issues
                       const existingIdx = categories.findIndex(c => c.name.trim().toLowerCase() === t.name.trim().toLowerCase() && c.type === 'savings')
                       let toastMsg: string
                       let affectedId: string
@@ -1003,9 +1023,7 @@ export default function App() {
                         affectedId = crypto.randomUUID()
                         toastMsg = `New: ${t.name} added to Budget at ${periodAmtDisplay}`
                       }
-                      // Push budget history snapshot so this change is undoable from Budget tab
                       pushBudgetHistory()
-                      // Apply the category change
                       if (existingIdx >= 0) {
                         setCategories(prev => {
                           const cp = [...prev]
@@ -1015,7 +1033,6 @@ export default function App() {
                       } else {
                         setCategories(prev => [...prev, { id: affectedId, name: t.name, amount: monthlyAmt, type: 'savings' }])
                       }
-                      // Switch to Budget tab and highlight the affected row
                       setTab('Budget')
                       setTimeout(() => {
                         if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
@@ -1036,7 +1053,6 @@ export default function App() {
                   <button
                     className="rounded bg-slate-600 hover:bg-slate-500 px-3 py-1.5 text-sm transition-colors min-w-[7rem]"
                     onClick={() => {
-                      // Push current form to history so Duplicate preload is undoable
                       setTargetFormHistory(fh => [...fh.slice(-19), { ...targetForm }])
                       setTargetFormRedo([])
                       setTargetForm({
@@ -1069,11 +1085,11 @@ export default function App() {
       </Card>
     )
   }
- 
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
       <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
- 
+
         <header className="rounded-2xl border border-slate-700 bg-slate-800/80 shadow-xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold tracking-tight">Flow</h1>
@@ -1092,45 +1108,192 @@ export default function App() {
             ))}
           </div>
         </header>
- 
+
         {/* ── DASHBOARD ── */}
         {tab === 'Dashboard' && (
           <section className="space-y-4 transition-all duration-300">
-            <Card title="Welcome back"><p className="text-slate-200">{welcome}</p></Card>
-            <Card title="Dashboard Summary">
-              <div className="flex gap-2 mb-4">{periods.map(p => <Pill key={p} active={period === p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div>
-              <p className="mb-4">
-                Monthly Gross Profit Reference:{' '}
-                <span
-                  className={`${gp > 10000 ? 'text-green-400' : ''} font-semibold underline cursor-pointer hover:opacity-75 transition-opacity`}
-                  onClick={goToIncomeAndFocus}
-                  title="Click to edit in Income tab"
-                >
-                  {currency(gp)}
-                </span>
-              </p>
-              <div className="grid md:grid-cols-3 gap-3">
-                <Metric title="Base Gross Income (salary only)" value={currency(convertFromMonthly(inc.baseGrossMonthly, period))} />
-                <Metric title="Base Net Income (salary take-home)" value={currency(baseNetByPeriod)} />
-                <Metric title="Commission Income (net)" value={currency(convertFromMonthly(inc.cMonthly, period))} />
-                <Metric title="Total Net Income (salary + commission take-home)" value={currency(convertFromMonthly(inc.totalMonthly, period))} featured />
-                <Metric title="Total Budget" value={currency(convertFromMonthly(monthlyBudget, period))} tone={totalBudgetTone} />
-                <Metric title="Remaining After Budget" value={currency(selectedPeriodRemaining)} tone={remainingTone} glow={selectedPeriodRemaining < 0} />
+
+            {/* ── TOP LAYER: Primary status + explanation ── */}
+            <div className={`rounded-2xl border ${dsStyles.border} ${dsStyles.bg} p-5 shadow-lg`}>
+              <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-3 mb-3">
+                    <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${dsStyles.dot}`} />
+                    <span className={`text-xs font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full ${dsStyles.badge}`}>
+                      {dashboardStatus.label}
+                    </span>
+                  </div>
+                  <p className="text-slate-200 text-base leading-relaxed">
+                    {dashboardStatus.explanation}
+                  </p>
+                  {dashboardStatus.insight && (
+                    <p className="mt-2 text-sm text-slate-400 leading-relaxed">
+                      {dashboardStatus.insight}
+                    </p>
+                  )}
+                </div>
+                {/* Quick financial pulse — period-aware */}
+                <div className="shrink-0 flex flex-col gap-1.5 min-w-[160px]">
+                  <div className="flex gap-2 mb-2">{periods.map(p => <Pill key={p} active={period === p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div>
+                  <div className="text-xs text-slate-400">Net income</div>
+                  <div
+                    className="text-lg font-bold text-sky-200 cursor-pointer hover:opacity-75 transition-opacity"
+                    onClick={goToIncomeAndFocus}
+                    title="Click to edit in Income tab"
+                  >
+                    {currency(convertFromMonthly(inc.totalMonthly, period))}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-1">Remaining</div>
+                  <div className={`text-lg font-bold ${selectedPeriodRemaining < 0 ? 'text-rose-300' : remainingCushionPct > 25 ? 'text-emerald-300' : 'text-amber-300'}`}>
+                    {currency(selectedPeriodRemaining)}
+                  </div>
+                </div>
               </div>
-            </Card>
-            <Card title="Financial Intelligence">
+            </div>
+
+            {/* ── MIDDLE LAYER: Core financial metrics ── */}
+            <div className="grid md:grid-cols-2 gap-4">
+              {/* Income & Cushion card */}
+              <Card title="Income & Cushion" noHover>
+                <div className="grid grid-cols-2 gap-3">
+                  <Metric title="Total Net Income" value={currency(convertFromMonthly(inc.totalMonthly, period))} featured />
+                  <Metric title="Remaining After Budget" value={currency(selectedPeriodRemaining)} tone={remainingTone} glow={selectedPeriodRemaining < 0} />
+                  <Metric title="Total Budget" value={currency(convertFromMonthly(monthlyBudget, period))} tone={totalBudgetTone} />
+                  <Metric title="Cushion" value={`${remainingCushionPct.toFixed(1)}%`} tone={cushionTone} />
+                </div>
+              </Card>
+
+              {/* Plan health card */}
+              <Card title="Plan Health" noHover>
+                <div className="grid grid-cols-2 gap-3">
+                  <Info title="Savings Rate" value={`${savingsRate.toFixed(1)}%`} tone={savingsTone} />
+                  <Info title="Fixed Bills Load" value={`${fixedRatio.toFixed(1)}%`} tone={fixedRatio > 60 ? 'warn' : 'neutral'} />
+                  <Info title="Commission Dependency" value={`${dep.toFixed(1)}%`} className={depColor} />
+                  <Info title="Budget Status" value={statusLabel} tone={statusTone} glow={selectedPeriodRemaining < 0} />
+                </div>
+              </Card>
+            </div>
+
+            {/* ── LOWER LAYER: Actionable signals ── */}
+            {hasBudgetData && (
               <div className="grid md:grid-cols-3 gap-3">
-                <Info title="Biggest Expense" value={top[0] ? `${top[0].name} (${currency(convertFromMonthly(top[0].amount, period))} ${labelPeriod(period)})` : 'None'} tone={biggestExpenseTone} />
-                <Info title="Fixed Bills Ratio" value={`${fixedRatio.toFixed(1)}%`} />
-                <Info title="Savings Rate" value={`${savingsRate.toFixed(1)}%`} tone={savingsTone} />
-                <Info title="Commission Dependency" value={`${dep.toFixed(1)}%`} className={depColor} />
-                <Info title="Remaining Cushion" value={`${remainingCushionPct.toFixed(1)}%`} tone={cushionTone} />
-                <Info title="Budget Status / Health Tier" value={statusLabel} tone={statusTone} glow={selectedPeriodRemaining < 0} />
+                {/* Spending pressure */}
+                <Card title="Spending Signals" noHover>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-400">Biggest expense</span>
+                      <span className="font-medium text-slate-100 text-right max-w-[55%] truncate">
+                        {top[0] ? `${top[0].name}` : '—'}
+                      </span>
+                    </div>
+                    {top[0] && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-400">&nbsp;</span>
+                        <span className={`font-medium ${biggestExpenseTone === 'danger' ? 'text-rose-300' : 'text-slate-300'}`}>
+                          {currency(convertFromMonthly(top[0].amount, period))} / {labelPeriod(period).toLowerCase()}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-sm pt-1 border-t border-slate-700/60">
+                      <span className="text-slate-400">Variable spending</span>
+                      <span className="font-medium text-slate-100">{currency(convertFromMonthly(byType.variable, period))}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-400">Fixed bills</span>
+                      <span className="font-medium text-slate-100">{currency(convertFromMonthly(byType.fixed, period))}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-400">Savings + investing</span>
+                      <span className="font-medium text-slate-100">{currency(convertFromMonthly(byType.savings + byType.investing, period))}</span>
+                    </div>
+                  </div>
+                </Card>
+
+                {/* Goals needing attention */}
+                <Card title="Goals Needing Attention" noHover>
+                  {behindTargets.length === 0 && aheadTargets.length === 0 && (
+                    <p className="text-sm text-slate-400">
+                      {activeTargets.length === 0
+                        ? 'No active savings goals yet.'
+                        : 'All active goals are on track.'}
+                    </p>
+                  )}
+                  <div className="space-y-2">
+                    {behindTargets.map(t => {
+                      const req = requiredForTarget(t)
+                      const pct = t.goalAmount > 0 ? (t.currentSaved / t.goalAmount) * 100 : 0
+                      return (
+                        <div key={t.id} className="rounded-lg bg-rose-950/40 border border-rose-800/40 px-3 py-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-medium text-rose-200 truncate max-w-[60%]">{t.name}</span>
+                            <span className="text-xs text-rose-400">{pct.toFixed(0)}% funded</span>
+                          </div>
+                          <div className="text-xs text-slate-400 mt-0.5">{currency(req.biWeekly)} / pay period needed</div>
+                        </div>
+                      )
+                    })}
+                    {aheadTargets.map(t => {
+                      const pct = t.goalAmount > 0 ? (t.currentSaved / t.goalAmount) * 100 : 0
+                      return (
+                        <div key={t.id} className="rounded-lg bg-emerald-950/40 border border-emerald-800/40 px-3 py-2">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm font-medium text-emerald-200 truncate max-w-[60%]">{t.name}</span>
+                            <span className="text-xs text-emerald-400">{pct.toFixed(0)}% — ahead</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </Card>
+
+                {/* Income composition */}
+                <Card title="Income Composition" noHover>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-400">Base salary (net)</span>
+                      <span className="font-medium text-slate-100">{currency(convertFromMonthly(inc.baseMonthly, period))}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-400">Commission (net)</span>
+                      <span className="font-medium text-slate-100">{currency(convertFromMonthly(inc.cMonthly, period))}</span>
+                    </div>
+                    <div className="pt-2 border-t border-slate-700/60">
+                      {/* Mini bar showing base vs commission split */}
+                      <div className="text-xs text-slate-400 mb-1.5">Income mix</div>
+                      <div className="h-2 rounded-full bg-slate-700 overflow-hidden flex">
+                        <div
+                          className="h-2 bg-sky-500 rounded-l-full"
+                          style={{ width: `${inc.totalMonthly > 0 ? (inc.baseMonthly / inc.totalMonthly) * 100 : 100}%` }}
+                        />
+                        <div
+                          className="h-2 bg-violet-500"
+                          style={{ width: `${inc.totalMonthly > 0 ? (inc.cMonthly / inc.totalMonthly) * 100 : 0}%` }}
+                        />
+                      </div>
+                      <div className="flex justify-between mt-1 text-xs text-slate-500">
+                        <span className="text-sky-400">Base {inc.totalMonthly > 0 ? (100 - dep).toFixed(0) : 100}%</span>
+                        <span className="text-violet-400">Commission {dep.toFixed(0)}%</span>
+                      </div>
+                    </div>
+                    <div className="pt-1 border-t border-slate-700/60">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-400">GP this month</span>
+                        <span
+                          className={`font-medium cursor-pointer hover:opacity-75 transition-opacity ${gp > 10000 ? 'text-emerald-400' : 'text-slate-100'}`}
+                          onClick={goToIncomeAndFocus}
+                          title="Click to edit in Income tab"
+                        >
+                          {currency(gp)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
               </div>
-            </Card>
+            )}
           </section>
         )}
- 
+
         {tab === 'Dashboard' && targets.length > 0 && period === 'bi-weekly' && (
           <Card title="Log Savings From This Paycheck">
             <div className="grid md:grid-cols-4 gap-2">
@@ -1144,7 +1307,7 @@ export default function App() {
             </div>
           </Card>
         )}
- 
+
         {/* ── INCOME ── */}
         {tab === 'Income' && (
           <section className="space-y-4 transition-all duration-300">
@@ -1211,7 +1374,7 @@ export default function App() {
             </div>
           </section>
         )}
- 
+
         {/* ── BUDGET ── */}
         {tab === 'Budget' && (
           <section className="space-y-4 transition-all duration-300">
@@ -1277,7 +1440,6 @@ export default function App() {
                     if (['1', '2', '3', '4'].includes(e.key)) { const m = { '1': 'fixed bill', '2': 'variable spending', '3': 'savings', '4': 'investing' } as const; setForm(v => ({ ...v, type: m[e.key as keyof typeof m] })) }
                     if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); commitFormCheckpoint(); upsert() }
                     if (e.key === 'ArrowLeft') { e.preventDefault(); commitFormCheckpoint(); budgetAmountRef.current?.focus() }
-                    // ArrowUp/ArrowDown: let browser handle native select navigation (no preventDefault)
                   }}
                   onChange={e => { setForm(v => ({ ...v, type: e.target.value as CategoryType })); commitFormCheckpoint() }}
                 >
@@ -1317,7 +1479,6 @@ export default function App() {
                   </div>
                 ))}
               </div>
-              {/* Budget table with correct column order per period */}
               <table className="w-full text-sm mt-3">
                 <thead>
                   <tr className="text-left text-slate-400 border-b border-slate-700">
@@ -1332,7 +1493,10 @@ export default function App() {
                 </thead>
                 <tbody>
                   {top.map(c => (
-                    <tr key={c.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedCategoryId === c.id ? 'bg-blue-600/20' : ''}`}>
+                    <tr
+                      key={c.id}
+                      className={`border-b border-slate-800 transition-colors duration-700 ${highlightedCategoryId === c.id ? 'bg-sky-900/30' : ''}`}
+                    >
                       <td>{c.name}</td>
                       <td>{c.type === 'fixed bill' ? 'Fixed Bill' : c.type === 'variable spending' ? 'Variable Spending' : c.type === 'savings' ? 'Savings' : 'Investing'}</td>
                       {period === 'weekly' && <><td>{currency(convertFromMonthly(c.amount, 'weekly'))}</td><td>{currency(c.amount)}</td></>}
@@ -1350,7 +1514,7 @@ export default function App() {
             </Card>
           </section>
         )}
- 
+
         {/* ── SCENARIOS ── */}
         {tab === 'Scenarios' && (
           <section className="space-y-4 transition-all duration-300">
@@ -1402,11 +1566,11 @@ export default function App() {
             </div>
           </section>
         )}
- 
+
         {/* ── SAVINGS GOALS ── */}
         {tab === 'Targets' && (
           <section className="space-y-4">
-            <Card title="Create Savings Goal" noHover>
+            <Card title="Create Savings Goal">
               <div className="grid md:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Goal Name</label>
@@ -1441,6 +1605,7 @@ export default function App() {
                           }
                           if (targetForm.name.trim()) { setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus() }
                         }
+                        if (e.key === 'ArrowRight') { e.preventDefault(); targetGoalRef.current?.focus() }
                       }}
                     />
                     {showTargetSuggestions && targetSuggestionList.length > 0 && (
@@ -1473,6 +1638,7 @@ export default function App() {
                     onFocus={e => e.target.select()}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); targetSavedRef.current?.focus() }
+                      if (e.key === 'ArrowLeft') { e.preventDefault(); targetNameRef.current?.focus() }
                     }}
                     placeholder="e.g. 1000"
                   />
@@ -1496,7 +1662,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Start Date (when you began saving)</label>
+                  <label className="block text-xs text-slate-400 mb-1">Start Date</label>
                   <input
                     ref={targetStartDateRef}
                     type="date"
@@ -1504,6 +1670,7 @@ export default function App() {
                     value={targetForm.startDate}
                     onChange={(e) => setTargetForm((v) => ({ ...v, startDate: e.target.value }))}
                     onKeyDown={(e) => {
+                      if (e.key === 'Enter') { e.preventDefault(); targetDeadlineRef.current?.focus() }
                       if (e.key === 'ArrowRight') {
                         startDateLeftArrowCount.current = 0
                         startDateArrowCount.current += 1
@@ -1520,21 +1687,15 @@ export default function App() {
                           startDateLeftArrowCount.current = 0
                           targetSavedRef.current?.focus()
                         }
-                      } else if (e.key === 'Enter') {
-                        e.preventDefault()
-                        startDateArrowCount.current = 0
-                        startDateLeftArrowCount.current = 0
-                        targetDeadlineRef.current?.focus()
                       } else {
                         startDateArrowCount.current = 0
                         startDateLeftArrowCount.current = 0
                       }
                     }}
                   />
-         
                 </div>
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Deadline (when the goal is due)</label>
+                  <label className="block text-xs text-slate-400 mb-1">Deadline</label>
                   <input
                     ref={targetDeadlineRef}
                     type="date"
@@ -1542,16 +1703,8 @@ export default function App() {
                     value={targetForm.deadline}
                     onChange={(e) => setTargetForm((v) => ({ ...v, deadline: e.target.value }))}
                     onKeyDown={(e) => {
-                      if (e.key === 'ArrowRight') {
-                        deadlineLeftArrowCount.current = 0
-                        // Let browser move through M→D→Y segments; after 2 presses trigger Create
-                        deadlineArrowCount.current += 1
-                        if (deadlineArrowCount.current > 2) {
-                          e.preventDefault()
-                          deadlineArrowCount.current = 0
-                          createTarget()
-                        }
-                      } else if (e.key === 'ArrowLeft') {
+                      if (e.key === 'Enter') { e.preventDefault(); createTarget() }
+                      if (e.key === 'ArrowLeft') {
                         deadlineArrowCount.current = 0
                         deadlineLeftArrowCount.current += 1
                         if (deadlineLeftArrowCount.current > 2) {
@@ -1559,18 +1712,20 @@ export default function App() {
                           deadlineLeftArrowCount.current = 0
                           targetStartDateRef.current?.focus()
                         }
-                      } else if (e.key === 'Enter') {
-                        e.preventDefault()
-                        deadlineArrowCount.current = 0
+                      } else if (e.key === 'ArrowRight') {
                         deadlineLeftArrowCount.current = 0
-                        createTarget()
+                        deadlineArrowCount.current += 1
+                        if (deadlineArrowCount.current > 2) {
+                          e.preventDefault()
+                          deadlineArrowCount.current = 0
+                          createTarget()
+                        }
                       } else {
                         deadlineArrowCount.current = 0
                         deadlineLeftArrowCount.current = 0
                       }
                     }}
                   />
-       
                 </div>
                 <div>
                   <button className="w-full px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 transition-colors" onClick={createTarget}>Create Savings Goal</button>
@@ -1580,7 +1735,7 @@ export default function App() {
                 <p className="mt-2 text-sm text-amber-300">{targetFormHint}</p>
               )}
             </Card>
- 
+
             {/* Target Undo / Redo / Clear row */}
             <div className="flex gap-2 items-center">
               <button
@@ -1604,7 +1759,7 @@ export default function App() {
                 Clear Savings Goals
               </button>
             </div>
- 
+
             <Card title="Savings Goal Sets" noHover>
               <div className="grid md:grid-cols-3 gap-2">
                 <input className="p-2 rounded bg-slate-800 border border-slate-600" value={targetSetName} onChange={(e) => setTargetSetName(e.target.value)} placeholder="Savings goal set name" />
@@ -1623,7 +1778,7 @@ export default function App() {
                 ))}
               </div>
             </Card>
- 
+
             {/* Active Targets */}
             <section className="space-y-3">
               <h3 className="text-base font-semibold text-slate-200">Active Savings Goals ({activeTargets.length})</h3>
@@ -1635,7 +1790,7 @@ export default function App() {
                 <p className="text-slate-500 text-sm">No active savings goals.</p>
               )}
             </section>
- 
+
             {/* Fully Funded Targets */}
             <section className="space-y-3">
               <button
@@ -1655,7 +1810,7 @@ export default function App() {
                 )
               )}
             </section>
- 
+
             {/* Completed Targets */}
             <section className="space-y-3">
               <button
@@ -1677,9 +1832,9 @@ export default function App() {
             </section>
           </section>
         )}
- 
+
       </div>
- 
+
       {/* Toast notification */}
       {toast && (
         <div
@@ -1709,11 +1864,11 @@ export default function App() {
     </div>
   )
 }
- 
+
 function Pill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return <button onClick={onClick} className={`px-3 py-1.5 rounded text-sm ${active ? 'bg-blue-600' : 'bg-slate-700 hover:bg-slate-600'} transition`}>{children}</button>
 }
- 
+
 function Metric({ title, value, tone = 'neutral', featured = false, glow = false }: { title: string; value: string; tone?: 'neutral' | 'good' | 'warn' | 'risk' | 'danger'; featured?: boolean; glow?: boolean }) {
   const c = tone === 'good' ? 'text-green-400' : tone === 'warn' ? 'text-yellow-300' : tone === 'risk' ? 'text-orange-300' : tone === 'danger' ? 'text-red-300' : 'text-slate-100'
   return (
@@ -1729,7 +1884,7 @@ function Metric({ title, value, tone = 'neutral', featured = false, glow = false
     </div>
   )
 }
- 
+
 function Info({ title, value, className = '', tone = 'neutral', glow = false }: { title: string; value: string; className?: string; tone?: 'neutral' | 'good' | 'warn' | 'risk' | 'danger'; glow?: boolean }) {
   const tc = tone === 'good' ? 'text-green-400' : tone === 'warn' ? 'text-yellow-300' : tone === 'risk' ? 'text-orange-300' : tone === 'danger' ? 'text-red-300' : 'text-slate-100'
   return (
@@ -1742,7 +1897,7 @@ function Info({ title, value, className = '', tone = 'neutral', glow = false }: 
     </div>
   )
 }
- 
+
 function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; valueClass?: string }) {
   return (
     <div className="py-1.5 border-b border-slate-700 last:border-b-0 flex justify-between gap-2 text-sm">
