@@ -325,7 +325,31 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
   const savingsTone: 'good' | 'warn' | 'danger' = savingsRate >= 35 ? 'good' : savingsRate >= 20 ? 'warn' : 'danger'
   const cushionTone: 'good' | 'warn' | 'risk' | 'danger' = remainingTone
   const biggestExpenseTone: 'neutral' | 'good' | 'warn' | 'danger' = top[0] && selectedPeriodTotalNet > 0 && convertFromMonthly(top[0].amount, period) > selectedPeriodTotalNet * 0.5 ? 'danger' : 'neutral'
-  const totalBudgetTone: 'neutral' = 'neutral'
+    const totalBudgetTone: 'neutral' = 'neutral'
+
+  // ── V7.9.2 Budget Resilience ──────────────────────────────────────────────────
+  // Survival floor = fixed bills + committed savings (investing excluded — fully discretionary)
+  const survivalMonthly = byType.fixed + byType.savings
+  const cushionAfterSurvivalMonthly = inc.totalMonthly - survivalMonthly
+  const resilienceNote: string = (() => {
+    if (!hasBudgetData) return 'Add budget categories to see your resilience picture.'
+    if (cushionAfterSurvivalMonthly < 0) {
+      return 'Fixed bills and savings commitments exceed your income at this level. The budget needs adjustment before anything else.'
+    }
+    const survivalPct = inc.totalMonthly > 0 ? (survivalMonthly / inc.totalMonthly) * 100 : 0
+    const variablePct = inc.totalMonthly > 0 ? (byType.variable / inc.totalMonthly) * 100 : 0
+    if (survivalPct > 75) {
+      return 'Fixed bills and savings commitments are taking up most of your income. There is limited room to absorb a slower month.'
+    }
+    if (variablePct > 35) {
+      return 'Flexible spending is your largest adjustment lever. It is the fastest thing to pull back if income tightens.'
+    }
+    if (survivalPct < 40) {
+      return 'Core commitments are well covered. The budget has solid room for flexible spending and savings goals.'
+    }
+    return 'Your survival budget is manageable at this income level. Flexible spending is the main variable to watch.'
+  })()
+
 
   // ── V7.5 Actuals computations ────────────────────────────────────────────────
   // Period-aware variance coloring: small misses should not look dangerous
@@ -1475,7 +1499,34 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                   )}
                 </div>
               </div>
+                        </Card>
+
+            <Card title="Budget Resilience">
+              {!hasBudgetData ? (
+                <p className="text-sm text-slate-400">Add budget categories to see your resilience picture.</p>
+              ) : (
+                <>
+                  <div>
+                    <Row l="Fixed Bills" v={currency(convertFromMonthly(byType.fixed, period))} />
+                    <Row l="Survival Budget (bills + savings)" v={currency(convertFromMonthly(survivalMonthly, period))} />
+                    <Row l="Flexible Cut Potential" v={currency(convertFromMonthly(byType.variable, period))} />
+                    <Row
+                      l="Cushion after Survival Budget"
+                      v={currency(convertFromMonthly(cushionAfterSurvivalMonthly, period))}
+                      valueClass={
+                        cushionAfterSurvivalMonthly < 0
+                          ? 'text-red-400'
+                          : cushionAfterSurvivalMonthly < inc.totalMonthly * 0.1
+                            ? 'text-yellow-300'
+                            : 'text-green-400'
+                      }
+                    />
+                  </div>
+                  <p className="mt-3 text-sm text-slate-300 leading-relaxed">{resilienceNote}</p>
+                </>
+              )}
             </Card>
+
             <Card title="Budget Categories">
               <div className="grid md:grid-cols-4 gap-2">
                 <div ref={autocompleteWrapRef} className="relative">
