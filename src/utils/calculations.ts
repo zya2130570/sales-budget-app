@@ -208,6 +208,9 @@ export interface DashboardStatusInput {
   categories: Category[]
   activeTargets: Target[]
   period: Period
+  // The Budget tab health tier from remainingTierFromPeriodValue.
+  // Used as a ceiling so Dashboard tone can never look healthier than Budget status.
+  budgetHealthTier: 'Healthy' | 'Moderate' | 'Risk' | 'Over Budget' | 'No Data'
 }
 
 export function computeDashboardStatus(input: DashboardStatusInput): DashboardStatus {
@@ -221,6 +224,7 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
     categories,
     activeTargets,
     period,
+    budgetHealthTier,
   } = input
 
   const hasBudget = monthlyBudget > 0
@@ -278,12 +282,12 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
 
   // ── No budget data ─────────────────────────────────────────────────────────
   if (!hasBudget) {
-    return {
+    return applyBudgetHealthCeiling({
       label: 'Getting Started',
       tone: 'warn',
-      explanation: "There's no budget data yet, so it's hard to read your financial picture right now.",
-      context: "Add your regular fixed bills first — that's the foundation everything else builds on.",
-    }
+      explanation: 'There's no budget data yet, so it's hard to read your financial picture right now.',
+      context: 'Add your regular fixed bills first — that's the foundation everything else builds on.',
+    }, budgetHealthTier)
   }
 
   // ── Over budget ────────────────────────────────────────────────────────────
@@ -296,12 +300,12 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
       : isFixedHeavy
         ? `Fixed bills are carrying ${fixedRatio.toFixed(0)}% of income${topFixed ? `, with ${topFixed.name} at the top` : ''}. That leaves very little room to work with.`
         : 'Review the Budget tab and look for anything that can come down, starting with the largest line items.'
-    return {
+    return applyBudgetHealthCeiling({
       label: 'Attention Needed',
       tone: 'danger',
       explanation: `Planned expenses are running ${formatMoney(overBy)}/month over income — the current setup isn't sustainable.`,
       context: lever,
-    }
+    }, budgetHealthTier)
   }
 
   // ── Very Strong Month ──────────────────────────────────────────────────────
@@ -317,13 +321,13 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
   ) {
     const goalNote = totalGoals > 0
       ? `${totalGoals > 1 ? 'All ' + totalGoals + ' goals are' : 'Your goal is'} staying on pace — good position to push savings further.`
-      : "There's still room to put the cushion to work through savings goals."
-    return {
+      : 'There's still room to put the cushion to work through savings goals.'
+    return applyBudgetHealthCeiling({
       label: 'Very Strong Month',
       tone: 'excellent',
       explanation: `Core bills are controlled, savings are healthy at ${savingsRate.toFixed(0)}%, and there's a solid ${cushionPct.toFixed(0)}% cushion after everything.`,
       context: goalNote,
-    }
+    }, budgetHealthTier)
   }
 
   // ── Strong Month ───────────────────────────────────────────────────────────
@@ -337,12 +341,12 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
           : flexTier === 'tight'
             ? `Spending pressure is a bit high — there's not a lot of flexibility if something unexpected comes up.`
             : 'The current setup has good room to continue building.' 
-    return {
+    return applyBudgetHealthCeiling({
       label: 'Strong Month',
       tone: 'good',
       explanation: `There's a ${cushionPct.toFixed(0)}% cushion remaining and a ${savingsRate.toFixed(0)}% savings rate — the budget is in good shape.`,
       context: imperfection,
-    }
+    }, budgetHealthTier)
   }
 
   // ── Flexible Spending Elevated ─────────────────────────────────────────────
@@ -350,13 +354,13 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
   if (resilienceTier === 'strong' && sustainTier === 'low') {
     const fix = topVariable
       ? `Moving part of what's going to ${topVariable.name} into savings would make a noticeable difference.`
-      : "The cushion looks fine right now, but most of it isn't being directed toward goals."
-    return {
+      : 'The cushion looks fine right now, but most of it isn't being directed toward goals.'
+    return applyBudgetHealthCeiling({
       label: 'Flexible Spending Elevated',
       tone: 'warn',
       explanation: `The cushion is ${cushionPct.toFixed(0)}% — comfortable — but the savings rate is only ${savingsRate.toFixed(0)}%, which means flexible spending is using up most of the breathing room.`,
       context: fix,
-    }
+    }, budgetHealthTier)
   }
 
   // ── Tight but Stable ──────────────────────────────────────────────────────
@@ -367,12 +371,12 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
       : behindCount > 0
         ? `${behindCount} goal${behindCount > 1 ? 's are' : ' is'} behind — with a thin cushion it's worth checking if the contribution pace is realistic.`
         : `Fixed bills are ${fixedRatio.toFixed(0)}% of income — not a problem now, but worth keeping an eye on.`
-    return {
+    return applyBudgetHealthCeiling({
       label: 'Tight but Stable',
       tone: 'warn',
       explanation: `The budget is holding, but the cushion is at ${cushionPct.toFixed(0)}% — there's not a lot of room if something comes up ${pl}.`,
       context: fix,
-    }
+    }, budgetHealthTier)
   }
 
   // ── Cushion Shrinking ─────────────────────────────────────────────────────
@@ -383,24 +387,24 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
       : spendingPressure > 80
         ? `Spending is eating ${spendingPressure.toFixed(0)}% of income. Something needs to come down before this becomes a problem.`
         : 'The savings rate is too low for the current cushion level — redirecting some variable spending toward savings would help.'
-    return {
+    return applyBudgetHealthCeiling({
       label: 'Cushion Shrinking',
       tone: 'warn',
       explanation: `Only ${cushionPct.toFixed(0)}% cushion left and the savings rate is just ${savingsRate.toFixed(0)}% — flexible spending is taking up most of what's available.`,
       context: fix,
-    }
+    }, budgetHealthTier)
   }
 
   // ── Rebalancing Recommended ───────────────────────────────────────────────
   // Commission dependency is high but cushion isn't yet at risk-tier.
   // The concern here is income volatility, not immediate cash pressure.
   if (commTier === 'high' && resilienceTier !== 'thin' && resilienceTier !== 'none') {
-    return {
+    return applyBudgetHealthCeiling({
       label: 'Rebalancing Recommended',
       tone: 'risk',
       explanation: `Commission is ${commissionPct.toFixed(0)}% of monthly income right now — the current budget is built on a strong month, which doesn't always hold.`,
-      context: "Run the Scenarios tab for a Slow month and see if the budget still works. If not, there's a gap to plan for.",
-    }
+      context: 'Run the Scenarios tab for a Slow month and see if the budget still works. If not, there's a gap to plan for.',
+    }, budgetHealthTier)
   }
 
   // ── Goal Pressure Ahead ───────────────────────────────────────────────────
@@ -408,13 +412,13 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
   if (behindCount > 0 && resilienceTier !== 'thin' && resilienceTier !== 'none') {
     const paceNote = aheadCount > 0
       ? `${aheadCount} goal${aheadCount > 1 ? 's are' : ' is'} ahead of pace, which helps — but the behind one${behindCount > 1 ? 's need' : ' needs'} attention soon.`
-      : "There's still budget room to catch up — it just needs a contribution logged."
-    return {
+      : 'There's still budget room to catch up — it just needs a contribution logged.'
+    return applyBudgetHealthCeiling({
       label: 'Goal Pressure Ahead',
       tone: 'warn',
       explanation: `${behindCount} savings goal${behindCount > 1 ? 's are' : ' is'} falling behind the expected pace, even though the budget itself still has some room.`,
       context: paceNote,
-    }
+    }, budgetHealthTier)
   }
 
   // ── Spending Pressure High ─────────────────────────────────────────────────
@@ -423,12 +427,12 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
     const fix = topVariable
       ? `${topVariable.name} is the largest flexible item — reducing it would open up the most room without touching fixed bills.`
       : `Fixed bills are ${fixedRatio.toFixed(0)}% of income. If any can be renegotiated, that's where the real flexibility lives.`
-    return {
+    return applyBudgetHealthCeiling({
       label: 'Spending Pressure High',
       tone: 'risk',
       explanation: `Spending commitments are using ${spendingPressure.toFixed(0)}% of income — there's not much flexibility left in the current setup.`,
       context: fix,
-    }
+    }, budgetHealthTier)
   }
 
   // ── Slow Income Cycle ─────────────────────────────────────────────────────
@@ -442,12 +446,12 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
       : topVariable
         ? `Pulling back on ${topVariable.name} would rebuild the cushion without requiring bigger changes.`
         : 'Review the Budget tab and see if any variable line items can come down temporarily.'
-    return {
+    return applyBudgetHealthCeiling({
       label: 'Slow Income Cycle',
       tone: 'risk',
       explanation: `Only ${cushionPct.toFixed(0)}% of income is left after planned expenses.${commNote}`,
       context: fix,
-    }
+    }, budgetHealthTier)
   }
 
   // ── Financially Stable (safe catch-all) ───────────────────────────────────
@@ -457,12 +461,13 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
     : onTrackCount > 0 || aheadCount > 0
       ? 'Savings goals are on pace. The current setup is sustainable at this income level.'
       : 'The budget looks balanced. Adding a savings goal would help put the cushion to work.'
-  return {
+  const stable: DashboardStatus = {
     label: 'Financially Stable',
     tone: 'good',
     explanation: `Income covers all planned expenses with ${cushionPct.toFixed(0)}% remaining — the core bills are pretty controlled right now.`,
     context: stableNote,
   }
+  return applyBudgetHealthCeiling(stable, budgetHealthTier)
 }
 
 // ─── Internal helpers (not exported) ─────────────────────────────────────────
@@ -473,4 +478,54 @@ function formatMoney(n: number): string {
 
 function pLabel(p: Period): string {
   return p === 'weekly' ? 'this week' : p === 'bi-weekly' ? 'this pay period' : p === 'monthly' ? 'this month' : 'this year'
+}
+
+// Tone severity order — lower index = healthier.
+// A Dashboard result may not use a tone that is healthier than what the Budget
+// tab's remainingTierFromPeriodValue reports.  For example: if the budget tier
+// is "Risk", the Dashboard must show at least a risk-level tone.
+const TONE_SEVERITY: DashboardStatusTone[] = ['excellent', 'good', 'warn', 'risk', 'danger']
+
+function budgetHealthFloor(tier: DashboardStatusInput['budgetHealthTier']): DashboardStatusTone {
+  switch (tier) {
+    case 'Healthy':     return 'good'    // ceiling is open — Dashboard can show excellent or good
+    case 'Moderate':    return 'warn'    // Dashboard must be at least warn
+    case 'Risk':        return 'risk'    // Dashboard must be at least risk
+    case 'Over Budget': return 'danger'  // Dashboard must be danger
+    case 'No Data':     return 'warn'    // No budget yet — keep at warn
+  }
+}
+
+function applyBudgetHealthCeiling(
+  result: DashboardStatus,
+  budgetHealthTier: DashboardStatusInput['budgetHealthTier'],
+): DashboardStatus {
+  const floor = budgetHealthFloor(budgetHealthTier)
+  const floorIdx   = TONE_SEVERITY.indexOf(floor)
+  const currentIdx = TONE_SEVERITY.indexOf(result.tone)
+  // If the result's tone is already as severe or more severe, nothing to do.
+  if (currentIdx >= floorIdx) return result
+
+  // The result is healthier than the budget tier allows. Override tone and label.
+  const overrideTone = floor
+
+  // Pick a replacement label that matches the overridden severity without
+  // contradicting the Budget tab's own language.
+  let overrideLabel: string
+  if (overrideTone === 'warn') {
+    overrideLabel = 'Tight but Stable'
+  } else if (overrideTone === 'risk') {
+    overrideLabel = 'Attention Needed'
+  } else {
+    // danger — should already be caught by Over Budget path, but be safe
+    overrideLabel = 'Attention Needed'
+  }
+
+  return {
+    ...result,
+    tone: overrideTone,
+    label: overrideLabel,
+    // Keep the explanation and context from the original result — they still
+    // describe what the numbers show.  Only tone + label change.
+  }
 }
