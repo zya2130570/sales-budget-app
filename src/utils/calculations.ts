@@ -281,7 +281,7 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
     return {
       label: 'Getting Started',
       tone: 'warn',
-      explanation: 'There's no budget data yet, so it's hard to read your financial picture right now.',
+      explanation: "There's no budget data yet, so it's hard to read your financial picture right now.",
       context: 'Add your regular fixed bills first — that's the foundation everything else builds on.',
     }
   }
@@ -317,7 +317,7 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
   ) {
     const goalNote = totalGoals > 0
       ? `${totalGoals > 1 ? 'All ' + totalGoals + ' goals are' : 'Your goal is'} staying on pace — good position to push savings further.`
-      : 'There's still room to put the cushion to work through savings goals.'
+      : "There's still room to put the cushion to work through savings goals."
     return {
       label: 'Very Strong Month',
       tone: 'excellent',
@@ -340,7 +340,7 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
     return {
       label: 'Strong Month',
       tone: 'good',
-      explanation: `There's a ${cushionPct.toFixed(0)}% cushion remaining and a ${savingsRate.toFixed(0)}% savings rate — the budget is in good shape.`,
+      explanation: "There's a ${cushionPct.toFixed(0)}% cushion remaining and a ${savingsRate.toFixed(0)}% savings rate — the budget is in good shape.",
       context: imperfection,
     }
   }
@@ -408,7 +408,7 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
   if (behindCount > 0 && resilienceTier !== 'thin' && resilienceTier !== 'none') {
     const paceNote = aheadCount > 0
       ? `${aheadCount} goal${aheadCount > 1 ? 's are' : ' is'} ahead of pace, which helps — but the behind one${behindCount > 1 ? 's need' : ' needs'} attention soon.`
-      : 'There's still budget room to catch up — it just needs a contribution logged.'
+      : "There's still budget room to catch up — it just needs a contribution logged."
     return {
       label: 'Goal Pressure Ahead',
       tone: 'warn',
