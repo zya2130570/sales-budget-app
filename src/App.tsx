@@ -309,6 +309,22 @@ export default function App() {
   const biggestExpenseTone: 'neutral' | 'good' | 'warn' | 'danger' = top[0] && selectedPeriodTotalNet > 0 && convertFromMonthly(top[0].amount, period) > selectedPeriodTotalNet * 0.5 ? 'danger' : 'neutral'
   const totalBudgetTone: 'neutral' = 'neutral'
 
+  // ── V7.5 Plan vs Actual ─────────────────────────────────────────────────────
+  const monthlyActualTotal = useMemo(
+    () => categories.reduce((s, c) => s + (c.actual ?? 0), 0),
+    [categories]
+  )
+  const monthlyActualVariance = monthlyActualTotal - monthlyBudget
+  const actualOverspendPct = useMemo(() => {
+    if (inc.totalMonthly <= 0 || monthlyActualTotal === 0) return 0
+    const overspent = categories.reduce((s, c) => {
+      const actual = c.actual ?? 0
+      return actual > c.amount ? s + (actual - c.amount) : s
+    }, 0)
+    return (overspent / inc.totalMonthly) * 100
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categories, inc.totalMonthly, monthlyActualTotal])
+
   // ── V7.3 Dashboard Status Engine ───────────────────────────────────────────
   const activeTargets = targets.filter(t => !t.completed && (t.goalAmount <= 0 || t.currentSaved < t.goalAmount))
   const dashboardStatus: DashboardStatus = useMemo(() => computeDashboardStatus({
@@ -322,8 +338,9 @@ export default function App() {
     activeTargets,
     period,
     budgetHealthTier: !hasBudgetData ? 'No Data' : selectedPeriodRemaining < 0 ? 'Over Budget' : remainingTier.label,
+    actualOverspendPct,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [inc.totalMonthly, monthlyBudget, monthlyLeft, savingsRate, fixedRatio, inc.commissionPct, categories, activeTargets, period, hasBudgetData, selectedPeriodRemaining, remainingTier.label])
+  }), [inc.totalMonthly, monthlyBudget, monthlyLeft, savingsRate, fixedRatio, inc.commissionPct, categories, activeTargets, period, hasBudgetData, selectedPeriodRemaining, remainingTier.label, actualOverspendPct])
 
   const createSnapshot = (): BudgetSnapshot => ({ categories: categories.map((c) => ({ ...c })), form: { ...form }, editId })
   const pushBudgetHistory = () => { setBudgetHistory((prev) => [...prev.slice(-19), createSnapshot()]); setBudgetRedo([]) }
@@ -1263,6 +1280,26 @@ export default function App() {
                 <Metric title="Remaining amount" value={currency(selectedPeriodRemaining)} tone={remainingTone} glow={selectedPeriodRemaining < 0} />
                 <Metric title="Budget status" value={statusLabel} tone={statusTone} glow={selectedPeriodRemaining < 0} />
               </div>
+              {monthlyActualTotal > 0 && (
+                <div className="mt-4 pt-3 border-t border-slate-700/60">
+                  <div className="text-xs text-slate-500 mb-2 font-semibold uppercase tracking-wide">Plan vs Actual</div>
+                  <div className="grid md:grid-cols-3 gap-3">
+                    <Metric
+                      title={`Planned (${labelPeriod(period)})`}
+                      value={currency(convertFromMonthly(monthlyBudget, period))}
+                    />
+                    <Metric
+                      title={`Actual (${labelPeriod(period)})`}
+                      value={currency(convertFromMonthly(monthlyActualTotal, period))}
+                    />
+                    <Metric
+                      title="Variance (Actual − Planned)"
+                      value={(monthlyActualVariance >= 0 ? '+' : '') + currency(convertFromMonthly(monthlyActualVariance, period))}
+                      tone={monthlyActualVariance > 0.005 ? 'danger' : monthlyActualVariance < -0.005 ? 'good' : 'neutral'}
+                    />
+                  </div>
+                </div>
+              )}
             </Card>
             <Card title="Budget Categories">
               <div className="grid md:grid-cols-4 gap-2">
@@ -1367,6 +1404,8 @@ export default function App() {
                     {period === 'bi-weekly' && <><th>Bi-weekly</th><th>Monthly</th></>}
                     {period === 'monthly' && <th>Monthly</th>}
                     {period === 'yearly' && <><th>Monthly</th><th>Yearly</th></>}
+                    <th className="text-slate-300">{labelPeriod(period)} Actual</th>
+                    <th className="text-slate-300">Variance</th>
                     <th />
                   </tr>
                 </thead>
@@ -1379,6 +1418,39 @@ export default function App() {
                       {period === 'bi-weekly' && <><td>{currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td><td>{currency(c.amount)}</td></>}
                       {period === 'monthly' && <td>{currency(c.amount)}</td>}
                       {period === 'yearly' && <><td>{currency(c.amount)}</td><td>{currency(convertFromMonthly(c.amount, 'yearly'))}</td></>}
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={c.actual !== undefined ? String(Math.round(convertFromMonthly(c.actual, period) * 100) / 100) : ''}
+                          onChange={e => {
+                            const raw = e.target.value
+                            setCategories(prev => prev.map(x => x.id === c.id
+                              ? { ...x, actual: raw === '' ? undefined : convertToMonthly(Math.max(0, Number(raw) || 0), period) }
+                              : x
+                            ))
+                          }}
+                          placeholder="—"
+                          className="w-24 p-1 text-sm rounded bg-slate-700 border border-slate-600 text-slate-100"
+                        />
+                      </td>
+                      <td className={
+                        c.actual === undefined ? 'text-slate-500 text-sm' :
+                        (convertFromMonthly(c.actual, period) - convertFromMonthly(c.amount, period)) > 0.005
+                          ? 'text-red-400 text-sm font-medium' :
+                        (convertFromMonthly(c.actual, period) - convertFromMonthly(c.amount, period)) < -0.005
+                          ? 'text-green-400 text-sm font-medium' :
+                          'text-slate-300 text-sm'
+                      }>
+                        {c.actual !== undefined
+                          ? (() => {
+                              const v = convertFromMonthly(c.actual, period) - convertFromMonthly(c.amount, period)
+                              return (v > 0 ? '+' : '') + currency(v)
+                            })()
+                          : '—'
+                        }
+                      </td>
                       <td className="space-x-2">
                         <button className="text-blue-300" onClick={() => { setForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type }); setEditId(c.id); budgetNameRef.current?.focus() }}>Edit</button>
                         <button className="text-red-300" onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
