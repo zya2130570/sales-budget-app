@@ -1337,54 +1337,75 @@ export default function App() {
                 <Metric title="Remaining" value={currency(selectedPeriodRemaining)} tone={remainingTone} glow={selectedPeriodRemaining < 0} />
                 <Metric title="Budget status" value={statusLabel} tone={statusTone} glow={selectedPeriodRemaining < 0} />
               </div>
-              {hasAnyActual && (
-                <div className="mt-3 pt-3 border-t border-slate-700/60">
-                  <div className="grid md:grid-cols-3 gap-3">
-                    <Metric title="Total actual" value={currency(actualPeriodTotal)} />
-                    <Metric
-                      title="Total variance"
-                      value={
-                        Math.abs(variancePeriodTotal) < 0.005
+              {/* ── Plan vs Actual summary — always visible ── */}
+              <div className="mt-3 pt-3 border-t border-slate-700/60">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Plan vs Actual</span>
+                  {hasAnyActual && (
+                    <button
+                      className="rounded px-2 py-0.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
+                      onClick={() => setActuals({})}
+                    >
+                      Clear All Actuals
+                    </button>
+                  )}
+                </div>
+                <div className="grid md:grid-cols-3 gap-3">
+                  <Metric
+                    title="Total actual"
+                    value={hasAnyActual ? currency(actualPeriodTotal) : '—'}
+                  />
+                  <Metric
+                    title="Total variance"
+                    value={
+                      !hasAnyActual
+                        ? '—'
+                        : Math.abs(variancePeriodTotal) < 0.005
                           ? 'On plan'
                           : variancePeriodTotal < 0
                             ? `Under by ${currency(Math.abs(variancePeriodTotal))}`
                             : `Over by ${currency(variancePeriodTotal)}`
-                      }
-                      tone={(() => {
-                        const t = varianceTone(variancePeriodTotal, period)
-                        return t === 'danger' ? 'danger' : t === 'warn' ? 'warn' : t === 'good' ? 'good' : 'neutral'
-                      })()}
-                    />
-                    <Metric
-                      title="Overspend %"
-                      value={actualOverspendPct > 0 ? `${actualOverspendPct.toFixed(1)}% over plan` : 'Under / on plan'}
-                      tone={actualOverspendPct > 20 ? 'danger' : actualOverspendPct > 5 ? 'warn' : 'good'}
-                    />
-                  </div>
-                  <p className="mt-2 text-xs text-slate-500">Actuals are manual entries for now. Transactions and CSV import come later.</p>
-                  {/* ── V7.6 Plan vs Actual pressure interpretation ── */}
-                  <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-1">
-                    <p className="text-sm text-slate-300">
-                      {!hasAnyActual
-                        ? 'Enter actuals to see spending pressure.'
-                        : actualOverspendPct >= 20
-                          ? 'Actual spending is significantly over plan.'
-                          : actualOverspendPct >= 5
-                            ? 'Actual spending is running over plan.'
-                            : variancePeriodTotal > 0
-                              ? 'Actual spending is close to plan.'
-                              : 'Actual spending is currently under plan.'}
-                    </p>
-                    <p className="text-xs text-slate-400">
-                      {!hasAnyActual
-                        ? null
-                        : biggestOverPlanCategory
-                          ? `Biggest over-plan category: ${biggestOverPlanCategory.name} (+${currency(biggestOverPlanCategory.overBy)})`
-                          : 'No category is currently over plan.'}
-                    </p>
-                  </div>
+                    }
+                    tone={!hasAnyActual ? 'neutral' : (() => {
+                      const t = varianceTone(variancePeriodTotal, period)
+                      return t === 'danger' ? 'danger' : t === 'warn' ? 'warn' : t === 'good' ? 'good' : 'neutral'
+                    })()}
+                  />
+                  <Metric
+                    title="Overspend %"
+                    value={
+                      !hasAnyActual
+                        ? '—'
+                        : actualOverspendPct > 0
+                          ? `${actualOverspendPct.toFixed(1)}% over plan`
+                          : 'Under / on plan'
+                    }
+                    tone={!hasAnyActual ? 'neutral' : actualOverspendPct > 20 ? 'danger' : actualOverspendPct > 5 ? 'warn' : 'good'}
+                  />
                 </div>
-              )}
+                <p className="mt-2 text-xs text-slate-500">Actuals are manual entries for now. Transactions and CSV import come later.</p>
+                {/* Interpretation */}
+                <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-1">
+                  <p className="text-sm text-slate-300">
+                    {!hasAnyActual
+                      ? 'Enter actuals to see spending pressure.'
+                      : actualOverspendPct >= 20
+                        ? 'Actual spending is significantly over plan.'
+                        : actualOverspendPct >= 5
+                          ? 'Actual spending is running over plan.'
+                          : variancePeriodTotal > 0
+                            ? 'Actual spending is close to plan.'
+                            : 'Actual spending is currently under plan.'}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    {!hasAnyActual
+                      ? 'Enter actuals to compare actual spending against the plan.'
+                      : biggestOverPlanCategory
+                        ? `Biggest over-plan category: ${biggestOverPlanCategory.name} (+${currency(biggestOverPlanCategory.overBy)})`
+                        : 'No category is currently over plan.'}
+                  </p>
+                </div>
+              </div>
             </Card>
             <Card title="Budget Categories">
               <div className="grid md:grid-cols-4 gap-2">
@@ -1535,33 +1556,44 @@ export default function App() {
                         {/* Monthly reference column for weekly/bi-weekly/yearly */}
                         {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
                         {period === 'yearly'    && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
-                        {/* Actual input */}
+                        {/* Actual input + row clear */}
                         <td className="py-1 pr-2">
-                          <input
-                            type="number"
-                            min={0}
-                            step={25}
-                            className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
-                            placeholder="—"
-                            value={rawActual ?? ''}
-                            onChange={e => {
-                              const raw = e.target.value
-                              if (raw === '' || raw === '0') {
-                                setActuals(prev => ({ ...prev, [c.id]: '' }))
-                              } else {
-                                setActuals(prev => ({ ...prev, [c.id]: raw }))
-                              }
-                            }}
-                            onKeyDown={e => {
-                              if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                                e.preventDefault()
-                                const cur = Number(rawActual) || 0
-                                const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
-                                setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
-                              }
-                            }}
-                            onFocus={e => { if (e.target.value !== '') e.target.select() }}
-                          />
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              min={0}
+                              step={25}
+                              className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
+                              placeholder="—"
+                              value={rawActual ?? ''}
+                              onChange={e => {
+                                const raw = e.target.value
+                                if (raw === '' || raw === '0') {
+                                  setActuals(prev => ({ ...prev, [c.id]: '' }))
+                                } else {
+                                  setActuals(prev => ({ ...prev, [c.id]: raw }))
+                                }
+                              }}
+                              onKeyDown={e => {
+                                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                  e.preventDefault()
+                                  const cur = Number(rawActual) || 0
+                                  const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
+                                  setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
+                                }
+                              }}
+                              onFocus={e => { if (e.target.value !== '') e.target.select() }}
+                            />
+                            {hasActual && (
+                              <button
+                                className="rounded px-1.5 py-0.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-700 hover:bg-slate-600 transition-colors"
+                                title="Clear actual"
+                                onClick={() => setActuals(prev => ({ ...prev, [c.id]: '' }))}
+                              >
+                                ×
+                              </button>
+                            )}
+                          </div>
                         </td>
                         {/* Variance */}
                         <td className={`py-1.5 pr-2 font-medium ${varClass}`}>
