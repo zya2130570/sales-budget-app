@@ -156,6 +156,10 @@ export default function App() {
   const [highlightedCategoryId, setHighlightedCategoryId] = useState<string | null>(null)
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Highlighted budget row from Budget Pressure Focus card
+  const [pressureFocusCategoryId, setPressureFocusCategoryId] = useState<string | null>(null)
+  const pressureFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const showToast = (message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     setToast({ message, visible: true })
@@ -348,9 +352,9 @@ export default function App() {
     : 0
 
   // Biggest over-plan category: category with the largest positive variance (actual > planned)
-  const biggestOverPlanCategory: { name: string; overBy: number } | null = (() => {
+  const biggestOverPlanCategory: { id: string; name: string; overBy: number } | null = (() => {
     if (!hasAnyActual) return null
-    let best: { name: string; overBy: number } | null = null
+    let best: { id: string; name: string; overBy: number } | null = null
     for (const c of categories) {
       const raw = actuals[c.id]
       if (raw === '' || raw === undefined) continue
@@ -358,7 +362,7 @@ export default function App() {
       const actual = Number(raw) || 0
       const overBy = actual - planned
       if (overBy > 0.005 && (best === null || overBy > best.overBy)) {
-        best = { name: c.name, overBy }
+        best = { id: c.id, name: c.name, overBy }
       }
     }
     return best
@@ -1344,7 +1348,7 @@ export default function App() {
                   {hasAnyActual && (
                     <button
                       className="rounded px-2 py-0.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
-                      onClick={() => setActuals({})}
+                      onClick={() => { setActuals({}); setPressureFocusCategoryId(null) }}
                     >
                       Clear All Actuals
                     </button>
@@ -1383,27 +1387,43 @@ export default function App() {
                     tone={!hasAnyActual ? 'neutral' : actualOverspendPct > 20 ? 'danger' : actualOverspendPct > 5 ? 'warn' : 'good'}
                   />
                 </div>
-                <p className="mt-2 text-xs text-slate-500">Actuals are manual entries for now. Transactions and CSV import come later.</p>
-                {/* Interpretation */}
-                <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-1">
-                  <p className="text-sm text-slate-300">
-                    {!hasAnyActual
-                      ? 'Enter actuals to see spending pressure.'
-                      : actualOverspendPct >= 20
-                        ? 'Actual spending is significantly over plan.'
-                        : actualOverspendPct >= 5
-                          ? 'Actual spending is running over plan.'
-                          : variancePeriodTotal > 0
-                            ? 'Actual spending is close to plan.'
-                            : 'Actual spending is currently under plan.'}
-                  </p>
-                  <p className="text-xs text-slate-400">
-                    {!hasAnyActual
-                      ? 'Enter actuals to compare actual spending against the plan.'
-                      : biggestOverPlanCategory
-                        ? `Biggest over-plan category: ${biggestOverPlanCategory.name} (+${currency(biggestOverPlanCategory.overBy)})`
-                        : 'No category is currently over plan.'}
-                  </p>
+                <p className="mt-2 text-xs text-slate-500">Actuals are manual entries. Transactions and CSV import come later.</p>
+
+                {/* ── V7.7 Pressure interpretation + focus card ── */}
+                <div className="mt-3 pt-3 border-t border-slate-700/50">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">What should I look at first?</p>
+                  {!hasAnyActual ? (
+                    <p className="text-sm text-slate-400">Enter actuals to see what needs attention first.</p>
+                  ) : biggestOverPlanCategory ? (
+                    <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-900/10 px-3 py-2.5">
+                      <div>
+                        <p className="text-sm text-slate-200">
+                          Start with <span className="font-semibold text-amber-300">{biggestOverPlanCategory.name}</span> — it is over plan by <span className="font-semibold text-amber-300">{currency(biggestOverPlanCategory.overBy)}</span>.
+                        </p>
+                        <p className="text-xs text-slate-400 mt-0.5">
+                          {actualOverspendPct >= 20
+                            ? 'Spending is significantly over plan overall.'
+                            : actualOverspendPct >= 5
+                              ? 'Spending is running over plan this period.'
+                              : 'Most categories are close to plan.'}
+                        </p>
+                      </div>
+                      <button
+                        className="shrink-0 rounded px-2.5 py-1.5 text-xs font-medium bg-amber-700/60 hover:bg-amber-700/80 text-amber-100 transition-colors"
+                        onClick={() => {
+                          if (pressureFocusTimerRef.current) clearTimeout(pressureFocusTimerRef.current)
+                          setPressureFocusCategoryId(biggestOverPlanCategory.id)
+                          pressureFocusTimerRef.current = setTimeout(() => setPressureFocusCategoryId(null), 2500)
+                        }}
+                      >
+                        Review this category
+                      </button>
+                    </div>
+                  ) : variancePeriodTotal > 0 ? (
+                    <p className="text-sm text-slate-400">Actuals are close to plan. No major pressure area yet.</p>
+                  ) : (
+                    <p className="text-sm text-slate-400">Actuals are currently under plan. Keep tracking before making changes.</p>
+                  )}
                 </div>
               </div>
             </Card>
@@ -1523,10 +1543,16 @@ export default function App() {
                     {period === 'yearly'    && <th className="pb-1.5 pr-2">Yearly Planned</th>}
                     {(period === 'weekly' || period === 'bi-weekly') && <th className="pb-1.5 pr-2">Monthly</th>}
                     {period === 'yearly'    && <th className="pb-1.5 pr-2">Monthly</th>}
-                    {period === 'weekly'    && <th className="pb-1.5 pr-2">Weekly Actual</th>}
-                    {period === 'bi-weekly' && <th className="pb-1.5 pr-2">Bi-weekly Actual</th>}
-                    {period === 'monthly'   && <th className="pb-1.5 pr-2">Actual</th>}
-                    {period === 'yearly'    && <th className="pb-1.5 pr-2">Yearly Actual</th>}
+                    <th className="pb-1.5 pr-2">
+                      <span className="inline-flex items-center gap-2">
+                        <span>
+                          {period === 'weekly' && 'Weekly Actual'}
+                          {period === 'bi-weekly' && 'Bi-weekly Actual'}
+                          {period === 'monthly' && 'Actual'}
+                          {period === 'yearly' && 'Yearly Actual'}
+                        </span>
+                      </span>
+                    </th>
                     <th className="pb-1.5 pr-2">Variance</th>
                     <th className="pb-1.5" />
                   </tr>
@@ -1545,7 +1571,7 @@ export default function App() {
                       vTone === 'neutral' ? 'text-slate-300' :
                       vTone === 'warn' ? 'text-yellow-300' : 'text-red-400'
                     return (
-                      <tr key={c.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedCategoryId === c.id ? 'bg-blue-600/20' : ''}`}>
+                      <tr key={c.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedCategoryId === c.id ? 'bg-blue-600/20' : pressureFocusCategoryId === c.id ? 'bg-amber-500/15' : ''}`}>
                         <td className="py-1.5 pr-2">{c.name}</td>
                         <td className="py-1.5 pr-2 text-slate-400 text-xs">{c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}</td>
                         {/* Primary period planned */}
@@ -1556,7 +1582,7 @@ export default function App() {
                         {/* Monthly reference column for weekly/bi-weekly/yearly */}
                         {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
                         {period === 'yearly'    && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
-                        {/* Actual input + row clear */}
+                        {/* Actual input + per-row Clear */}
                         <td className="py-1 pr-2">
                           <div className="flex items-center gap-1">
                             <input
