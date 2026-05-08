@@ -282,7 +282,7 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
       label: 'Getting Started',
       tone: 'warn',
       explanation: "There's no budget data yet, so it's hard to read your financial picture right now.",
-      context: 'Add your regular fixed bills first — that's the foundation everything else builds on.',
+      context: "Add your regular fixed bills first — that's the foundation everything else builds on.",
     }
   }
 
@@ -340,7 +340,7 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
     return {
       label: 'Strong Month',
       tone: 'good',
-      explanation: "There's a ${cushionPct.toFixed(0)}% cushion remaining and a ${savingsRate.toFixed(0)}% savings rate — the budget is in good shape.",
+      explanation: 'There's a ${cushionPct.toFixed(0)}% cushion remaining and a ${savingsRate.toFixed(0)}% savings rate — the budget is in good shape.',
       context: imperfection,
     }
   }
@@ -350,7 +350,7 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
   if (resilienceTier === 'strong' && sustainTier === 'low') {
     const fix = topVariable
       ? `Moving part of what's going to ${topVariable.name} into savings would make a noticeable difference.`
-      : 'The cushion looks fine right now, but most of it isn't being directed toward goals.'
+      : "The cushion looks fine right now, but most of it isn't being directed toward goals."
     return {
       label: 'Flexible Spending Elevated',
       tone: 'warn',
@@ -399,7 +399,7 @@ export function computeDashboardStatus(input: DashboardStatusInput): DashboardSt
       label: 'Rebalancing Recommended',
       tone: 'risk',
       explanation: `Commission is ${commissionPct.toFixed(0)}% of monthly income right now — the current budget is built on a strong month, which doesn't always hold.`,
-      context: 'Run the Scenarios tab for a Slow month and see if the budget still works. If not, there's a gap to plan for.',
+      context: "Run the Scenarios tab for a Slow month and see if the budget still works. If not, there's a gap to plan for.",
     }
   }
 
