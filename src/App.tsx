@@ -86,6 +86,38 @@ const tabTips: Record<Tab, string> = {
   Targets:      'Set savings goals, deadlines, and track what you actually save. Use goal cards to log contributions and monitor progress.',
 }
 
+// ── V8.4 Period date-range helper ────────────────────────────────────────────
+// Returns the [start, end] date strings (YYYY-MM-DD) for the current calendar
+// window of the selected period. Used to filter transactions into actuals.
+function getPeriodDateRange(period: Period): { start: string; end: string } {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const fmt = (d: Date) => d.toISOString().slice(0, 10)
+  if (period === 'monthly') {
+    return {
+      start: fmt(new Date(today.getFullYear(), today.getMonth(), 1)),
+      end:   fmt(new Date(today.getFullYear(), today.getMonth() + 1, 0)),
+    }
+  }
+  if (period === 'yearly') {
+    return {
+      start: fmt(new Date(today.getFullYear(), 0, 1)),
+      end:   fmt(new Date(today.getFullYear(), 11, 31)),
+    }
+  }
+  if (period === 'weekly') {
+    const sun = new Date(today)
+    sun.setDate(today.getDate() - today.getDay())
+    const sat = new Date(sun)
+    sat.setDate(sun.getDate() + 6)
+    return { start: fmt(sun), end: fmt(sat) }
+  }
+  // bi-weekly: trailing 14-day window ending today
+  const start = new Date(today)
+  start.setDate(today.getDate() - 13)
+  return { start: fmt(start), end: fmt(today) }
+}
+
 export default function App() {
   const incomeRef = useRef<HTMLInputElement>(null)
   const budgetNameRef = useRef<HTMLInputElement>(null)
@@ -187,8 +219,8 @@ export default function App() {
   const actualInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   // V7.7.1: Parallel undo/redo stacks for actuals (mirrors budget history timing)
-  const [, setActualsHistory] = useState<Array<Record<string, string>>>([])
-const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
+  const [actualsHistory, setActualsHistory] = useState<Array<Record<string, string>>>([])
+  const [actualsRedo, setActualsRedo] = useState<Array<Record<string, string>>>([])
 
   const showToast = (message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
@@ -450,15 +482,44 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
   // Planned total for the selected period (sum of all categories)
   const plannedPeriodTotal = convertFromMonthly(monthlyBudget, period)
 
-  // Actual total: sum of entered actuals for the selected period; blank = 0 for totals
+  // ── V8.4 Transaction-driven actuals ──────────────────────────────────────────
+  // Sum categorized transaction amounts within the current period window.
+  // Only expense/transfer/credit-card-payment transactions count toward spending.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const txnActuals = useMemo(() => {
+    const range = getPeriodDateRange(period)
+    const result: Record<string, number> = {}
+    for (const tx of transactions) {
+      if (!tx.categoryId) continue
+      if (tx.date < range.start || tx.date > range.end) continue
+      result[tx.categoryId] = (result[tx.categoryId] ?? 0) + tx.amount
+    }
+    return result
+  }, [transactions, period])
+
+  // Effective actual for one category = transaction total + manual adjustment.
+  // If no transactions and no manual entry: null (nothing to show).
+  // When no transactions exist, manual entry is the full actual (backward-compat).
+  const effectiveCatActual = (catId: string): {
+    total: number; txnAmt: number; manualAmt: number; hasTxn: boolean; hasManual: boolean
+  } | null => {
+    const txnAmt    = txnActuals[catId] ?? 0
+    const manualStr = actuals[catId]
+    const hasManual = manualStr !== '' && manualStr !== undefined
+    const manualAmt = hasManual ? (Number(manualStr) || 0) : 0
+    const hasTxn    = txnAmt > 0
+    if (!hasTxn && !hasManual) return null
+    return { total: txnAmt + manualAmt, txnAmt, manualAmt, hasTxn, hasManual }
+  }
+
+  // Actual total for the selected period (transactions + manual adjustments)
   const actualPeriodTotal = categories.reduce((sum, c) => {
-    const raw = actuals[c.id]
-    if (raw === '' || raw === undefined) return sum
-    return sum + (Number(raw) || 0)
+    const eff = effectiveCatActual(c.id)
+    return eff !== null ? sum + eff.total : sum
   }, 0)
 
-  // Whether any actual has been entered at all
-  const hasAnyActual = categories.some(c => actuals[c.id] !== '' && actuals[c.id] !== undefined)
+  // Any actuals present = transactions OR manual entries
+  const hasAnyActual = categories.some(c => effectiveCatActual(c.id) !== null)
 
   // Variance total (actual - planned); positive = overspend
   const variancePeriodTotal = hasAnyActual ? actualPeriodTotal - plannedPeriodTotal : 0
@@ -468,16 +529,15 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
     ? Math.max(0, (variancePeriodTotal / plannedPeriodTotal) * 100)
     : 0
 
-  // Biggest over-plan category: category with the largest positive variance (actual > planned)
+  // Biggest over-plan category (for pressure card)
   const biggestOverPlanCategory: { id: string; name: string; overBy: number } | null = (() => {
     if (!hasAnyActual) return null
     let best: { id: string; name: string; overBy: number } | null = null
     for (const c of categories) {
-      const raw = actuals[c.id]
-      if (raw === '' || raw === undefined) continue
+      const eff = effectiveCatActual(c.id)
+      if (!eff) continue
       const planned = convertFromMonthly(c.amount, period)
-      const actual = Number(raw) || 0
-      const overBy = actual - planned
+      const overBy  = eff.total - planned
       if (overBy > 0.005 && (best === null || overBy > best.overBy)) {
         best = { id: c.id, name: c.name, overBy }
       }
@@ -1747,7 +1807,16 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                     tone={!hasAnyActual ? 'neutral' : actualOverspendPct > 20 ? 'danger' : actualOverspendPct > 5 ? 'warn' : 'good'}
                   />
                 </div>
-                <p className="mt-2 text-xs text-slate-500">Actuals are manual entries. Transactions and CSV import come later.</p>
+                <p className="mt-2 text-xs text-slate-500">
+                  {(() => {
+                    const r = getPeriodDateRange(period)
+                    const hasTxnActuals = Object.keys(txnActuals).length > 0
+                    if (hasTxnActuals) {
+                      return `Actuals include categorized transactions from ${r.start} to ${r.end}. Use the +adj field to add manual adjustments.`
+                    }
+                    return `No categorized transactions found for ${r.start} to ${r.end}. Enter actuals manually or assign budget categories to transactions.`
+                  })()}
+                </p>
 
                 {/* ── V7.7 Budget Pressure Focus card ── */}
                 <div className="mt-3 pt-3 border-t border-slate-700/50">
@@ -1935,18 +2004,22 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                 </thead>
                 <tbody>
                   {top.map(c => {
-                    const planned = convertFromMonthly(c.amount, period)
-                    const rawActual = actuals[c.id]
-                    const hasActual = rawActual !== '' && rawActual !== undefined
-                    const actualVal = hasActual ? (Number(rawActual) || 0) : null
-                    const variance = actualVal !== null ? actualVal - planned : null
-                    const vTone = variance !== null ? varianceTone(variance, period) : 'neutral'
-                    const varClass =
+                    const planned     = convertFromMonthly(c.amount, period)
+                    const eff         = effectiveCatActual(c.id)
+                    const rawActual   = actuals[c.id]
+                    const hasTxn      = (txnActuals[c.id] ?? 0) > 0
+                    const txnAmt      = txnActuals[c.id] ?? 0
+                    const hasManual   = rawActual !== '' && rawActual !== undefined
+                    const hasActual   = eff !== null
+                    const actualVal   = eff !== null ? eff.total : null
+                    const variance    = actualVal !== null ? actualVal - planned : null
+                    const vTone       = variance !== null ? varianceTone(variance, period) : 'neutral'
+                    const varClass    =
                       variance === null ? 'text-slate-500' :
                       vTone === 'good' ? 'text-green-400' :
                       vTone === 'neutral' ? 'text-slate-300' :
                       vTone === 'warn' ? 'text-yellow-300' : 'text-red-400'
-                    const isPressure = pressureFocusCategoryId === c.id
+                    const isPressure  = pressureFocusCategoryId === c.id
                     return (
                       <tr
                         key={c.id}
@@ -1962,65 +2035,86 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                         <td className="py-1.5 pr-2 text-slate-400 text-xs">
                           {c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}
                         </td>
-                        {/* Primary period planned */}
                         {period === 'weekly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'weekly'))}</td>}
                         {period === 'bi-weekly' && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td>}
                         {period === 'monthly'   && <td className="py-1.5 pr-2">{currency(c.amount)}</td>}
                         {period === 'yearly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'yearly'))}</td>}
-                        {/* Monthly reference column */}
                         {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
                         {period === 'yearly' && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
-                        {/* Actual input + per-row Clear */}
+                        {/* Actual cell: txn-driven breakdown or plain manual entry */}
                         <td className="py-1 pr-2">
-                          <div className="flex items-center gap-1">
-                            <input
-                              ref={el => { actualInputRefs.current[c.id] = el }}
-                              type="number"
-                              inputMode="decimal"
-                              min={0}
-                              step={25}
-                              className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
-                              placeholder="—"
-                              value={rawActual ?? ''}
-                              onFocus={e => { if (e.target.value !== '') e.target.select() }}
-                              onChange={e => {
-                                const raw = e.target.value
-                                // Strip any non-numeric characters except decimal point and minus
-                                const cleaned = raw.replace(/[^0-9.]/g, '')
-                                if (cleaned === '' || Number(cleaned) === 0) {
-                                  setActuals(prev => ({ ...prev, [c.id]: '' }))
-                                } else {
-                                  setActuals(prev => ({ ...prev, [c.id]: cleaned }))
-                                }
-                              }}
-                              onBlur={() => {
-                                // Snapshot actuals into undo history on blur (debounced by field exit)
-                                pushActualsHistory({ ...actuals })
-                              }}
-                              onKeyDown={e => {
-                                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                                  e.preventDefault()
-                                  const cur = Number(rawActual) || 0
-                                  const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
-                                  setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
-                                }
-                              }}
-                            />
-                            {hasActual && (
-                              <button
-                                className="rounded px-1.5 py-0.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-700 hover:bg-slate-600 transition-colors"
-                                title="Clear actual"
-                                onClick={() => {
-                                  pushActualsHistory({ ...actuals })
-                                  setActuals(prev => ({ ...prev, [c.id]: '' }))
+                          {hasTxn ? (
+                            <div className="space-y-0.5 text-xs min-w-[7rem]">
+                              <div className="flex items-center gap-1.5 text-slate-400">
+                                <span className="w-5 shrink-0">Txn</span>
+                                <span className="font-medium text-slate-300">{currency(txnAmt)}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-5 shrink-0 text-slate-600">+adj</span>
+                                <input
+                                  ref={el => { actualInputRefs.current[c.id] = el }}
+                                  type="number" inputMode="decimal" min={0} step={25}
+                                  className="w-16 px-1 py-0.5 rounded bg-slate-700 border border-slate-600 text-slate-100 text-xs focus:border-blue-500 focus:outline-none"
+                                  placeholder="0"
+                                  value={rawActual ?? ''}
+                                  onFocus={e => { if (e.target.value !== '') e.target.select() }}
+                                  onChange={e => {
+                                    const cleaned = e.target.value.replace(/[^0-9.]/g, '')
+                                    setActuals(prev => ({ ...prev, [c.id]: cleaned === '' || Number(cleaned) === 0 ? '' : cleaned }))
+                                  }}
+                                  onBlur={() => { pushActualsHistory({ ...actuals }) }}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                      e.preventDefault()
+                                      const cur = Number(rawActual) || 0
+                                      const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
+                                      setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
+                                    }
+                                  }}
+                                />
+                                {hasManual && (
+                                  <button
+                                    className="rounded px-1 py-0.5 text-slate-400 hover:text-slate-200 bg-slate-700 hover:bg-slate-600 transition-colors text-xs"
+                                    title="Clear adjustment"
+                                    onClick={() => { pushActualsHistory({ ...actuals }); setActuals(prev => ({ ...prev, [c.id]: '' })) }}
+                                  >×</button>
+                                )}
+                              </div>
+                              {eff && <div className="font-semibold text-slate-200 pl-6">{currency(eff.total)}</div>}
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <input
+                                ref={el => { actualInputRefs.current[c.id] = el }}
+                                type="number" inputMode="decimal" min={0} step={25}
+                                className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
+                                placeholder="—"
+                                value={rawActual ?? ''}
+                                onFocus={e => { if (e.target.value !== '') e.target.select() }}
+                                onChange={e => {
+                                  const cleaned = e.target.value.replace(/[^0-9.]/g, '')
+                                  setActuals(prev => ({ ...prev, [c.id]: cleaned === '' || Number(cleaned) === 0 ? '' : cleaned }))
                                 }}
-                              >
-                                ×
-                              </button>
-                            )}
-                          </div>
+                                onBlur={() => { pushActualsHistory({ ...actuals }) }}
+                                onKeyDown={e => {
+                                  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                    e.preventDefault()
+                                    const cur = Number(rawActual) || 0
+                                    const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
+                                    setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
+                                  }
+                                }}
+                              />
+                              {hasActual && (
+                                <button
+                                  className="rounded px-1.5 py-0.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-700 hover:bg-slate-600 transition-colors"
+                                  title="Clear actual"
+                                  onClick={() => { pushActualsHistory({ ...actuals }); setActuals(prev => ({ ...prev, [c.id]: '' })) }}
+                                >×</button>
+                              )}
+                            </div>
+                          )}
                         </td>
-                        {/* Variance */}
                         <td className={`py-1.5 pr-2 font-medium ${varClass}`}>
                           {variance === null
                             ? '—'
@@ -2272,7 +2366,17 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                         const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
                         setTxnForm(v => ({ ...v, amount: next === 0 ? '' : String(next) }))
                       }
-                      if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) txnMerchantRef.current?.focus(); else txnTypeRef.current?.focus() }
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (e.shiftKey) {
+                          txnMerchantRef.current?.focus()
+                        } else if (txnForm.accountId && txnForm.merchant.trim() && parseFloat(txnForm.amount) > 0) {
+                          // All required fields filled — log the transaction directly
+                          createOrSaveTxn()
+                        } else {
+                          txnTypeRef.current?.focus()
+                        }
+                      }
                     }}
                   />
                 </div>
