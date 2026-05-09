@@ -10,8 +10,10 @@ export type Contribution = { id: string; date: string; amount: number; note: str
 export type Target = { id: string; name: string; goalAmount: number; currentSaved: number; startDate?: string; deadline: string; createdAt?: string; type: 'savings'; contributions: Contribution[]; completed?: boolean }
 export type SavedTargetSet = { name: string; targets: Target[]; savedAt: string }
 
-// V8 — Accounts
+// ── V8 — Accounts ─────────────────────────────────────────────────────────────
+
 export type AccountType = 'checking' | 'savings' | 'credit card' | 'investment' | 'other'
+
 export type Account = {
   id: string
   name: string
@@ -21,8 +23,11 @@ export type Account = {
   createdAt: string
 }
 
-// V8 — Transactions
+// ── V8 — Transactions ─────────────────────────────────────────────────────────
+// Manual-entry only for V8.2. No CSV import, no Plaid, no auto balance updates.
+
 export type TransactionType = 'expense' | 'income' | 'transfer'
+
 export type Transaction = {
   id: string
   date: string
