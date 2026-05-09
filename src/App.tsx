@@ -161,8 +161,12 @@ export default function App() {
   // V7.7: Budget Pressure Focus — highlights the over-plan row and focuses its actual input
   const [pressureFocusCategoryId, setPressureFocusCategoryId] = useState<string | null>(null)
   const pressureFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  // Keyed by category id → ref to that row's actual input
+ // Keyed by category id → ref to that row's actual input
   const actualInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  // Captures the value when a field is focused — used for batched undo on blur
+  const actualsSessionStart = useRef<Record<string, string>>({})
+
+  // V7.7.1: Parallel undo/redo stacks for actuals
   // Snapshot of actuals at the moment an actual input is focused (for correct undo on blur)
   const actualsBeforeFocusRef = useRef<Record<string, string> | null>(null)
   // V7.7.1: Parallel undo/redo stacks for actuals (mirrors budget history timing)
@@ -299,8 +303,12 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
   const depColor = dep <= 35 ? 'text-green-400' : dep <= 55 ? 'text-yellow-300' : 'text-red-400'
   const baseNetByPeriod = period === 'weekly' ? inc.baseWeekly : period === 'bi-weekly' ? inc.baseBiWeekly : period === 'yearly' ? inc.baseMonthly * 12 : inc.baseMonthly
 
-  const top = [...categories].sort((a, b) => b.amount - a.amount)
-  const suggestionList = form.name.trim() ? categorySuggestions.filter(s => s.toLowerCase().includes(form.name.toLowerCase())) : categorySuggestions
+ const top = [...categories].sort((a, b) => b.amount - a.amount)
+  // Visual row order matches grouped table: Fixed → Variable → Savings → Investing, each by amount desc
+  const visualOrder: Category[] = (['fixed bill', 'variable spending', 'savings', 'investing'] as CategoryType[]).flatMap(
+    type => top.filter(c => c.type === type)
+  )
+  const suggestionList = form.name.trim()
   const targetSuggestionList = targetForm.name.trim() ? targetPresets.filter(s => s.toLowerCase().includes(targetForm.name.toLowerCase())) : targetPresets
 
   const hasBudgetData = monthlyBudget > 0
@@ -856,7 +864,7 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
             ) : (
               <button
                 className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
-                onClick={() => {
+               onClick={() => {
                   setEditTargetId(t.id)
                   setEditTargetOriginal(t)
                   setEditTargetForm({
@@ -866,7 +874,6 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
                     startDate: t.startDate ?? t.createdAt ?? '',
                     deadline: t.deadline,
                   })
-                  setTimeout(() => { editGoalAmountRef.current?.focus(); editGoalAmountRef.current?.select() }, 0)
                 }}
               >
                 Edit
@@ -882,8 +889,16 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
         }
       >
         {isEditingTarget ? (
-          <div
+        <div
             className="space-y-3"
+            onKeyDown={e => {
+              if (e.key === 'Escape') {
+                e.preventDefault()
+                if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current)
+                setEditTargetHint('')
+                cancelEditTarget(t.id)
+              }
+            }}
             onBlur={e => {
               if (e.currentTarget.contains(e.relatedTarget as Node)) return
               if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current)
@@ -896,7 +911,6 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
                 className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
                 value={editTargetForm.name}
                 onChange={e => setEditTargetForm(v => ({ ...v, name: e.target.value }))}
-                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current); saveEditTarget(t.id) } }}
                 placeholder="Goal name"
               />
             </div>
@@ -911,8 +925,8 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
                 value={editTargetForm.goalAmount}
                 onChange={e => setEditTargetForm(v => ({ ...v, goalAmount: e.target.value }))}
                 onFocus={e => e.target.select()}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') { e.preventDefault(); if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current); saveEditTarget(t.id) }
+            onKeyDown={e => {
+                  if (['e', 'E', '+', '-'].includes(e.key)) { e.preventDefault(); return }
                   if (e.key === 'ArrowRight') { e.preventDefault(); editCurrentSavedRef.current?.focus() }
                 }}
                 placeholder="Goal amount"
@@ -929,8 +943,8 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
                 value={editTargetForm.currentSaved}
                 onChange={e => setEditTargetForm(v => ({ ...v, currentSaved: e.target.value }))}
                 onFocus={e => e.target.select()}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') { e.preventDefault(); if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current); saveEditTarget(t.id) }
+             onKeyDown={e => {
+                  if (['e', 'E', '+', '-'].includes(e.key)) { e.preventDefault(); return }
                   if (e.key === 'ArrowRight') { e.preventDefault(); editStartDateRef.current?.focus() }
                   if (e.key === 'ArrowLeft') { e.preventDefault(); editGoalAmountRef.current?.focus() }
                 }}
@@ -945,8 +959,7 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
                 className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
                 value={editTargetForm.startDate}
                 onChange={e => setEditTargetForm(v => ({ ...v, startDate: e.target.value }))}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') { e.preventDefault(); if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current); saveEditTarget(t.id) }
+               onKeyDown={e => {
                   if (e.key === 'ArrowRight') {
                     editStartDateLeftArrowCount.current = 0
                     editStartDateArrowCount.current += 1
@@ -978,8 +991,7 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
                 className="w-full p-2 rounded bg-slate-700 border border-slate-500 text-slate-100"
                 value={editTargetForm.deadline}
                 onChange={e => setEditTargetForm(v => ({ ...v, deadline: e.target.value }))}
-                onKeyDown={e => {
-                  if (e.key === 'Enter') { e.preventDefault(); if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current); saveEditTarget(t.id) }
+               onKeyDown={e => {
                   if (e.key === 'ArrowLeft') {
                     editDeadlineArrowCount.current = 0
                     editDeadlineLeftArrowCount.current += 1
@@ -1945,36 +1957,64 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
                               <td className="py-1 pr-2">
                                 <div className="flex items-center gap-1">
                                   <input
-                                    ref={el => { actualInputRefs.current[c.id] = el }}
-                                    type="number"
-                                    inputMode="decimal"
-                                    min={0}
-                                    step={25}
-                                    className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
-                                    placeholder="—"
-                                    value={rawActual ?? ''}
-                                    onFocus={e => { if (e.target.value !== '') e.target.select() }}
-                                    onChange={e => {
-                                      const raw = e.target.value
-                                      const cleaned = raw.replace(/[^0-9.]/g, '')
-                                      if (cleaned === '' || Number(cleaned) === 0) {
-                                        setActuals(prev => ({ ...prev, [c.id]: '' }))
-                                      } else {
-                                        setActuals(prev => ({ ...prev, [c.id]: cleaned }))
-                                      }
-                                    }}
-                                    onBlur={() => {
-                                      pushActualsHistory({ ...actuals })
-                                    }}
-                                    onKeyDown={e => {
-                                      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                                        e.preventDefault()
-                                        const cur = Number(rawActual) || 0
-                                        const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
-                                        setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
-                                      }
-                                    }}
-                                  />
+                              ref={el => { actualInputRefs.current[c.id] = el }}
+                              type="text"
+                              inputMode="decimal"
+                              className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
+                              placeholder="—"
+                              value={rawActual ?? ''}
+                              onFocus={e => {
+                                actualsSessionStart.current[c.id] = rawActual ?? ''
+                                e.target.select()
+                              }}
+                              onChange={e => {
+                                // Allow digits and at most one decimal point; block everything else
+                                const raw = e.target.value
+                                const parts = raw.replace(/[^0-9.]/g, '').split('.')
+                                const cleaned = parts.length > 2
+                                  ? parts[0] + '.' + parts.slice(1).join('')
+                                  : parts.join('.')
+                                setActuals(prev => ({ ...prev, [c.id]: cleaned }))
+                              }}
+                              onBlur={() => {
+                                // Format to 2 dp; treat 0 or blank as blank
+                                const num = parseFloat(rawActual ?? '')
+                                const formatted = !isNaN(num) && num > 0 ? num.toFixed(2) : ''
+                                if (formatted !== (rawActual ?? '')) {
+                                  setActuals(prev => ({ ...prev, [c.id]: formatted }))
+                                }
+                                // Batched undo: push one entry only if value changed this session
+                                const startVal = actualsSessionStart.current[c.id] ?? ''
+                                const endVal = rawActual ?? ''
+                                if (endVal !== startVal) {
+                                  pushActualsHistory({ ...actuals, [c.id]: startVal })
+                                }
+                              }}
+                              onKeyDown={e => {
+                                // Block chars that type="text" would otherwise accept
+                                if (['e', 'E', '+', '-'].includes(e.key)) { e.preventDefault(); return }
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  const idx = visualOrder.findIndex(x => x.id === c.id)
+                                  if (e.shiftKey) {
+                                    const prev = visualOrder[idx - 1]
+                                    if (prev) actualInputRefs.current[prev.id]?.focus()
+                                    else e.currentTarget.blur()
+                                  } else {
+                                    const next = visualOrder[idx + 1]
+                                    if (next) actualInputRefs.current[next.id]?.focus()
+                                    else e.currentTarget.blur()
+                                  }
+                                  return
+                                }
+                                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                  e.preventDefault()
+                                  const cur = parseFloat(rawActual ?? '') || 0
+                                  const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
+                                  setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
+                                }
+                              }}
+                            />
                                   {hasActual && (
                                     <button
                                       className="rounded px-1.5 py-0.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-700 hover:bg-slate-600 transition-colors"
