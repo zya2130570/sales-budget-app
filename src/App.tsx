@@ -58,13 +58,16 @@ const presetTypeMap: Record<string, CategoryType> = {
 }
 const categorySuggestions = Object.keys(presetTypeMap).sort((a, b) => a.localeCompare(b))
 
-const ACCOUNT_TYPES: AccountType[] = ['checking', 'savings', 'credit card', 'investment', 'other']
+const ACCOUNT_TYPES: AccountType[] = ['checking', 'savings', 'credit card', 'investment', 'cash', 'roth ira', 'retirement', 'other']
 const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
-  'checking':     'Checking',
-  'savings':      'Savings',
-  'credit card':  'Credit Card',
-  'investment':   'Investment',
-  'other':        'Other',
+  'checking':    'Checking',
+  'savings':     'Savings',
+  'credit card': 'Credit Card',
+  'investment':  'Investment',
+  'cash':        'Cash',
+  'roth ira':    'Roth IRA',
+  'retirement':  'Retirement',
+  'other':       'Other',
 }
 const TXN_TYPES: TransactionType[] = ['expense', 'income', 'transfer', 'credit card payment']
 const TXN_TYPE_LABELS: Record<TransactionType, string> = {
@@ -118,6 +121,42 @@ function getPeriodDateRange(period: Period): { start: string; end: string } {
   return { start: fmt(start), end: fmt(today) }
 }
 
+// ── V8.4.2 Sample generator data pools ───────────────────────────────────────
+const SAMPLE_MERCHANTS = ['Target', 'Walmart', "Fry's", 'Shell', 'Chevron', 'Costco', 'Amazon', 'Starbucks', 'Chipotle', 'Uber', 'Lyft', 'Apple', 'Best Buy', 'CVS', "McDonald's", 'Walgreens']
+const SAMPLE_ACCOUNT_TEMPLATES: Array<{ name: string; type: AccountType; balance: number; institution: string }> = [
+  { name: 'Chase Checking',       type: 'checking',    balance: 2500,   institution: 'Chase'            },
+  { name: 'Ally Savings',         type: 'savings',     balance: 8500,   institution: 'Ally'             },
+  { name: 'SoFi Checking',        type: 'checking',    balance: 1800,   institution: 'SoFi'             },
+  { name: 'Robinhood Investing',  type: 'investment',  balance: 12000,  institution: 'Robinhood'        },
+  { name: 'Fidelity Roth IRA',    type: 'roth ira',    balance: 25000,  institution: 'Fidelity'         },
+  { name: 'Amex Gold',            type: 'credit card', balance: -1200,  institution: 'American Express' },
+  { name: 'Capital One Venture',  type: 'credit card', balance: -450,   institution: 'Capital One'      },
+  { name: 'Wells Fargo Checking', type: 'checking',    balance: 3200,   institution: 'Wells Fargo'      },
+  { name: 'Cash Wallet',          type: 'cash',        balance: 80,     institution: ''                 },
+  { name: 'Vanguard Retirement',  type: 'retirement',  balance: 48000,  institution: 'Vanguard'         },
+]
+const SAMPLE_GOAL_NAMES = ['Emergency Fund', 'Vacation', 'New Bike', 'Car Repair', 'Roth IRA Contribution', 'Laptop Upgrade', 'Moving Fund', 'Travel Fund']
+const SAMPLE_RULE_TEMPLATES: Array<{ name: string; matchText: string }> = [
+  { name: 'Target Shopping', matchText: 'Target, TGT'     },
+  { name: 'Gas Stations',    matchText: 'Shell, Chevron'  },
+  { name: 'Coffee Shops',    matchText: 'Starbucks'       },
+  { name: 'Ride Share',      matchText: 'Uber, Lyft'      },
+  { name: 'Groceries',       matchText: 'Walmart, Costco' },
+  { name: 'Fast Food',       matchText: "McDonald's, Chipotle" },
+]
+const SAMPLE_BUDGET_CATS: Array<{ name: string; type: CategoryType; monthly: number }> = [
+  { name: 'Groceries',      type: 'variable spending', monthly: 400  },
+  { name: 'Gas',            type: 'variable spending', monthly: 120  },
+  { name: 'Dining',         type: 'variable spending', monthly: 200  },
+  { name: 'Rent',           type: 'fixed bill',        monthly: 1800 },
+  { name: 'Internet',       type: 'fixed bill',        monthly: 60   },
+  { name: 'Insurance',      type: 'fixed bill',        monthly: 180  },
+  { name: 'Investing',      type: 'investing',         monthly: 300  },
+  { name: 'Emergency Fund', type: 'savings',           monthly: 200  },
+  { name: 'Entertainment',  type: 'variable spending', monthly: 80   },
+  { name: 'Travel',         type: 'savings',           monthly: 150  },
+]
+
 export default function App() {
   const incomeRef = useRef<HTMLInputElement>(null)
   const budgetNameRef = useRef<HTMLInputElement>(null)
@@ -168,9 +207,9 @@ export default function App() {
   const [form, setForm] = useState({ name: '', amount: '', type: 'fixed bill' as CategoryType })
 
   // ── V7.5 Plan vs Actual ──────────────────────────────────────────────────────
-    // Keyed by category id → raw string so blank stays blank, never forced to "0".
-  // Lazy-initialized directly from localStorage so the save effect never overwrites
-  // saved data with the empty default on first render.
+  // Keyed by category id → raw string so blank stays blank, never forced to "0".
+  // Lazy-initialized from localStorage so the save effect can't overwrite stored
+  // data with the empty default on the first render (effects fire after render).
   const [actuals, setActuals] = useState<Record<string, string>>(() => {
     try {
       const raw = localStorage.getItem('flow_actuals')
@@ -180,11 +219,10 @@ export default function App() {
     }
   })
 
-  // Persist actuals — defined after lazy init so effect order is no longer a concern
+  // Persist actuals — save effect defined after lazy init; no ordering race
   useEffect(() => {
     try { localStorage.setItem('flow_actuals', JSON.stringify(actuals)) } catch { /* ignore */ }
   }, [actuals])
-
 
   // Target edit state
   const [editTargetId, setEditTargetId] = useState<string | null>(null)
@@ -221,6 +259,14 @@ export default function App() {
   // Highlighted budget category (after Add to Current Budget)
   const [highlightedCategoryId, setHighlightedCategoryId] = useState<string | null>(null)
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [highlightedAccountId, setHighlightedAccountId]     = useState<string | null>(null)
+  const [highlightedTxnId, setHighlightedTxnId]             = useState<string | null>(null)
+  const [highlightedRuleId, setHighlightedRuleId]           = useState<string | null>(null)
+  const [highlightedTargetId, setHighlightedTargetId]       = useState<string | null>(null)
+  const highlightAccountTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const highlightTxnTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const highlightRuleTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const highlightTargetTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // V7.7: Budget Pressure Focus — highlights the over-plan row and focuses its actual input
   const [pressureFocusCategoryId, setPressureFocusCategoryId] = useState<string | null>(null)
@@ -229,8 +275,8 @@ export default function App() {
   const actualInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   // V7.7.1: Parallel undo/redo stacks for actuals (mirrors budget history timing)
-const [, setActualsHistory] = useState<Array<Record<string, string>>>([])
-const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
+  const [actualsHistory, setActualsHistory] = useState<Array<Record<string, string>>>([])
+  const [actualsRedo, setActualsRedo] = useState<Array<Record<string, string>>>([])
 
   const showToast = (message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
@@ -394,8 +440,7 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
     const ac = loadAccounts(); if (ac) setAccounts(ac)
     const tx = loadTransactions(); if (tx) setTransactions(tx)
     const rl = loadTransactionRules(); if (rl) setRules(rl)
-     }, [])
-
+  }, [])
   useEffect(() => saveTab(tab), [tab])
   useEffect(() => savePeriod(period), [period])
   useEffect(() => saveCategories(categories), [categories])
@@ -916,6 +961,101 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
     setTimeout(() => setApplyRulesMsg(''), 5000)
   }
 
+  // ── V8.4.2 Sample generators — instant-create with highlight ─────────────────
+
+  const flashHighlight = (
+    id: string,
+    setter: (id: string | null) => void,
+    timerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>,
+    ms = 2500,
+  ) => {
+    if (timerRef.current) clearTimeout(timerRef.current)
+    setter(id)
+    timerRef.current = setTimeout(() => setter(null), ms)
+  }
+
+  const generateSampleAccount = () => {
+    const used = new Set(accounts.map(a => a.name))
+    const pool = SAMPLE_ACCOUNT_TEMPLATES.filter(t => !used.has(t.name))
+    const tpl = (pool.length ? pool : SAMPLE_ACCOUNT_TEMPLATES)[Math.floor(Math.random() * (pool.length || SAMPLE_ACCOUNT_TEMPLATES.length))]
+    const jitter = Math.round((Math.random() - 0.5) * Math.abs(tpl.balance) * 0.3)
+    const balance = parseFloat((tpl.balance + jitter).toFixed(2))
+    const id = crypto.randomUUID()
+    setAccountsWithHistory(prev => [
+      { id, name: tpl.name, type: tpl.type, balance, institution: tpl.institution, createdAt: new Date().toISOString().slice(0, 10) },
+      ...prev,
+    ])
+    flashHighlight(id, setHighlightedAccountId, highlightAccountTimerRef)
+  }
+
+  const generateSampleTransaction = () => {
+    const merchant = SAMPLE_MERCHANTS[Math.floor(Math.random() * SAMPLE_MERCHANTS.length)]
+    const amount = (Math.floor(Math.random() * 19) + 1) * 5
+    const roll = Math.random()
+    const type: TransactionType = roll < 0.75 ? 'expense' : roll < 0.85 ? 'income' : roll < 0.93 ? 'transfer' : 'credit card payment'
+    const catPool = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
+    const categoryId = catPool.length ? catPool[Math.floor(Math.random() * catPool.length)].id : undefined
+    const accountId = accounts[0]?.id ?? ''
+    const range = getPeriodDateRange(period)
+    const startMs = new Date(range.start + 'T00:00:00').getTime()
+    const endMs   = Math.min(new Date(range.end + 'T23:59:59').getTime(), Date.now())
+    const date = new Date(startMs + Math.random() * (endMs - startMs)).toISOString().slice(0, 10)
+    const id = crypto.randomUUID()
+    setTxnWithHistory(prev => [
+      { id, date, accountId, merchant, amount, type, categoryId, createdAt: new Date().toISOString() },
+      ...prev,
+    ])
+    flashHighlight(id, setHighlightedTxnId, highlightTxnTimerRef)
+  }
+
+  const generateSampleRule = () => {
+    const used = new Set(rules.map(r => r.name))
+    const pool = SAMPLE_RULE_TEMPLATES.filter(t => !used.has(t.name))
+    const tpl = (pool.length ? pool : SAMPLE_RULE_TEMPLATES)[Math.floor(Math.random() * (pool.length || SAMPLE_RULE_TEMPLATES.length))]
+    const catPool = categories.filter(c => c.type === 'variable spending')
+    const categoryId = (catPool.length ? catPool : categories)[Math.floor(Math.random() * ((catPool.length || categories.length)))]?.id ?? ''
+    if (!categoryId) return
+    const id = crypto.randomUUID()
+    setRulesWithHistory(prev => [
+      { id, name: tpl.name, matchText: tpl.matchText, matchField: 'merchant', categoryId, type: 'expense', createdAt: new Date().toISOString() },
+      ...prev,
+    ])
+    flashHighlight(id, setHighlightedRuleId, highlightRuleTimerRef)
+  }
+
+  const generateSampleCategory = () => {
+    const used = new Set(categories.map(c => c.name))
+    const pool = SAMPLE_BUDGET_CATS.filter(c => !used.has(c.name))
+    if (!pool.length) return
+    const tpl = pool[Math.floor(Math.random() * pool.length)]
+    const jitter = Math.round((tpl.monthly * (Math.random() * 0.3 - 0.15)) / 5) * 5
+    const monthly = Math.max(5, tpl.monthly + jitter)
+    const id = crypto.randomUUID()
+    pushBudgetHistory()
+    setCategories(prev => [...prev, { id, name: tpl.name, amount: monthly, type: tpl.type }])
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
+    setHighlightedCategoryId(id)
+    highlightTimerRef.current = setTimeout(() => setHighlightedCategoryId(null), 2500)
+  }
+
+  const generateSampleGoal = () => {
+    const name = SAMPLE_GOAL_NAMES[Math.floor(Math.random() * SAMPLE_GOAL_NAMES.length)]
+    const goalAmount = (Math.floor(Math.random() * 145) + 5) * 100
+    const currentSaved = Math.round(goalAmount * (Math.random() * 0.85) / 50) * 50
+    const today = new Date()
+    const startYearOffset = Math.floor(Math.random() * (today.getFullYear() - 2020 + 1))
+    const startDate = `${2020 + startYearOffset}-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}-01`
+    const dlYear = today.getFullYear() + Math.floor(Math.random() * 5) + 1
+    const deadline = `${dlYear}-${String(Math.floor(Math.random() * 12) + 1).padStart(2, '0')}-01`
+    const id = crypto.randomUUID()
+    const todayStr = today.toISOString().slice(0, 10)
+    setTargetsWithHistory(prev => [
+      { id, name, goalAmount, currentSaved, startDate, deadline, createdAt: todayStr, type: 'savings', contributions: [], completed: false },
+      ...prev,
+    ])
+    flashHighlight(id, setHighlightedTargetId, highlightTargetTimerRef)
+  }
+
   const upsert = () => {
     const amt = Math.max(0, Number(form.amount) || 0)
     const monthlyAmt = convertToMonthly(amt, period)
@@ -1106,6 +1246,7 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
       <Card
         key={t.id}
         title={isEditingTarget ? `Editing: ${t.name}` : t.name}
+        className={highlightedTargetId === t.id ? 'ring-2 ring-blue-500/40 ring-inset transition-shadow duration-300' : undefined}
         headerAction={
           <div className="flex gap-2">
             {isEditingTarget ? (
@@ -1770,7 +1911,7 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
               {/* ── Plan vs Actual summary — always visible ── */}
               <div className="mt-3 pt-3 border-t border-slate-700/60">
                 <div className="flex items-center justify-between mb-2">
-                                   <div>
+                  <div>
                     <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Plan vs Actual</span>
                     <p className="text-[10px] text-slate-500 mt-0.5 normal-case tracking-normal">Actuals combine categorized transactions plus any manual adjustment.</p>
                   </div>
@@ -1947,18 +2088,10 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                   <option value="savings">3 - Savings</option>
                   <option value="investing">4 - Investing</option>
                 </select>
-                               <div className="flex gap-2 flex-col">
-                  <div className="flex gap-2">
-                    <button onClick={upsert} className="flex-1 rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm transition-colors">{editId ? 'Save Changes' : 'Add'}</button>
-                    {editId && (
-                      <button onClick={cancelBudgetEdit} className="rounded-lg bg-slate-600 hover:bg-slate-500 px-3 py-2 text-sm transition-colors">Cancel</button>
-                    )}
-                  </div>
-                  {!editId && (
-                    <button
-                      className="rounded-lg px-3 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors"
-                      onClick={() => { setForm({ name: 'Groceries', amount: '125', type: 'variable spending' }); setBudgetFormHint('') }}
-                    >Generate Sample</button>
+                <div className="flex gap-2">
+                  <button onClick={upsert} className="flex-1 rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm transition-colors">{editId ? 'Save Changes' : 'Add'}</button>
+                  {editId && (
+                    <button onClick={cancelBudgetEdit} className="rounded-lg bg-slate-600 hover:bg-slate-500 px-3 py-2 text-sm transition-colors">Cancel</button>
                   )}
                 </div>
               </div>
@@ -1966,6 +2099,7 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                 <button onClick={undoBudget} disabled={!budgetHistory.length} className={`rounded-lg px-3 py-1.5 ${budgetHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoBudget} disabled={!budgetRedo.length} className={`rounded-lg px-3 py-1.5 ${budgetRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 <button onClick={() => { if (!categories.length) return; pushBudgetHistory(); setCategories([]) }} className="rounded-lg px-3 py-1.5 bg-slate-700 hover:bg-slate-600">Reset Budget</button>
+                <button onClick={generateSampleCategory} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample budget category">Generate Sample</button>
               </div>
               {budgetFormHint && <p className="mt-2 text-sm text-amber-300">{budgetFormHint}</p>}
               <div className="mt-3 grid md:grid-cols-3 gap-2">
@@ -2065,14 +2199,13 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                         {/* Actual cell: txn-driven breakdown or plain manual entry */}
                         <td className="py-1 pr-2">
                           {hasTxn ? (
-                                                     <div className="space-y-0.5 text-xs min-w-[8rem]">
+                            <div className="space-y-0.5 text-xs min-w-[8rem]">
                               <div className="flex items-center justify-between gap-2">
                                 <span className="text-slate-500">Transactions</span>
                                 <span className="font-medium text-slate-300">{currency(txnAmt)}</span>
                               </div>
                               <div className="flex items-center gap-1.5">
                                 <span className="text-slate-600 shrink-0">+ Adj</span>
-
                                 <input
                                   ref={el => { actualInputRefs.current[c.id] = el }}
                                   type="number" inputMode="decimal" min={0} step={25}
@@ -2102,13 +2235,12 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                                   >×</button>
                                 )}
                               </div>
-                                                          {eff && (
+                              {eff && (
                                 <div className="flex items-center justify-between gap-2 border-t border-slate-700/60 pt-0.5 mt-0.5">
                                   <span className="text-slate-500">Total Actual</span>
                                   <span className="font-semibold text-slate-200">{currency(eff.total)}</span>
                                 </div>
                               )}
-
                             </div>
                           ) : (
                             <div className="flex items-center gap-1">
@@ -2257,22 +2389,19 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                   />
                 </div>
               </div>
-                          <div className="flex gap-2 mt-3 flex-wrap">
+              <div className="flex gap-2 mt-3 flex-wrap">
                 <button onClick={createOrSaveAccount} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-1.5 text-sm transition-colors">
                   {editAccountId ? 'Save Changes' : 'Add Account'}
                 </button>
-                {!editAccountId && (
-                  <button
-                    className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors"
-                    onClick={() => setAccountForm({ name: 'Chase Checking', type: 'checking', balance: '1000.00', institution: 'Chase' })}
-                  >Generate Sample</button>
-                )}
                 {editAccountId
                   ? <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Cancel</button>
                   : <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
                 }
                 <button onClick={undoAccount} disabled={!accountHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoAccount} disabled={!accountRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
+                {!editAccountId && (
+                  <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
+                )}
               </div>
               {accountHint && <p className="mt-2 text-sm text-amber-300">{accountHint}</p>}
             </Card>
@@ -2292,7 +2421,7 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                     </thead>
                     <tbody>
                       {accounts.map(a => (
-                        <tr key={a.id} className="border-b border-slate-800 hover:bg-slate-800/40 transition-colors">
+                        <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedAccountId === a.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
                           <td className="py-2 pr-4 font-medium">{a.name}</td>
                           <td className="py-2 pr-4 text-slate-400">{ACCOUNT_TYPE_LABELS[a.type]}</td>
                           <td className={`py-2 pr-4 text-right font-semibold ${a.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
@@ -2455,19 +2584,12 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                   />
                 </div>
               </div>
-                           <div className="flex gap-2 mt-3 flex-wrap">
+              <div className="flex gap-2 mt-3 flex-wrap">
                 <button onClick={createOrSaveTxn} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-1.5 text-sm transition-colors">Add Transaction</button>
-                <button
-                  className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors"
-                  onClick={() => {
-                    const sampleAcctId = accounts[0]?.id ?? ''
-                    const sampleCatId = categories.find(c => c.type === 'variable spending')?.id ?? ''
-                    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: sampleAcctId, merchant: 'Target', amount: '45.00', type: 'expense', categoryId: sampleCatId, notes: '' })
-                  }}
-                >Generate Sample</button>
                 <button onClick={clearTxnForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
                 <button onClick={undoTxn} disabled={!txnHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoTxn} disabled={!txnRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
+                <button onClick={generateSampleTransaction} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a random sample transaction">Generate Sample</button>
               </div>
               {txnHint && <p className="mt-2 text-sm text-amber-300">{txnHint}</p>}
             </Card>
@@ -2536,7 +2658,7 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
 
                         const txTypeColor = tx.type === 'income' ? 'bg-green-900/50 text-green-300' : tx.type === 'transfer' ? 'bg-blue-900/50 text-blue-300' : tx.type === 'credit card payment' ? 'bg-purple-900/50 text-purple-300' : 'bg-slate-700 text-slate-300'
                         return (
-                          <tr key={tx.id} className="border-b border-slate-800 hover:bg-slate-800/40 transition-colors">
+                          <tr key={tx.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedTxnId === tx.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
                             <td className="py-2 pr-3 text-slate-300 text-xs whitespace-nowrap">{tx.date}</td>
                             <td className="py-2 pr-3 text-slate-400 text-xs">{acct?.name ?? '—'}</td>
                             <td className="py-2 pr-3 font-medium">{tx.merchant}</td>
@@ -2635,18 +2757,12 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                   </select>
                 </div>
               </div>
-                           <div className="flex gap-2 mt-3 flex-wrap">
+              <div className="flex gap-2 mt-3 flex-wrap">
                 <button onClick={createOrSaveRule} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-1.5 text-sm transition-colors">Add Rule</button>
-                <button
-                  className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors"
-                  onClick={() => {
-                    const sampleCatId = categories.find(c => c.type === 'variable spending')?.id ?? ''
-                    setRuleForm({ name: 'Target shopping', matchText: 'Target, TGT', matchField: 'merchant', categoryId: sampleCatId, type: 'expense' })
-                  }}
-                >Generate Sample</button>
                 <button onClick={clearRuleForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
                 <button onClick={undoRule} disabled={!ruleHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoRule} disabled={!ruleRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
+                <button onClick={generateSampleRule} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample rule">Generate Sample</button>
               </div>
               {ruleHint && <p className="mt-2 text-sm text-amber-300">{ruleHint}</p>}
 
@@ -2713,7 +2829,7 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                           )
                         }
                         return (
-                          <tr key={r.id} className="border-b border-slate-800 hover:bg-slate-800/40 transition-colors">
+                          <tr key={r.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedRuleId === r.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
                             <td className="py-2 pr-3 font-medium">{r.name}</td>
                             <td className="py-2 pr-3 font-mono text-xs text-slate-300">{r.matchText}</td>
                             <td className="py-2 pr-3 text-slate-400 text-xs capitalize">{r.matchField}</td>
@@ -2962,15 +3078,12 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                     }}
                   />
                 </div>
-                              <div className="space-y-1.5">
+                <div className="space-y-1.5">
                   <button className="w-full px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 transition-colors" onClick={createTarget}>Create Savings Goal</button>
                   <button
                     className="w-full px-3 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors"
-                    onClick={() => {
-                      const deadline = new Date()
-                      deadline.setMonth(deadline.getMonth() + 3)
-                      setTargetForm({ name: 'Emergency Fund', goalAmount: '1000', currentSaved: '100', startDate: new Date().toISOString().slice(0, 10), deadline: deadline.toISOString().slice(0, 10) })
-                    }}
+                    title="Instantly add a randomized sample savings goal"
+                    onClick={generateSampleGoal}
                   >Generate Sample</button>
                 </div>
               </div>
