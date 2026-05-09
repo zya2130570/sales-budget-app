@@ -24,7 +24,6 @@ export type Account = {
 }
 
 // ── V8 — Transactions ─────────────────────────────────────────────────────────
-// Manual-entry only for V8.2. No CSV import, no Plaid, no auto balance updates.
 
 export type TransactionType = 'expense' | 'income' | 'transfer'
 
@@ -37,5 +36,19 @@ export type Transaction = {
   type: TransactionType
   categoryId?: string
   notes?: string
+  createdAt: string
+}
+
+// ── V8.3 — Transaction Rules ──────────────────────────────────────────────────
+// Manual keyword-based rules that assign a budget category to transactions
+// whose merchant or notes field contains the rule's matchText (case-insensitive).
+
+export type TransactionRule = {
+  id: string
+  name: string
+  matchText: string
+  matchField: 'merchant' | 'notes'
+  categoryId: string
+  type?: TransactionType   // optional: rule only fires for this transaction type
   createdAt: string
 }
