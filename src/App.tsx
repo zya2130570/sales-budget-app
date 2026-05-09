@@ -187,7 +187,7 @@ export default function App() {
 
   const [tab, setTab] = useState<Tab>('Dashboard')
   const [period, setPeriod] = useState<Period>('weekly')
-  const [gpInput, setGpInput] = useState('5000')
+  const [gpInput, setGpInput] = useState('0')
   const [categories, setCategories] = useState<Category[]>([])
   const [scenario, setScenario] = useState<Record<ScenarioName, number>>(scenarioDefaults)
   const [savedBudgets, setSavedBudgets] = useState<SavedBudget[]>([])
@@ -900,20 +900,41 @@ export default function App() {
     const merchant = inlineTxnEditForm.merchant.trim()
     const amount = parseFloat(inlineTxnEditForm.amount) || 0
     if (!inlineTxnEditForm.accountId || !merchant || amount <= 0) return
+
+    // V8.5.1 — Duplicate detection: same merchant + amount + date, excluding self
+    const isDup = transactions.some(x =>
+      x.id !== inlineTxnEditId &&
+      x.merchant.toLowerCase() === merchant.toLowerCase() &&
+      x.amount === amount &&
+      x.date === inlineTxnEditForm.date
+    )
+    if (isDup) {
+      setTimedTxnHint('Possible duplicate transaction — same merchant, amount, and date already exists. Save again to confirm.')
+      // Allow second save to go through by not returning if hint already shown — use a flag approach:
+      // We set txnDupWarning here to reuse the existing "save anyway" pattern
+      if (!txnDupWarning) { setTxnDupWarning(true); return }
+    }
+    setTxnDupWarning(false)
+
     setTxnWithHistory(prev => prev.map(x => x.id === inlineTxnEditId
       ? { ...x, date: inlineTxnEditForm.date, accountId: inlineTxnEditForm.accountId, merchant, amount, type: inlineTxnEditForm.type, categoryId: inlineTxnEditForm.categoryId || undefined, notes: inlineTxnEditForm.notes.trim() || undefined }
       : x
     ))
     setInlineTxnEditId(null)
   }
-  const cancelInlineTxnEdit = () => setInlineTxnEditId(null)
+  const cancelInlineTxnEdit = () => { setInlineTxnEditId(null); setTxnDupWarning(false); setTxnHint('') }
 
   // ── V8.3 Rule helpers ─────────────────────────────────────────────────────────
 
-  // Case-insensitive, comma-separated alias matching
+  // V8.5.1 — Case-insensitive, comma-separated alias matching.
+  // Splits matchText by comma, strips surrounding quotes and whitespace,
+  // ignores empty fragments, matches if ANY alias is contained in haystack.
   const matchesAnyAlias = (haystack: string, matchText: string): boolean => {
-    const aliases = matchText.split(',').map(a => a.replace(/['"]/g, '').trim().toLowerCase()).filter(Boolean)
-    return aliases.some(alias => haystack.includes(alias))
+    const aliases = matchText
+      .split(',')
+      .map(a => a.replace(/^['"\s]+|['"\s]+$/g, '').toLowerCase())
+      .filter(Boolean)
+    return aliases.some(alias => alias.length > 0 && haystack.includes(alias))
   }
 
   const setRulesWithHistory = (updater: (prev: TransactionRule[]) => TransactionRule[]) => {
@@ -951,6 +972,25 @@ export default function App() {
     if (!name) { setRuleHint('Enter a rule name.'); ruleNameRef.current?.focus(); return }
     if (!matchText) { setRuleHint('Enter match text before adding this rule.'); ruleMatchTextRef.current?.focus(); return }
     if (!ruleForm.categoryId) { setRuleHint('Choose a budget category before adding this rule.'); return }
+
+    // V8.5.1 — Conflict detection: same field + overlapping alias + overlapping type → different category
+    const newAliases = matchText.split(',').map(a => a.replace(/^['"\s]+|['"\s]+$/g, '').toLowerCase()).filter(Boolean)
+    const newTypeIsAny = !ruleForm.type
+    for (const existing of rules) {
+      if (existing.matchField !== ruleForm.matchField) continue
+      const existingAliases = existing.matchText.split(',').map(a => a.replace(/^['"\s]+|['"\s]+$/g, '').toLowerCase()).filter(Boolean)
+      const hasOverlapAlias = newAliases.some(a => existingAliases.includes(a))
+      if (!hasOverlapAlias) continue
+      const existingTypeIsAny = !existing.type
+      const typesOverlap = newTypeIsAny || existingTypeIsAny || ruleForm.type === existing.type
+      if (!typesOverlap) continue
+      if (existing.categoryId !== ruleForm.categoryId) {
+        const overlapAlias = newAliases.find(a => existingAliases.includes(a)) ?? matchText
+        setRuleHint(`This rule conflicts with an existing rule for "${overlapAlias}". Change the match text or choose the same category.`)
+        return
+      }
+    }
+
     setRuleHint('')
     setRulesWithHistory(prev => [
       { id: crypto.randomUUID(), name, matchText, matchField: ruleForm.matchField, categoryId: ruleForm.categoryId, type: ruleForm.type || undefined, createdAt: new Date().toISOString() },
@@ -964,6 +1004,26 @@ export default function App() {
     const name = inlineRuleEditForm.name.trim()
     const matchText = inlineRuleEditForm.matchText.trim()
     if (!name || !matchText || !inlineRuleEditForm.categoryId) return
+
+    // V8.5.1 — Conflict detection (exclude self)
+    const newAliases = matchText.split(',').map(a => a.replace(/^['"\s]+|['"\s]+$/g, '').toLowerCase()).filter(Boolean)
+    const newTypeIsAny = !inlineRuleEditForm.type
+    for (const existing of rules) {
+      if (existing.id === inlineRuleEditId) continue
+      if (existing.matchField !== inlineRuleEditForm.matchField) continue
+      const existingAliases = existing.matchText.split(',').map(a => a.replace(/^['"\s]+|['"\s]+$/g, '').toLowerCase()).filter(Boolean)
+      const hasOverlapAlias = newAliases.some(a => existingAliases.includes(a))
+      if (!hasOverlapAlias) continue
+      const existingTypeIsAny = !existing.type
+      const typesOverlap = newTypeIsAny || existingTypeIsAny || inlineRuleEditForm.type === existing.type
+      if (!typesOverlap) continue
+      if (existing.categoryId !== inlineRuleEditForm.categoryId) {
+        const overlapAlias = newAliases.find(a => existingAliases.includes(a)) ?? matchText
+        setRuleHint(`This rule conflicts with an existing rule for "${overlapAlias}". Change the match text or choose the same category.`)
+        return
+      }
+    }
+
     setRulesWithHistory(prev => prev.map(r => r.id === inlineRuleEditId
       ? { ...r, name, matchText, matchField: inlineRuleEditForm.matchField, categoryId: inlineRuleEditForm.categoryId, type: inlineRuleEditForm.type || undefined }
       : r
@@ -981,7 +1041,7 @@ export default function App() {
         const haystack = rule.matchField === 'merchant' ? mLower : nLower
         if (matchesAnyAlias(haystack, rule.matchText)) {
           if (tx.categoryId !== rule.categoryId) count++
-          return { ...tx, categoryId: rule.categoryId }
+          return { ...tx, categoryId: rule.categoryId, appliedByRule: rule.id }
         }
       }
       return tx
@@ -2152,7 +2212,7 @@ export default function App() {
               <div className="mt-2 flex gap-2">
                 <button onClick={undoBudget} disabled={!budgetHistory.length} className={`rounded-lg px-3 py-1.5 ${budgetHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoBudget} disabled={!budgetRedo.length} className={`rounded-lg px-3 py-1.5 ${budgetRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
-                <button onClick={() => { if (!categories.length) return; pushBudgetHistory(); setCategories([]) }} className="rounded-lg px-3 py-1.5 bg-slate-700 hover:bg-slate-600">Reset Budget</button>
+                <button onClick={() => { if (!categories.length) return; pushBudgetHistory(); setCategories([]); showToast('Budget reset.') }} className="rounded-lg px-3 py-1.5 bg-slate-700 hover:bg-slate-600">Reset Budget</button>
                 <button onClick={generateSampleCategory} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample budget category">Generate Sample</button>
               </div>
               {budgetFormHint && <p className="mt-2 text-sm text-amber-300">{budgetFormHint}</p>}
@@ -2453,6 +2513,9 @@ export default function App() {
                 }
                 <button onClick={undoAccount} disabled={!accountHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoAccount} disabled={!accountRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
+                {!editAccountId && accounts.length > 0 && (
+                  <button onClick={() => { if (window.confirm(`Clear all ${accounts.length} account${accounts.length !== 1 ? 's' : ''}? This cannot be undone.`)) { setAccountsWithHistory(() => []); showToast('Accounts cleared.') } }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                )}
                 {!editAccountId && (
                   <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
                 )}
@@ -2517,7 +2580,7 @@ export default function App() {
             {/* ── V8.5 Review queue summary ── */}
             {transactions.length > 0 && (() => {
               const range = getPeriodDateRange(period)
-              const uncatCount   = transactions.filter(tx => !tx.categoryId).length
+              const uncatCount   = transactions.filter(tx => !tx.categoryId && tx.type === 'expense').length
               const periodSpend  = transactions
                 .filter(tx => tx.date >= range.start && tx.date <= range.end && (tx.type === 'expense' || tx.type === 'credit card payment'))
                 .reduce((s, tx) => s + tx.amount, 0)
@@ -2669,6 +2732,9 @@ export default function App() {
                 <button onClick={clearTxnForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
                 <button onClick={undoTxn} disabled={!txnHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoTxn} disabled={!txnRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
+                {transactions.length > 0 && (
+                  <button onClick={() => { if (window.confirm(`Clear all ${transactions.length} transaction${transactions.length !== 1 ? 's' : ''}?`)) { setTxnWithHistory(() => []); showToast('Transactions cleared.') } }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                )}
                 <button onClick={generateSampleTransaction} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a random sample transaction">Generate Sample</button>
                 <button onClick={generateTenSamples} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Add 10 varied samples — mixed categories, some uncategorized, some duplicate-like">Generate 10 Samples</button>
               </div>
@@ -2687,11 +2753,11 @@ export default function App() {
                         txnFilter === opt.value
                           ? 'bg-blue-600 text-white'
                           : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
-                      }${opt.value === 'uncategorized' && transactions.filter(tx => !tx.categoryId).length > 0 && txnFilter !== 'uncategorized' ? ' ring-1 ring-amber-500/60' : ''}`}
+                      }${opt.value === 'uncategorized' && transactions.filter(tx => !tx.categoryId && tx.type === 'expense').length > 0 && txnFilter !== 'uncategorized' ? ' ring-1 ring-amber-500/60' : ''}`}
                     >
                       {opt.label}
-                      {opt.value === 'uncategorized' && transactions.filter(tx => !tx.categoryId).length > 0
-                        ? ` (${transactions.filter(tx => !tx.categoryId).length})`
+                      {opt.value === 'uncategorized' && transactions.filter(tx => !tx.categoryId && tx.type === 'expense').length > 0
+                        ? ` (${transactions.filter(tx => !tx.categoryId && tx.type === 'expense').length})`
                         : ''}
                     </button>
                   ))}
@@ -2775,7 +2841,7 @@ export default function App() {
                             <td className="py-2 pr-3 text-slate-400 text-xs">
                               {cat?.name ?? '—'}
                               {tx.appliedByRule && (
-                                <span className="ml-1.5 text-[9px] text-indigo-400 bg-indigo-900/40 border border-indigo-700/40 px-1 py-0.5 rounded">Rule</span>
+                                <span className="ml-1.5 text-[9px] text-indigo-400 bg-indigo-900/40 border border-indigo-700/40 px-1 py-0.5 rounded">Rule Applied</span>
                               )}
                             </td>
                             <td className={`py-2 pr-3 text-right font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-100'}`}>
@@ -2803,11 +2869,11 @@ export default function App() {
               </p>
             )}
 
-            {/* ── V8.5 Uncategorized Transactions ── */}
-            {transactions.some(tx => !tx.categoryId) && (
-              <Card title={`Uncategorized Transactions (${transactions.filter(tx => !tx.categoryId).length})`}>
+            {/* ── V8.5.1 Uncategorized Expenses ── only expense transactions need budget categories */}
+            {transactions.some(tx => !tx.categoryId && tx.type === 'expense') && (
+              <Card title={`Uncategorized Expenses (${transactions.filter(tx => !tx.categoryId && tx.type === 'expense').length})`}>
                 <p className="text-xs text-slate-400 mb-3">
-                  Assign a budget category to include these in Plan vs Actual actuals.
+                  Only expenses need budget categories. Transfers, income, and credit card payments do not count toward Budget Actuals.
                 </p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -2824,7 +2890,7 @@ export default function App() {
                     </thead>
                     <tbody>
                       {[...transactions]
-                        .filter(tx => !tx.categoryId)
+                        .filter(tx => !tx.categoryId && tx.type === 'expense')
                         .sort((a, b) => b.date.localeCompare(a.date))
                         .map(tx => {
                           const acct = accounts.find(a => a.id === tx.accountId)
@@ -2943,6 +3009,9 @@ export default function App() {
                 <button onClick={clearRuleForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
                 <button onClick={undoRule} disabled={!ruleHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoRule} disabled={!ruleRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
+                {rules.length > 0 && (
+                  <button onClick={() => { if (window.confirm(`Clear all ${rules.length} rule${rules.length !== 1 ? 's' : ''}?`)) { setRulesWithHistory(() => []); showToast('Transaction rules cleared.') } }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                )}
                 <button onClick={generateSampleRule} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample rule">Generate Sample</button>
               </div>
               {ruleHint && <p className="mt-2 text-sm text-amber-300">{ruleHint}</p>}
