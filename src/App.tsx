@@ -167,7 +167,7 @@ export default function App() {
  // Keyed by category id → ref to that row's actual input
   const actualInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
   // Captures the value when a field is focused — used for batched undo on blur
-  const actualsSessionStart = useRef<Record<string, string>>({})
+ 
 
   // V7.7.1: Parallel undo/redo stacks for actuals
   // Snapshot of actuals at the moment an actual input is focused (for correct undo on blur)
@@ -308,9 +308,7 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
 
  const top = [...categories].sort((a, b) => b.amount - a.amount)
   // Visual row order matches grouped table: Fixed → Variable → Savings → Investing, each by amount desc
-  const visualOrder: Category[] = (['fixed bill', 'variable spending', 'savings', 'investing'] as CategoryType[]).flatMap(
-    type => top.filter(c => c.type === type)
-  )
+ 
 const suggestionList = form.name.trim() ? categorySuggestions.filter(s => s.toLowerCase().includes(form.name.toLowerCase())) : categorySuggestions
   const targetSuggestionList = targetForm.name.trim() ? targetPresets.filter(s => s.toLowerCase().includes(targetForm.name.toLowerCase())) : targetPresets
 
