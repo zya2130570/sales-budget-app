@@ -275,9 +275,8 @@ export default function App() {
   const actualInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   // V7.7.1: Parallel undo/redo stacks for actuals (mirrors budget history timing)
-  const [actualsHistory, setActualsHistory] = useState<Array<Record<string, string>>>([])
-  const [actualsRedo, setActualsRedo] = useState<Array<Record<string, string>>>([])
-
+  const [, setActualsHistory] = useState<Array<Record<string, string>>>([])
+const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
   const showToast = (message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     setToast({ message, visible: true })
