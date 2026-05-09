@@ -157,6 +157,15 @@ const SAMPLE_BUDGET_CATS: Array<{ name: string; type: CategoryType; monthly: num
   { name: 'Travel',         type: 'savings',           monthly: 150  },
 ]
 
+const TXN_FILTER_OPTIONS = [
+  { value: 'all'                 as const, label: 'All'                  },
+  { value: 'uncategorized'       as const, label: 'Uncategorized'        },
+  { value: 'expense'             as const, label: 'Expense'              },
+  { value: 'income'              as const, label: 'Income'               },
+  { value: 'transfer'            as const, label: 'Transfer'             },
+  { value: 'credit card payment' as const, label: 'Credit Card Payment'  },
+]
+
 export default function App() {
   const incomeRef = useRef<HTMLInputElement>(null)
   const budgetNameRef = useRef<HTMLInputElement>(null)
@@ -276,7 +285,8 @@ export default function App() {
 
   // V7.7.1: Parallel undo/redo stacks for actuals (mirrors budget history timing)
   const [, setActualsHistory] = useState<Array<Record<string, string>>>([])
-const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
+  const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
+
   const showToast = (message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     setToast({ message, visible: true })
@@ -374,6 +384,10 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
   })
   const [txnHistory, setTxnHistory]           = useState<Transaction[][]>([])
   const [txnRedo, setTxnRedo]                 = useState<Transaction[][]>([])
+
+  // V8.5 — review / filter
+  const [txnFilter, setTxnFilter]             = useState<typeof TXN_FILTER_OPTIONS[number]['value']>('all')
+  const [txnDupWarning, setTxnDupWarning]     = useState(false)
   const [accountHint, setAccountHint]         = useState('')
   const [txnHint, setTxnHint]                 = useState('')
 
@@ -836,6 +850,7 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
   const clearTxnForm = () => {
     setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '' })
     setTxnHint('')
+    setTxnDupWarning(false)
   }
   const createOrSaveTxn = () => {
     const merchant = txnForm.merchant.trim()
@@ -844,8 +859,22 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
     const amount = parseFloat(txnForm.amount) || 0
     if (amount <= 0) { setTimedTxnHint('Enter a transaction amount before logging.'); txnAmountRef.current?.focus(); return }
 
-    // Auto-fill category from rules when creating a new transaction with no category selected
+    // Duplicate detection — same merchant + amount + date
+    const isDup = transactions.some(x =>
+      x.merchant.toLowerCase() === merchant.toLowerCase() &&
+      x.amount === amount &&
+      x.date === txnForm.date
+    )
+    if (isDup && !txnDupWarning) {
+      setTxnDupWarning(true)
+      setTimedTxnHint('Possible duplicate — same merchant, amount, and date already exists. Click Add again to save anyway.')
+      return
+    }
+    setTxnDupWarning(false)
+
+    // Auto-fill category from rules; track which rule matched
     let autoCategoryId = txnForm.categoryId
+    let matchedRuleId: string | undefined
     if (!txnForm.categoryId) {
       const mLower = merchant.toLowerCase()
       const nLower = txnForm.notes.toLowerCase()
@@ -853,13 +882,14 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
         const haystack = rule.matchField === 'merchant' ? mLower : nLower
         if (matchesAnyAlias(haystack, rule.matchText)) {
           autoCategoryId = rule.categoryId
+          matchedRuleId = rule.id
           break
         }
       }
     }
 
     setTxnWithHistory(prev => [
-      { id: crypto.randomUUID(), date: txnForm.date, accountId: txnForm.accountId, merchant, amount, type: txnForm.type, categoryId: autoCategoryId || undefined, notes: txnForm.notes.trim() || undefined, createdAt: new Date().toISOString() },
+      { id: crypto.randomUUID(), date: txnForm.date, accountId: txnForm.accountId, merchant, amount, type: txnForm.type, categoryId: autoCategoryId || undefined, appliedByRule: matchedRuleId, notes: txnForm.notes.trim() || undefined, createdAt: new Date().toISOString() },
       ...prev,
     ])
     clearTxnForm()
@@ -1053,6 +1083,31 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
       ...prev,
     ])
     flashHighlight(id, setHighlightedTargetId, highlightTargetTimerRef)
+  }
+
+  const generateTenSamples = () => {
+    const range = getPeriodDateRange(period)
+    const startMs = new Date(range.start + 'T00:00:00').getTime()
+    const endMs   = Math.min(new Date(range.end + 'T23:59:59').getTime(), Date.now())
+    const batch: Transaction[] = []
+    for (let i = 0; i < 10; i++) {
+      const merchant = SAMPLE_MERCHANTS[Math.floor(Math.random() * SAMPLE_MERCHANTS.length)]
+      const amount   = (Math.floor(Math.random() * 19) + 1) * 5
+      const roll     = Math.random()
+      const type: TransactionType = roll < 0.72 ? 'expense' : roll < 0.84 ? 'income' : roll < 0.93 ? 'transfer' : 'credit card payment'
+      // ~30% intentionally uncategorized
+      const catPool  = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
+      const categoryId = Math.random() < 0.7 && catPool.length ? catPool[Math.floor(Math.random() * catPool.length)].id : undefined
+      const accountId  = accounts[0]?.id ?? ''
+      const date       = new Date(startMs + Math.random() * (endMs - startMs)).toISOString().slice(0, 10)
+      // ~15% duplicate a previous entry in this batch
+      const dupSrc = batch.length >= 2 && Math.random() < 0.15 ? batch[Math.floor(Math.random() * batch.length)] : null
+      batch.push(dupSrc
+        ? { ...dupSrc, id: crypto.randomUUID(), createdAt: new Date().toISOString() }
+        : { id: crypto.randomUUID(), date, accountId, merchant, amount, type, categoryId, createdAt: new Date().toISOString() }
+      )
+    }
+    setTxnWithHistory(prev => [...batch, ...prev])
   }
 
   const upsert = () => {
@@ -2459,6 +2514,30 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
         {/* ── TRANSACTIONS ── */}
         {tab === 'Transactions' && (
           <section className="space-y-4 transition-all duration-300">
+            {/* ── V8.5 Review queue summary ── */}
+            {transactions.length > 0 && (() => {
+              const range = getPeriodDateRange(period)
+              const uncatCount   = transactions.filter(tx => !tx.categoryId).length
+              const periodSpend  = transactions
+                .filter(tx => tx.date >= range.start && tx.date <= range.end && (tx.type === 'expense' || tx.type === 'credit card payment'))
+                .reduce((s, tx) => s + tx.amount, 0)
+              const rulesApplied = transactions.filter(tx => tx.appliedByRule).length
+              return (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Uncategorized',     value: uncatCount,                      alert: uncatCount > 0 },
+                    { label: 'Period Spend',       value: currency(periodSpend),           alert: false          },
+                    { label: 'Rules Applied',      value: rulesApplied,                    alert: false          },
+                    { label: 'Total Transactions', value: transactions.length,             alert: false          },
+                  ].map(({ label, value, alert }) => (
+                    <div key={label} className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
+                      <div className="text-xs text-slate-400 mb-1">{label}</div>
+                      <div className={`text-xl font-bold ${alert ? 'text-amber-300' : 'text-slate-200'}`}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+              )
+            })()}
             <Card title="Log Transaction" noHover>
               <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
                 {/* Date */}
@@ -2584,17 +2663,39 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                 </div>
               </div>
               <div className="flex gap-2 mt-3 flex-wrap">
-                <button onClick={createOrSaveTxn} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-1.5 text-sm transition-colors">Add Transaction</button>
+                <button onClick={createOrSaveTxn} className={`rounded-lg px-4 py-1.5 text-sm transition-colors ${txnDupWarning ? 'bg-amber-600 hover:bg-amber-500' : 'bg-blue-600 hover:bg-blue-500'}`}>
+                  {txnDupWarning ? 'Save Anyway' : 'Add Transaction'}
+                </button>
                 <button onClick={clearTxnForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
                 <button onClick={undoTxn} disabled={!txnHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoTxn} disabled={!txnRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 <button onClick={generateSampleTransaction} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a random sample transaction">Generate Sample</button>
+                <button onClick={generateTenSamples} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Add 10 varied samples — mixed categories, some uncategorized, some duplicate-like">Generate 10 Samples</button>
               </div>
               {txnHint && <p className="mt-2 text-sm text-amber-300">{txnHint}</p>}
             </Card>
 
             {transactions.length > 0 ? (
               <Card title={`Transactions (${transactions.length})`}>
+                {/* Filter pills */}
+                <div className="flex gap-1.5 flex-wrap mb-3">
+                  {TXN_FILTER_OPTIONS.map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setTxnFilter(opt.value)}
+                      className={`rounded-full px-3 py-0.5 text-xs transition-colors ${
+                        txnFilter === opt.value
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
+                      }${opt.value === 'uncategorized' && transactions.filter(tx => !tx.categoryId).length > 0 && txnFilter !== 'uncategorized' ? ' ring-1 ring-amber-500/60' : ''}`}
+                    >
+                      {opt.label}
+                      {opt.value === 'uncategorized' && transactions.filter(tx => !tx.categoryId).length > 0
+                        ? ` (${transactions.filter(tx => !tx.categoryId).length})`
+                        : ''}
+                    </button>
+                  ))}
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -2610,7 +2711,14 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                       </tr>
                     </thead>
                     <tbody>
-                      {[...transactions].sort((a, b) => b.date.localeCompare(a.date)).map(tx => {
+                      {[...transactions]
+                        .filter(tx => {
+                          if (txnFilter === 'uncategorized') return !tx.categoryId
+                          if (txnFilter === 'all') return true
+                          return tx.type === txnFilter
+                        })
+                        .sort((a, b) => b.date.localeCompare(a.date))
+                        .map(tx => {
                         const acct = accounts.find(a => a.id === tx.accountId)
                         const cat  = categories.find(c => c.id === tx.categoryId)
                         const isInlineEdit = inlineTxnEditId === tx.id
@@ -2664,7 +2772,12 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                             <td className="py-2 pr-3">
                               <span className={`text-xs px-1.5 py-0.5 rounded ${txTypeColor}`}>{TXN_TYPE_LABELS[tx.type]}</span>
                             </td>
-                            <td className="py-2 pr-3 text-slate-400 text-xs">{cat?.name ?? '—'}</td>
+                            <td className="py-2 pr-3 text-slate-400 text-xs">
+                              {cat?.name ?? '—'}
+                              {tx.appliedByRule && (
+                                <span className="ml-1.5 text-[9px] text-indigo-400 bg-indigo-900/40 border border-indigo-700/40 px-1 py-0.5 rounded">Rule</span>
+                              )}
+                            </td>
                             <td className={`py-2 pr-3 text-right font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-100'}`}>
                               {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : ''}{currency(tx.amount)}
                             </td>
@@ -2688,6 +2801,75 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                 No transactions yet.
                 {accounts.length === 0 && <span className="block mt-1 text-slate-600 text-xs">Add an account first to start logging transactions.</span>}
               </p>
+            )}
+
+            {/* ── V8.5 Uncategorized Transactions ── */}
+            {transactions.some(tx => !tx.categoryId) && (
+              <Card title={`Uncategorized Transactions (${transactions.filter(tx => !tx.categoryId).length})`}>
+                <p className="text-xs text-slate-400 mb-3">
+                  Assign a budget category to include these in Plan vs Actual actuals.
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-slate-400 border-b border-slate-700">
+                        <th className="pb-1.5 pr-3 font-medium">Date</th>
+                        <th className="pb-1.5 pr-3 font-medium">Account</th>
+                        <th className="pb-1.5 pr-3 font-medium">Merchant</th>
+                        <th className="pb-1.5 pr-3 font-medium">Type</th>
+                        <th className="pb-1.5 pr-3 font-medium text-right">Amount</th>
+                        <th className="pb-1.5 pr-3 font-medium">Quick Assign</th>
+                        <th className="pb-1.5" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[...transactions]
+                        .filter(tx => !tx.categoryId)
+                        .sort((a, b) => b.date.localeCompare(a.date))
+                        .map(tx => {
+                          const acct = accounts.find(a => a.id === tx.accountId)
+                          const txTypeColor = tx.type === 'income' ? 'bg-green-900/50 text-green-300' : tx.type === 'transfer' ? 'bg-blue-900/50 text-blue-300' : tx.type === 'credit card payment' ? 'bg-purple-900/50 text-purple-300' : 'bg-slate-700 text-slate-300'
+                          return (
+                            <tr key={tx.id} className="border-b border-slate-800 hover:bg-amber-900/10 transition-colors">
+                              <td className="py-2 pr-3 text-slate-300 text-xs whitespace-nowrap">{tx.date}</td>
+                              <td className="py-2 pr-3 text-slate-400 text-xs">{acct?.name ?? '—'}</td>
+                              <td className="py-2 pr-3 font-medium">{tx.merchant}</td>
+                              <td className="py-2 pr-3">
+                                <span className={`text-xs px-1.5 py-0.5 rounded ${txTypeColor}`}>{TXN_TYPE_LABELS[tx.type]}</span>
+                              </td>
+                              <td className={`py-2 pr-3 text-right font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-100'}`}>
+                                {tx.type === 'income' ? '+' : '−'}{currency(tx.amount)}
+                              </td>
+                              <td className="py-2 pr-3">
+                                <select
+                                  className="px-2 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                                  value=""
+                                  onChange={e => {
+                                    if (!e.target.value) return
+                                    setTxnWithHistory(prev => prev.map(x =>
+                                      x.id === tx.id ? { ...x, categoryId: e.target.value } : x
+                                    ))
+                                  }}
+                                >
+                                  <option value="">Assign category…</option>
+                                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                </select>
+                              </td>
+                              <td className="py-2 whitespace-nowrap space-x-2">
+                                <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
+                                  setInlineTxnEditId(tx.id)
+                                  setInlineTxnEditForm({ date: tx.date, accountId: tx.accountId, merchant: tx.merchant, amount: String(tx.amount), type: tx.type, categoryId: tx.categoryId ?? '', notes: tx.notes ?? '' })
+                                  setTxnFilter('all')
+                                }}>Edit</button>
+                                <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id))}>Delete</button>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
             )}
 
             {/* ── V8.3 Transaction Rules ── */}
