@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction } from './types'
+import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule } from './types'
 import { currency, labelPeriod, formatDate } from './utils/formatting'
 import {
   BASE_SALARY,
@@ -25,6 +25,7 @@ import {
   loadSavedTargetSets,
   loadAccounts,
   loadTransactions,
+  loadTransactionRules,
   saveTab,
   savePeriod,
   saveCategories,
@@ -34,6 +35,7 @@ import {
   saveSavedTargetSets,
   saveAccounts,
   saveTransactions,
+  saveTransactionRules,
   runMigrations,
 } from './utils/storage'
 
@@ -231,9 +233,14 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
   const txnAmountRef   = useRef<HTMLInputElement>(null)
   const txnTypeRef     = useRef<HTMLSelectElement>(null)
   const txnCategoryRef = useRef<HTMLSelectElement>(null)
-  const txnNotesRef    = useRef<HTMLInputElement>(null)
+   const txnNotesRef    = useRef<HTMLInputElement>(null)
+
+  // V8.3 — Rule form refs
+  const ruleNameRef      = useRef<HTMLInputElement>(null)
+  const ruleMatchTextRef = useRef<HTMLInputElement>(null)
 
   // Refs for Log Contribution fields per target card (keyed by target id)
+
   const logDateRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const logAmountRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const logNoteRefs = useRef<Record<string, HTMLInputElement | null>>({})
@@ -261,7 +268,21 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
   const [txnHistory, setTxnHistory]           = useState<Transaction[][]>([])
   const [txnRedo, setTxnRedo]                 = useState<Transaction[][]>([])
 
+  // V8.3 — Transaction Rules
+  const [rules, setRules]                     = useState<TransactionRule[]>([])
+  const [ruleForm, setRuleForm]               = useState<{
+    name: string; matchText: string; matchField: 'merchant' | 'notes'
+    categoryId: string; type: TransactionType | ''
+  }>({ name: '', matchText: '', matchField: 'merchant', categoryId: '', type: '' })
+  const [editRuleId, setEditRuleId]           = useState<string | null>(null)
+  const [ruleHint, setRuleHint]               = useState('')
+  const [ruleHistory, setRuleHistory]         = useState<TransactionRule[][]>([])
+  const [ruleRedo, setRuleRedo]               = useState<TransactionRule[][]>([])
+  const [overwriteCategories, setOverwriteCategories] = useState(false)
+  const [applyRulesMsg, setApplyRulesMsg]     = useState('')
+
   const gp = Math.max(0, Number(gpInput) || 0)
+
   const adjustedSalary = BASE_SALARY + (baseBumpsAchieved * 5000)
   const eligibleBumps = BUMP_THRESHOLDS.filter(t => gp >= t).length
   const nextUnreachedThreshold = BUMP_THRESHOLDS[eligibleBumps]
@@ -295,8 +316,9 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
     const s = loadSavedScenarios(); if (s) setSavedScenarios(s)
     const t = loadTargets(); if (t) setTargets(t)
     const ts = loadSavedTargetSets(); if (ts) setSavedTargetSets(ts)
-    const ac = loadAccounts(); if (ac) setAccounts(ac)
+      const ac = loadAccounts(); if (ac) setAccounts(ac)
     const tx = loadTransactions(); if (tx) setTransactions(tx)
+    const rl = loadTransactionRules(); if (rl) setRules(rl)
     try { const a = localStorage.getItem('flow_actuals'); if (a) setActuals(JSON.parse(a)) } catch { /* ignore */ }
   }, [])
   useEffect(() => saveTab(tab), [tab])
@@ -308,6 +330,8 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
   useEffect(() => saveSavedTargetSets(savedTargetSets), [savedTargetSets])
   useEffect(() => saveAccounts(accounts), [accounts])
   useEffect(() => saveTransactions(transactions), [transactions])
+  useEffect(() => saveTransactionRules(rules), [rules])
+
 
   // Deadline-passed detection: show a one-time prompt per target when today is past the deadline
   // and the target is still active (not completed, not fully funded).
@@ -666,10 +690,25 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
     setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '' })
     setEditTxnId(null)
   }
-  const createOrSaveTxn = () => {
+    const createOrSaveTxn = () => {
     const merchant = txnForm.merchant.trim()
     const amount = parseFloat(txnForm.amount) || 0
     if (!merchant || !txnForm.accountId || amount <= 0) return
+
+    // Auto-fill category from rules when creating a new transaction with no category selected
+    let autoCategoryId = txnForm.categoryId
+    if (!editTxnId && !txnForm.categoryId) {
+      const mLower = merchant.toLowerCase()
+      const nLower = txnForm.notes.toLowerCase()
+      for (const rule of rules) {
+        const haystack = rule.matchField === 'merchant' ? mLower : nLower
+        if (haystack.includes(rule.matchText.toLowerCase())) {
+          autoCategoryId = rule.categoryId
+          break
+        }
+      }
+    }
+
     const now = new Date().toISOString()
     if (editTxnId) {
       setTxnWithHistory(prev => prev.map(x => x.id === editTxnId
@@ -678,7 +717,7 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
       ))
     } else {
       setTxnWithHistory(prev => [
-        { id: crypto.randomUUID(), date: txnForm.date, accountId: txnForm.accountId, merchant, amount, type: txnForm.type, categoryId: txnForm.categoryId || undefined, notes: txnForm.notes.trim() || undefined, createdAt: now },
+        { id: crypto.randomUUID(), date: txnForm.date, accountId: txnForm.accountId, merchant, amount, type: txnForm.type, categoryId: autoCategoryId || undefined, notes: txnForm.notes.trim() || undefined, createdAt: now },
         ...prev,
       ])
     }
@@ -686,7 +725,80 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
     txnMerchantRef.current?.focus()
   }
 
+  // ── V8.3 Rule helpers ─────────────────────────────────────────────────────────
+
+  const setRulesWithHistory = (updater: (prev: TransactionRule[]) => TransactionRule[]) => {
+    setRules(prev => {
+      setRuleHistory(h => [...h.slice(-19), prev])
+      setRuleRedo([])
+      return updater(prev)
+    })
+  }
+  const undoRule = () => {
+    setRuleHistory(h => {
+      if (!h.length) return h
+      const next = [...h]; const prior = next.pop()!
+      setRuleRedo(r => [...r.slice(-19), rules])
+      setRules(prior)
+      return next
+    })
+  }
+  const redoRule = () => {
+    setRuleRedo(r => {
+      if (!r.length) return r
+      const next = [...r]; const snap = next.pop()!
+      setRuleHistory(h => [...h.slice(-19), rules])
+      setRules(snap)
+      return next
+    })
+  }
+  const clearRuleForm = () => {
+    setRuleForm({ name: '', matchText: '', matchField: 'merchant', categoryId: '', type: '' })
+    setEditRuleId(null)
+    setRuleHint('')
+  }
+  const createOrSaveRule = () => {
+    const name = ruleForm.name.trim()
+    const matchText = ruleForm.matchText.trim()
+    if (!name) { setRuleHint('Enter a rule name.'); ruleNameRef.current?.focus(); return }
+    if (!matchText) { setRuleHint('Enter match text.'); ruleMatchTextRef.current?.focus(); return }
+    if (!ruleForm.categoryId) { setRuleHint('Select a category.'); return }
+    setRuleHint('')
+    if (editRuleId) {
+      setRulesWithHistory(prev => prev.map(r => r.id === editRuleId
+        ? { ...r, name, matchText, matchField: ruleForm.matchField, categoryId: ruleForm.categoryId, type: ruleForm.type || undefined }
+        : r
+      ))
+    } else {
+      setRulesWithHistory(prev => [
+        { id: crypto.randomUUID(), name, matchText, matchField: ruleForm.matchField, categoryId: ruleForm.categoryId, type: ruleForm.type || undefined, createdAt: new Date().toISOString() },
+        ...prev,
+      ])
+    }
+    clearRuleForm()
+    ruleNameRef.current?.focus()
+  }
+  const applyAllRules = () => {
+    let count = 0
+    setTxnWithHistory(prev => prev.map(tx => {
+      if (!overwriteCategories && tx.categoryId) return tx
+      const mLower = tx.merchant.toLowerCase()
+      const nLower = (tx.notes ?? '').toLowerCase()
+      for (const rule of rules) {
+        const haystack = rule.matchField === 'merchant' ? mLower : nLower
+        if (haystack.includes(rule.matchText.toLowerCase())) {
+          if (tx.categoryId !== rule.categoryId) count++
+          return { ...tx, categoryId: rule.categoryId }
+        }
+      }
+      return tx
+    }))
+    setApplyRulesMsg(`${count} transaction${count !== 1 ? 's' : ''} updated.`)
+    setTimeout(() => setApplyRulesMsg(''), 5000)
+  }
+
   const upsert = () => {
+
     const amt = Math.max(0, Number(form.amount) || 0)
     const monthlyAmt = convertToMonthly(amt, period)
     const n = form.name.trim()
@@ -2224,10 +2336,150 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                 {accounts.length === 0 && <span className="block mt-1 text-slate-600 text-xs">Add an account first to start logging transactions.</span>}
               </p>
             )}
+                     {/* ── V8.3 Category Rules ── */}
+            <Card title="Category Rules" noHover>
+              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Rule Name</label>
+                  <input
+                    ref={ruleNameRef}
+                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                    placeholder="e.g. Groceries"
+                    value={ruleForm.name}
+                    onChange={e => { setRuleForm(v => ({ ...v, name: e.target.value })); setRuleHint('') }}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ruleMatchTextRef.current?.focus() } }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Match Text</label>
+                  <input
+                    ref={ruleMatchTextRef}
+                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                    placeholder="e.g. Whole Foods"
+                    value={ruleForm.matchText}
+                    onChange={e => { setRuleForm(v => ({ ...v, matchText: e.target.value })); setRuleHint('') }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); createOrSaveRule() }
+                      if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); ruleNameRef.current?.focus() }
+                    }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Match Field</label>
+                  <select
+                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                    value={ruleForm.matchField}
+                    onChange={e => setRuleForm(v => ({ ...v, matchField: e.target.value as 'merchant' | 'notes' }))}
+                  >
+                    <option value="merchant">Merchant</option>
+                    <option value="notes">Notes</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Assign Category</label>
+                  <select
+                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                    value={ruleForm.categoryId}
+                    onChange={e => { setRuleForm(v => ({ ...v, categoryId: e.target.value })); setRuleHint('') }}
+                  >
+                    <option value="">Select category…</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Transaction Type <span className="text-slate-600">(optional)</span></label>
+                  <select
+                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                    value={ruleForm.type}
+                    onChange={e => setRuleForm(v => ({ ...v, type: e.target.value as TransactionType | '' }))}
+                  >
+                    <option value="">— any —</option>
+                    {TXN_TYPES.map(t => <option key={t} value={t}>{t[0].toUpperCase() + t.slice(1)}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="flex gap-2 mt-3 flex-wrap">
+                <button onClick={createOrSaveRule} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-1.5 text-sm transition-colors">
+                  {editRuleId ? 'Save Rule' : 'Add Rule'}
+                </button>
+                {editRuleId
+                  ? <button onClick={clearRuleForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Cancel</button>
+                  : <button onClick={clearRuleForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
+                }
+                <button onClick={undoRule} disabled={!ruleHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
+                <button onClick={redoRule} disabled={!ruleRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
+              </div>
+              {ruleHint && <p className="mt-2 text-sm text-amber-300">{ruleHint}</p>}
+
+              {transactions.length > 0 && rules.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-slate-700/60 flex items-center gap-3 flex-wrap">
+                  <button
+                    onClick={applyAllRules}
+                    className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors"
+                  >
+                    Apply Rules to Transactions
+                  </button>
+                  <label className="flex items-center gap-2 text-sm text-slate-400 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      className="rounded"
+                      checked={overwriteCategories}
+                      onChange={e => setOverwriteCategories(e.target.checked)}
+                    />
+                    Overwrite existing categories
+                  </label>
+                  {applyRulesMsg && <span className="text-sm text-green-400">{applyRulesMsg}</span>}
+                </div>
+              )}
+
+              {rules.length > 0 ? (
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-slate-400 border-b border-slate-700">
+                        <th className="pb-1.5 pr-3 font-medium">Rule Name</th>
+                        <th className="pb-1.5 pr-3 font-medium">Matches</th>
+                        <th className="pb-1.5 pr-3 font-medium">In Field</th>
+                        <th className="pb-1.5 pr-3 font-medium">Category</th>
+                        <th className="pb-1.5 pr-3 font-medium">Type Filter</th>
+                        <th className="pb-1.5" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rules.map(r => {
+                        const cat = categories.find(c => c.id === r.categoryId)
+                        return (
+                          <tr key={r.id} className="border-b border-slate-800 hover:bg-slate-800/40 transition-colors">
+                            <td className="py-2 pr-3 font-medium">{r.name}</td>
+                            <td className="py-2 pr-3 font-mono text-xs text-slate-300">{r.matchText}</td>
+                            <td className="py-2 pr-3 text-slate-400 text-xs capitalize">{r.matchField}</td>
+                            <td className="py-2 pr-3 text-xs">
+                              {cat ? <span className="text-slate-400">{cat.name}</span> : <span className="text-red-400">missing</span>}
+                            </td>
+                            <td className="py-2 pr-3 text-slate-400 text-xs">{r.type ?? '—'}</td>
+                            <td className="py-2 whitespace-nowrap space-x-2">
+                              <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
+                                setEditRuleId(r.id)
+                                setRuleForm({ name: r.name, matchText: r.matchText, matchField: r.matchField, categoryId: r.categoryId, type: r.type ?? '' })
+                                ruleNameRef.current?.focus()
+                              }}>Edit</button>
+                              <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setRulesWithHistory(prev => prev.filter(x => x.id !== r.id))}>Delete</button>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-slate-500">No rules yet. Add a rule above to auto-categorize transactions.</p>
+              )}
+            </Card>
           </section>
         )}
 
         {/* ── SCENARIOS ── */}
+
         {tab === 'Scenarios' && (
           <section className="space-y-4 transition-all duration-300">
             <Card title="Scenario Set Manager">
