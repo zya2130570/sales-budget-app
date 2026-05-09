@@ -308,7 +308,7 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
   const visualOrder: Category[] = (['fixed bill', 'variable spending', 'savings', 'investing'] as CategoryType[]).flatMap(
     type => top.filter(c => c.type === type)
   )
-  const suggestionList = form.name.trim()
+const suggestionList = form.name.trim() ? categorySuggestions.filter(s => s.toLowerCase().includes(form.name.toLowerCase())) : categorySuggestions
   const targetSuggestionList = targetForm.name.trim() ? targetPresets.filter(s => s.toLowerCase().includes(targetForm.name.toLowerCase())) : targetPresets
 
   const hasBudgetData = monthlyBudget > 0
