@@ -108,6 +108,7 @@ export default function App() {
   const [targetSuggestionIndex, setTargetSuggestionIndex] = useState(-1)
   const [budgetFormHint, setBudgetFormHint] = useState('')
   const [targetFormHint, setTargetFormHint] = useState('')
+  const [targetFormDupState, setTargetFormDupState] = useState<'hard' | 'soft' | null>(null)
   const [budgetHistory, setBudgetHistory] = useState<BudgetSnapshot[]>([])
   const [budgetRedo, setBudgetRedo] = useState<BudgetSnapshot[]>([])
   const [form, setForm] = useState({ name: '', amount: '', type: 'fixed bill' as CategoryType })
@@ -658,7 +659,7 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
   }
 
   const [editTargetHint, setEditTargetHint] = useState('')
-
+const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | null>(null)
   const saveEditTarget = (targetId: string) => {
     const name = editTargetForm.name.trim()
     const goalAmount = Number(editTargetForm.goalAmount) || 0
