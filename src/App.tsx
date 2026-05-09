@@ -16,14 +16,12 @@ import {
 } from './utils/calculations'
 import type { DashboardStatus } from './utils/calculations'
 import {
-  loadTab,
   loadPeriod,
   loadCategories,
   loadSavedBudgets,
   loadSavedScenarios,
   loadTargets,
   loadSavedTargetSets,
-  saveTab,
   savePeriod,
   saveCategories,
   saveSavedBudgets,
@@ -250,7 +248,11 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
   // localStorage
   useEffect(() => {
     runMigrations()
-    const savedTab = loadTab(); if (savedTab) setTab(savedTab)
+    try {
+  const rawTab = localStorage.getItem('flow_tab')
+  const validTabs = ['Dashboard', 'Income', 'Budget', 'Accounts', 'Scenarios', 'Targets']
+  if (rawTab && validTabs.includes(rawTab)) setTab(rawTab as Tab)
+} catch { /* ignore */ }
     const savedPeriod = loadPeriod(); if (savedPeriod) setPeriod(savedPeriod)
     const c = loadCategories(); if (c) setCategories(c)
     const b = loadSavedBudgets(); if (b) setSavedBudgets(b)
@@ -260,7 +262,9 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
     try { const a = localStorage.getItem('flow_actuals'); if (a) setActuals(JSON.parse(a)) } catch { /* ignore */ }
     try { const ac = localStorage.getItem('flow_accounts'); if (ac) setAccounts(JSON.parse(ac)) } catch { /* ignore */ }
   }, [])
-  useEffect(() => saveTab(tab), [tab])
+ useEffect(() => {
+  try { localStorage.setItem('flow_tab', tab) } catch { /* ignore */ }
+}, [tab])
   useEffect(() => savePeriod(period), [period])
   useEffect(() => saveCategories(categories), [categories])
   useEffect(() => saveSavedBudgets(savedBudgets), [savedBudgets])
