@@ -12,7 +12,7 @@ export type SavedTargetSet = { name: string; targets: Target[]; savedAt: string 
 
 // ── V8 — Accounts ─────────────────────────────────────────────────────────────
 
-export type AccountType = 'checking' | 'savings' | 'credit card' | 'investment' | 'other'
+export type AccountType = 'checking' | 'savings' | 'credit card' | 'investment' | 'cash' | 'roth ira' | 'retirement' | 'other'
 
 export type Account = {
   id: string
