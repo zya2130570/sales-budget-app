@@ -359,9 +359,17 @@ export default function App() {
   const txnCategoryRef = useRef<HTMLSelectElement>(null)
   const txnNotesRef    = useRef<HTMLInputElement>(null)
 
-  // V8.3 — Rule form refs
-  const ruleNameRef      = useRef<HTMLInputElement>(null)
-  const ruleMatchTextRef = useRef<HTMLInputElement>(null)
+ // V8.3 — Rule form refs
+  const ruleNameRef           = useRef<HTMLInputElement>(null)
+  const ruleMatchTextRef      = useRef<HTMLInputElement>(null)
+
+  // V8.6 — Inline txn edit field refs (for programmatic focus on Edit click)
+  const inlineTxnAmountRef    = useRef<HTMLInputElement>(null)
+  const inlineTxnMerchantRef  = useRef<HTMLInputElement>(null)
+  const inlineTxnTypeRef      = useRef<HTMLSelectElement>(null)
+  const inlineTxnCategoryRef  = useRef<HTMLSelectElement>(null)
+  // V8.6 — Inline rule edit field ref
+  const inlineRuleMatchRef    = useRef<HTMLInputElement>(null)
 
   // Refs for Log Contribution fields per target card (keyed by target id)
   const logDateRefs = useRef<Record<string, HTMLInputElement | null>>({})
@@ -2564,10 +2572,10 @@ export default function App() {
                           </td>
                           <td className="py-2 pr-4 text-slate-400 text-xs">{a.institution || '—'}</td>
                           <td className="py-2 whitespace-nowrap space-x-2">
-                            <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
+                          <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
                               setEditAccountId(a.id)
                               setAccountForm({ name: a.name, type: a.type, balance: a.balance === 0 ? '' : String(a.balance), institution: a.institution })
-                              accountNameRef.current?.focus()
+                              setTimeout(() => { accountBalanceRef.current?.focus(); accountBalanceRef.current?.select() }, 0)
                             }}>Edit</button>
                             <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))}>Delete</button>
                           </td>
@@ -2807,7 +2815,7 @@ export default function App() {
                         const cat  = categories.find(c => c.id === tx.categoryId)
                         const isInlineEdit = inlineTxnEditId === tx.id
 
-                        if (isInlineEdit) {
+                       if (isInlineEdit) {
                           return (
                             <tr key={tx.id} className="border-b border-slate-700 bg-blue-950/20">
                               <td className="py-1.5 pr-2">
@@ -2871,7 +2879,6 @@ export default function App() {
                             </tr>
                           )
                         }
-
                         const txTypeColor = tx.type === 'income' ? 'bg-green-900/50 text-green-300' : tx.type === 'transfer' ? 'bg-blue-900/50 text-blue-300' : tx.type === 'credit card payment' ? 'bg-purple-900/50 text-purple-300' : 'bg-slate-700 text-slate-300'
                         return (
                           <tr key={tx.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedTxnId === tx.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
@@ -2895,6 +2902,8 @@ export default function App() {
                               <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
                                 setInlineTxnEditId(tx.id)
                                 setInlineTxnEditForm({ date: tx.date, accountId: tx.accountId, merchant: tx.merchant, amount: String(tx.amount), type: tx.type, categoryId: tx.categoryId ?? '', notes: tx.notes ?? '' })
+                                setTxnDupWarning(false)
+                                setTimeout(() => { inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select() }, 0)
                               }}>Edit</button>
                               <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id))}>Delete</button>
                             </td>
@@ -2969,6 +2978,8 @@ export default function App() {
                                   setInlineTxnEditId(tx.id)
                                   setInlineTxnEditForm({ date: tx.date, accountId: tx.accountId, merchant: tx.merchant, amount: String(tx.amount), type: tx.type, categoryId: tx.categoryId ?? '', notes: tx.notes ?? '' })
                                   setTxnFilter('all')
+                                  setTxnDupWarning(false)
+                                  setTimeout(() => { inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select() }, 0)
                                 }}>Edit</button>
                                 <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id))}>Delete</button>
                               </td>
@@ -3093,8 +3104,15 @@ export default function App() {
                               <td className="py-1.5 pr-2">
                                 <input className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineRuleEditForm.name} onChange={e => setInlineRuleEditForm(v => ({ ...v, name: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') saveInlineRuleEdit(); if (e.key === 'Escape') cancelInlineRuleEdit() }} />
                               </td>
-                              <td className="py-1.5 pr-2">
-                                <input className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none font-mono" value={inlineRuleEditForm.matchText} onChange={e => setInlineRuleEditForm(v => ({ ...v, matchText: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') saveInlineRuleEdit(); if (e.key === 'Escape') cancelInlineRuleEdit() }} />
+                             <td className="py-1.5 pr-2">
+                                <input
+                                  ref={inlineRuleMatchRef}
+                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none font-mono"
+                                  value={inlineRuleEditForm.matchText}
+                                  onFocus={e => e.target.select()}
+                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, matchText: e.target.value }))}
+                                  onKeyDown={e => { if (e.key === 'Enter') saveInlineRuleEdit(); if (e.key === 'Escape') cancelInlineRuleEdit() }}
+                                />
                               </td>
                               <td className="py-1.5 pr-2">
                                 <select className="px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineRuleEditForm.matchField} onChange={e => setInlineRuleEditForm(v => ({ ...v, matchField: e.target.value as 'merchant' | 'notes' }))}>
@@ -3129,16 +3147,22 @@ export default function App() {
                             <td className="py-2 pr-3 text-xs">{cat ? <span className="text-slate-400">{cat.name}</span> : <span className="text-red-400">missing</span>}</td>
                             <td className="py-2 pr-3 text-slate-400 text-xs">{r.type ? TXN_TYPE_LABELS[r.type] : '—'}</td>
                             <td className="py-2 whitespace-nowrap space-x-2">
-                              <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
+                            <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
                                 setInlineRuleEditId(r.id)
                                 setInlineRuleEditForm({ name: r.name, matchText: r.matchText, matchField: r.matchField, categoryId: r.categoryId, type: r.type ?? '' })
+                                setTimeout(() => { inlineRuleMatchRef.current?.focus(); inlineRuleMatchRef.current?.select() }, 0)
                               }}>Edit</button>
-                              <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => {
+                             <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => {
                                 const deletedId = r.id
                                 setRulesWithHistory(prev => prev.filter(x => x.id !== deletedId))
-                                // V8.5.2 — Remove stale rule-applied marker from any transactions linked to this rule
-                                setTransactions(prev => prev.map(tx =>
-                                  tx.appliedByRule === deletedId ? { ...tx, appliedByRule: undefined } : tx
+                                // V8.6 — When a rule is deleted, clear the category AND the badge on any
+                                // transaction that the rule assigned and the user hasn't manually changed
+                                // since (appliedByRule still points to this rule = no manual override).
+                                // Uses setTxnWithHistory so the cleanup is undoable.
+                                setTxnWithHistory(prev => prev.map(tx =>
+                                  tx.appliedByRule === deletedId
+                                    ? { ...tx, categoryId: undefined, appliedByRule: undefined }
+                                    : tx
                                 ))
                               }}>Delete</button>
                             </td>
