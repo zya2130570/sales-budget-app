@@ -25,7 +25,7 @@ export type Account = {
 
 // ── V8 — Transactions ─────────────────────────────────────────────────────────
 
-export type TransactionType = 'expense' | 'income' | 'transfer'
+export type TransactionType = 'expense' | 'income' | 'transfer' | 'credit card payment'
 
 export type Transaction = {
   id: string
@@ -40,15 +40,15 @@ export type Transaction = {
 }
 
 // ── V8.3 — Transaction Rules ──────────────────────────────────────────────────
-// Manual keyword-based rules that assign a budget category to transactions
-// whose merchant or notes field contains the rule's matchText (case-insensitive).
+// Keyword-based rules that auto-assign a budget category to matching transactions.
+// matchText supports comma-separated aliases: "Target, TGT, Target Store"
 
 export type TransactionRule = {
   id: string
   name: string
-  matchText: string
+  matchText: string              // comma-separated aliases, case-insensitive
   matchField: 'merchant' | 'notes'
   categoryId: string
-  type?: TransactionType   // optional: rule only fires for this transaction type
+  type?: TransactionType         // optional filter: only fire for this transaction type
   createdAt: string
 }
