@@ -1,6 +1,5 @@
-
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet } from './types'
+import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet, Account, AccountType } from './types'
 import { currency, labelPeriod, formatDate } from './utils/formatting'
 import {
   BASE_SALARY,
@@ -59,6 +58,7 @@ const tabTips: Record<Tab, string> = {
   Dashboard: 'See your take-home pay, leftover money, warnings, and log savings from each paycheck.',
   Income: 'Change gross profit to see how your paycheck and commission change.',
   Budget: 'Plan your spending, savings, and investing.',
+  Accounts: 'Track your checking, savings, credit card, and investment accounts.',
   Scenarios: 'Compare different income levels like slow, medium, fast, or custom.',
   Targets: 'Set savings goals, deadlines, and track what you actually save. Use goal cards to log contributions and monitor progress.',
 }
@@ -120,10 +120,30 @@ export default function App() {
   // Keyed by category id → raw string so blank stays blank, never forced to "0"
   const [actuals, setActuals] = useState<Record<string, string>>({})
 
+  // ── V8.1 Accounts ────────────────────────────────────────────────────────────
+  const [accounts, setAccounts] = useState<Account[]>([])
+  const [accountHistory, setAccountHistory] = useState<Account[][]>([])
+  const [accountRedo, setAccountRedo] = useState<Account[][]>([])
+  const [accountForm, setAccountForm] = useState<{ name: string; type: AccountType; balance: string; institution: string }>({
+    name: '', type: 'checking', balance: '', institution: '',
+  })
+  const [accountFormHint, setAccountFormHint] = useState('')
+  const accountHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [inlineEditAccountId, setInlineEditAccountId] = useState<string | null>(null)
+  const [inlineEditAccountForm, setInlineEditAccountForm] = useState<{ name: string; type: AccountType; balance: string; institution: string }>({
+    name: '', type: 'checking', balance: '', institution: '',
+  })
+  const [inlineEditAccountHint, setInlineEditAccountHint] = useState('')
+
   // Persist actuals to localStorage
   useEffect(() => {
     try { localStorage.setItem('flow_actuals', JSON.stringify(actuals)) } catch { /* ignore */ }
   }, [actuals])
+
+  // Persist accounts to localStorage
+  useEffect(() => {
+    try { localStorage.setItem('flow_accounts', JSON.stringify(accounts)) } catch { /* ignore */ }
+  }, [accounts])
 
   // Target edit state
   const [editTargetId, setEditTargetId] = useState<string | null>(null)
@@ -167,10 +187,6 @@ export default function App() {
  // Keyed by category id → ref to that row's actual input
   const actualInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
   // Captures the value when a field is focused — used for batched undo on blur
- 
-
-  // V7.7.1: Parallel undo/redo stacks for actuals
-  // Snapshot of actuals at the moment an actual input is focused (for correct undo on blur)
   const actualsBeforeFocusRef = useRef<Record<string, string> | null>(null)
   // V7.7.1: Parallel undo/redo stacks for actuals (mirrors budget history timing)
   const [, setActualsHistory] = useState<Array<Record<string, string>>>([])
@@ -242,6 +258,7 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
     const t = loadTargets(); if (t) setTargets(t)
     const ts = loadSavedTargetSets(); if (ts) setSavedTargetSets(ts)
     try { const a = localStorage.getItem('flow_actuals'); if (a) setActuals(JSON.parse(a)) } catch { /* ignore */ }
+    try { const ac = localStorage.getItem('flow_accounts'); if (ac) setAccounts(JSON.parse(ac)) } catch { /* ignore */ }
   }, [])
   useEffect(() => saveTab(tab), [tab])
   useEffect(() => savePeriod(period), [period])
@@ -308,7 +325,9 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
 
  const top = [...categories].sort((a, b) => b.amount - a.amount)
   // Visual row order matches grouped table: Fixed → Variable → Savings → Investing, each by amount desc
- 
+  const visualOrder: Category[] = (['fixed bill', 'variable spending', 'savings', 'investing'] as CategoryType[]).flatMap(
+    type => top.filter(c => c.type === type)
+  )
 const suggestionList = form.name.trim() ? categorySuggestions.filter(s => s.toLowerCase().includes(form.name.toLowerCase())) : categorySuggestions
   const targetSuggestionList = targetForm.name.trim() ? targetPresets.filter(s => s.toLowerCase().includes(targetForm.name.toLowerCase())) : targetPresets
 
@@ -570,6 +589,107 @@ const suggestionList = form.name.trim() ? categorySuggestions.filter(s => s.toLo
       pushTargetHistory(prev)
       return next
     })
+  }
+
+  // ── V8.1 Account helpers ─────────────────────────────────────────────────────
+
+  const setTimedAccountFormHint = (msg: string) => {
+    setAccountFormHint(msg)
+    if (accountHintTimerRef.current) clearTimeout(accountHintTimerRef.current)
+    if (msg) accountHintTimerRef.current = setTimeout(() => setAccountFormHint(''), 8000)
+  }
+
+  const pushAccountHistory = (prev: Account[]) => {
+    setAccountHistory(h => [...h.slice(-19), prev])
+    setAccountRedo([])
+  }
+
+  const undoAccount = () => {
+    setAccountHistory(h => {
+      if (!h.length) return h
+      const next = [...h]
+      const prior = next.pop()!
+      setAccountRedo(r => [...r.slice(-19), accounts])
+      setAccounts(prior)
+      return next
+    })
+  }
+
+  const redoAccount = () => {
+    setAccountRedo(r => {
+      if (!r.length) return r
+      const next = [...r]
+      const snapshot = next.pop()!
+      setAccountHistory(h => [...h.slice(-19), accounts])
+      setAccounts(snapshot)
+      return next
+    })
+  }
+
+  const addAccount = () => {
+    const name = accountForm.name.trim()
+    const balance = Number(accountForm.balance)
+    if (!name) { setTimedAccountFormHint('Enter an account name.'); return }
+    if (isNaN(balance)) { setTimedAccountFormHint('Enter a valid balance.'); return }
+    const dup = accounts.find(a => a.name.trim().toLowerCase() === name.toLowerCase() && a.type === accountForm.type)
+    if (dup) { setTimedAccountFormHint(`An account named "${name}" of this type already exists.`); return }
+    pushAccountHistory(accounts)
+    const newAccount: Account = {
+      id: crypto.randomUUID(),
+      name,
+      type: accountForm.type,
+      balance,
+      institution: accountForm.institution.trim() || undefined,
+      createdAt: new Date().toISOString(),
+    }
+    setAccounts(prev => [...prev, newAccount])
+    setAccountForm({ name: '', type: 'checking', balance: '', institution: '' })
+    setAccountFormHint('')
+  }
+
+  const startEditAccount = (a: Account) => {
+    setInlineEditAccountId(a.id)
+    setInlineEditAccountHint('')
+    setInlineEditAccountForm({
+      name: a.name,
+      type: a.type,
+      balance: String(a.balance),
+      institution: a.institution ?? '',
+    })
+  }
+
+  const saveEditAccount = () => {
+    if (!inlineEditAccountId) return
+    const name = inlineEditAccountForm.name.trim()
+    const balance = Number(inlineEditAccountForm.balance)
+    if (!name) { setInlineEditAccountHint('Name cannot be blank.'); return }
+    if (isNaN(balance)) { setInlineEditAccountHint('Enter a valid balance.'); return }
+    const dup = accounts.find(a =>
+      a.id !== inlineEditAccountId &&
+      a.name.trim().toLowerCase() === name.toLowerCase() &&
+      a.type === inlineEditAccountForm.type
+    )
+    if (dup) { setInlineEditAccountHint(`Another account named "${name}" of this type already exists.`); return }
+    pushAccountHistory(accounts)
+    setAccounts(prev => prev.map(a => a.id !== inlineEditAccountId ? a : {
+      ...a,
+      name,
+      type: inlineEditAccountForm.type,
+      balance,
+      institution: inlineEditAccountForm.institution.trim() || undefined,
+    }))
+    setInlineEditAccountId(null)
+    setInlineEditAccountHint('')
+  }
+
+  const cancelEditAccount = () => {
+    setInlineEditAccountId(null)
+    setInlineEditAccountHint('')
+  }
+
+  const deleteAccount = (id: string) => {
+    pushAccountHistory(accounts)
+    setAccounts(prev => prev.filter(a => a.id !== id))
   }
 
  const upsert = () => {
@@ -1431,7 +1551,7 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
             <p className="text-slate-400">Personal Finance Dashboard</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {(['Dashboard', 'Income', 'Budget', 'Scenarios', 'Targets'] as Tab[]).map(t => (
+            {(['Dashboard', 'Income', 'Budget', 'Accounts', 'Scenarios', 'Targets'] as Tab[]).map(t => (
               <button
                 title={tabTips[t]}
                 key={t}
@@ -1916,7 +2036,7 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
                         </tr>
 
                         {/* ── Category rows ── */}
-                        {rows.map(c => {
+                        {rows.map((c, _rowIdx) => {
                           const planned    = convertFromMonthly(c.amount, period)
                           const rawActual  = actuals[c.id]
                           const hasActual  = rawActual !== '' && rawActual !== undefined
@@ -1935,6 +2055,10 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
                           const inlineMonthly = isEditing
                             ? convertToMonthly(Math.max(0, Number(inlineEditForm.amount) || 0), period)
                             : 0
+
+                          // For Enter-to-next navigation: flat visual order across all sections
+                          const voIdx = visualOrder.findIndex(x => x.id === c.id)
+                          const nextInOrder = voIdx >= 0 ? visualOrder[voIdx + 1] : undefined
 
                           return (
                             <tr
@@ -2035,29 +2159,50 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
                                 <div className="flex items-center gap-1">
                                   <input
                                     ref={el => { actualInputRefs.current[c.id] = el }}
-                                    type="number"
+                                    type="text"
                                     inputMode="decimal"
-                                    min={0}
-                                    step={25}
                                     className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
                                     placeholder="—"
                                     value={rawActual ?? ''}
-                                    onFocus={e => { if (e.target.value !== '') e.target.select() }}
+                                    onFocus={e => {
+                                      actualsBeforeFocusRef.current = { ...actuals }
+                                      if (e.target.value !== '') e.target.select()
+                                    }}
                                     onChange={e => {
-                                      const cleaned = e.target.value.replace(/[^0-9.]/g, '')
+                                      const cleaned = e.target.value
+                                        .replace(/[^0-9.]/g, '')
+                                        .replace(/^(\d*\.?\d*).*$/, '$1')
                                       if (cleaned === '' || Number(cleaned) === 0) {
                                         setActuals(prev => ({ ...prev, [c.id]: '' }))
                                       } else {
                                         setActuals(prev => ({ ...prev, [c.id]: cleaned }))
                                       }
                                     }}
-                                    onBlur={() => { pushActualsHistory({ ...actuals }) }}
+                                    onBlur={() => {
+                                      const before = actualsBeforeFocusRef.current
+                                      actualsBeforeFocusRef.current = null
+                                      if (before !== null) {
+                                        const afterVal = actuals[c.id] ?? ''
+                                        const beforeVal = before[c.id] ?? ''
+                                        if (afterVal !== beforeVal) pushActualsHistory(before)
+                                      }
+                                    }}
                                     onKeyDown={e => {
+                                      if (['e', 'E', '+', '-'].includes(e.key)) { e.preventDefault(); return }
                                       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                         e.preventDefault()
                                         const cur = Number(rawActual) || 0
                                         const nxt = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
                                         setActuals(prev => ({ ...prev, [c.id]: nxt === 0 ? '' : String(nxt) }))
+                                        return
+                                      }
+                                      if (e.key === 'Enter') {
+                                        e.preventDefault()
+                                        if (nextInOrder) {
+                                          actualInputRefs.current[nextInOrder.id]?.focus()
+                                        } else {
+                                          ;(e.target as HTMLInputElement).blur()
+                                        }
                                       }
                                     }}
                                   />
@@ -2065,6 +2210,7 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
                                     <button
                                       className="rounded px-1.5 py-0.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-700 hover:bg-slate-600 transition-colors"
                                       title="Clear actual"
+                                      onMouseDown={() => { actualsBeforeFocusRef.current = null }}
                                       onClick={() => { pushActualsHistory({ ...actuals }); setActuals(prev => ({ ...prev, [c.id]: '' })) }}
                                     >
                                       ×
@@ -2152,6 +2298,304 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
             </Card>
           </section>
         )}
+
+        {/* ── ACCOUNTS ── */}
+        {tab === 'Accounts' && (() => {
+          // Derived account aggregates
+          const liquidAccounts = accounts.filter(a => a.type !== 'credit card')
+          const debtAccounts   = accounts.filter(a => a.type === 'credit card')
+          const totalCash      = liquidAccounts.reduce((s, a) => s + a.balance, 0)
+          const totalDebt      = debtAccounts.reduce((s, a)  => s + a.balance, 0)
+          const netLiquid      = totalCash - totalDebt
+          const accountTypeLabel = (t: AccountType) =>
+            t === 'checking'    ? 'Checking'
+            : t === 'savings'   ? 'Savings'
+            : t === 'credit card' ? 'Credit Card'
+            : t === 'cash'      ? 'Cash'
+            : 'Investment'
+
+          return (
+            <section className="space-y-4 transition-all duration-300">
+
+              {/* ── Summary cards ── */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Metric title="Total Cash &amp; Assets" value={currency(totalCash)} tone={totalCash >= 0 ? 'good' : 'danger'} />
+                <Metric title="Total Credit Card Debt" value={currency(totalDebt)} tone={totalDebt > 0 ? 'warn' : 'neutral'} />
+                <Metric title="Net Liquid Position" value={currency(netLiquid)} tone={netLiquid >= 0 ? 'good' : 'danger'} glow={netLiquid < 0} featured />
+                <Metric title="Accounts Tracked" value={String(accounts.length)} />
+              </div>
+
+              {/* ── Add account form ── */}
+              <Card title="Add Account">
+                <div className="grid md:grid-cols-4 gap-2">
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Account Name</label>
+                    <input
+                      className="w-full p-2 rounded-lg bg-slate-800 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
+                      placeholder="e.g. Chase Checking"
+                      value={accountForm.name}
+                      onChange={e => { setAccountForm(v => ({ ...v, name: e.target.value })); setAccountFormHint('') }}
+                      onKeyDown={e => { if (e.key === 'Enter') addAccount() }}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Type</label>
+                    <select
+                      className="w-full p-2 rounded-lg bg-slate-800 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
+                      value={accountForm.type}
+                      onChange={e => setAccountForm(v => ({ ...v, type: e.target.value as AccountType }))}
+                    >
+                      <option value="checking">Checking</option>
+                      <option value="savings">Savings</option>
+                      <option value="credit card">Credit Card</option>
+                      <option value="cash">Cash</option>
+                      <option value="investment">Investment</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">
+                      {accountForm.type === 'credit card' ? 'Balance Owed' : 'Current Balance'}
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-2.5 top-2.5 text-slate-400 text-sm">$</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        className="w-full pl-6 p-2 rounded-lg bg-slate-800 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
+                        placeholder="0.00"
+                        value={accountForm.balance}
+                        onChange={e => { setAccountForm(v => ({ ...v, balance: e.target.value })); setAccountFormHint('') }}
+                        onFocus={e => e.target.select()}
+                        onKeyDown={e => {
+                          if (['e', 'E', '+'].includes(e.key)) { e.preventDefault(); return }
+                          if (e.key === 'Enter') addAccount()
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">Institution (optional)</label>
+                    <input
+                      className="w-full p-2 rounded-lg bg-slate-800 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
+                      placeholder="e.g. Chase"
+                      value={accountForm.institution}
+                      onChange={e => setAccountForm(v => ({ ...v, institution: e.target.value }))}
+                      onKeyDown={e => { if (e.key === 'Enter') addAccount() }}
+                    />
+                  </div>
+                </div>
+                <div className="mt-3 flex items-center gap-3">
+                  <button
+                    className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-sm transition-colors"
+                    onClick={addAccount}
+                  >
+                    Add Account
+                  </button>
+                  {accountFormHint && (
+                    <span className="text-sm text-amber-300">{accountFormHint}</span>
+                  )}
+                </div>
+              </Card>
+
+              {/* ── Accounts list ── */}
+              <Card title="Accounts">
+                <div className="flex gap-2 mb-3">
+                  <button
+                    onClick={undoAccount}
+                    disabled={!accountHistory.length}
+                    className={`rounded-lg px-3 py-1.5 text-sm ${accountHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+                  >
+                    Undo
+                  </button>
+                  <button
+                    onClick={redoAccount}
+                    disabled={!accountRedo.length}
+                    className={`rounded-lg px-3 py-1.5 text-sm ${accountRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}
+                  >
+                    Redo
+                  </button>
+                </div>
+
+                {accounts.length === 0 ? (
+                  <p className="text-sm text-slate-400">No accounts yet. Add one above to start tracking your balances.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-slate-400 border-b border-slate-700">
+                          <th className="pb-2 pr-3 font-medium">Name</th>
+                          <th className="pb-2 pr-3 font-medium">Type</th>
+                          <th className="pb-2 pr-3 font-medium">Institution</th>
+                          <th className="pb-2 pr-3 font-medium text-right">Balance</th>
+                          <th className="pb-2" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {accounts.map(a => {
+                          const isEditingThis = inlineEditAccountId === a.id
+                          const isDebt = a.type === 'credit card'
+                          return (
+                            <tr key={a.id} className={`border-b border-slate-800/80 transition-colors duration-200 ${isEditingThis ? 'bg-blue-950/30' : 'hover:bg-slate-800/40'}`}>
+
+                              {/* Name */}
+                              <td className="py-2 pr-3 align-middle">
+                                {isEditingThis ? (
+                                  <input
+                                    autoFocus
+                                    className="w-full px-1.5 py-1 rounded bg-slate-700 border border-blue-500 text-slate-100 text-sm focus:outline-none"
+                                    value={inlineEditAccountForm.name}
+                                    onChange={e => setInlineEditAccountForm(v => ({ ...v, name: e.target.value }))}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter')  { e.preventDefault(); saveEditAccount() }
+                                      if (e.key === 'Escape') { e.preventDefault(); cancelEditAccount() }
+                                    }}
+                                  />
+                                ) : (
+                                  <span className="font-medium text-slate-100">{a.name}</span>
+                                )}
+                              </td>
+
+                              {/* Type */}
+                              <td className="py-2 pr-3 align-middle">
+                                {isEditingThis ? (
+                                  <select
+                                    className="px-1 py-1 rounded bg-slate-700 border border-slate-500 text-slate-100 text-xs focus:outline-none"
+                                    value={inlineEditAccountForm.type}
+                                    onChange={e => setInlineEditAccountForm(v => ({ ...v, type: e.target.value as AccountType }))}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter')  { e.preventDefault(); saveEditAccount() }
+                                      if (e.key === 'Escape') { e.preventDefault(); cancelEditAccount() }
+                                    }}
+                                  >
+                                    <option value="checking">Checking</option>
+                                    <option value="savings">Savings</option>
+                                    <option value="credit card">Credit Card</option>
+                                    <option value="cash">Cash</option>
+                                    <option value="investment">Investment</option>
+                                  </select>
+                                ) : (
+                                  <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium border ${
+                                    a.type === 'checking'    ? 'bg-blue-900/40 text-blue-300 border-blue-700/40' :
+                                    a.type === 'savings'     ? 'bg-green-900/40 text-green-300 border-green-700/40' :
+                                    a.type === 'credit card' ? 'bg-red-900/40 text-red-300 border-red-700/40' :
+                                    a.type === 'cash'        ? 'bg-slate-700/60 text-slate-300 border-slate-600/60' :
+                                                               'bg-purple-900/40 text-purple-300 border-purple-700/40'
+                                  }`}>
+                                    {accountTypeLabel(a.type)}
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* Institution */}
+                              <td className="py-2 pr-3 align-middle">
+                                {isEditingThis ? (
+                                  <input
+                                    className="w-full px-1.5 py-1 rounded bg-slate-700 border border-slate-500 text-slate-100 text-sm focus:outline-none"
+                                    placeholder="Institution"
+                                    value={inlineEditAccountForm.institution}
+                                    onChange={e => setInlineEditAccountForm(v => ({ ...v, institution: e.target.value }))}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter')  { e.preventDefault(); saveEditAccount() }
+                                      if (e.key === 'Escape') { e.preventDefault(); cancelEditAccount() }
+                                    }}
+                                  />
+                                ) : (
+                                  <span className="text-slate-400">{a.institution ?? '—'}</span>
+                                )}
+                              </td>
+
+                              {/* Balance */}
+                              <td className="py-2 pr-3 align-middle text-right">
+                                {isEditingThis ? (
+                                  <div className="relative flex justify-end">
+                                    <span className="absolute left-2.5 top-1.5 text-slate-400 text-sm">$</span>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      step={1}
+                                      className="w-32 pl-6 px-1.5 py-1 rounded bg-slate-700 border border-blue-500 text-slate-100 text-sm focus:outline-none text-right"
+                                      value={inlineEditAccountForm.balance}
+                                      onChange={e => setInlineEditAccountForm(v => ({ ...v, balance: e.target.value }))}
+                                      onFocus={e => e.target.select()}
+                                      onKeyDown={e => {
+                                        if (['e', 'E', '+'].includes(e.key)) { e.preventDefault(); return }
+                                        if (e.key === 'Enter')  { e.preventDefault(); saveEditAccount() }
+                                        if (e.key === 'Escape') { e.preventDefault(); cancelEditAccount() }
+                                      }}
+                                    />
+                                  </div>
+                                ) : (
+                                  <span className={`font-semibold ${isDebt ? 'text-red-400' : a.balance >= 0 ? 'text-slate-100' : 'text-red-400'}`}>
+                                    {isDebt ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)}
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* Actions */}
+                              <td className="py-2 align-middle whitespace-nowrap">
+                                {isEditingThis ? (
+                                  <span className="flex gap-1.5 justify-end">
+                                    <button
+                                      className="rounded px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+                                      onClick={saveEditAccount}
+                                    >
+                                      Save
+                                    </button>
+                                    <button
+                                      className="rounded px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
+                                      onClick={cancelEditAccount}
+                                    >
+                                      Cancel
+                                    </button>
+                                  </span>
+                                ) : (
+                                  <span className="flex gap-2 justify-end">
+                                    <button
+                                      className="text-blue-400 hover:text-blue-300 text-xs transition-colors"
+                                      onClick={() => startEditAccount(a)}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      className="text-red-400 hover:text-red-300 text-xs transition-colors"
+                                      onClick={() => deleteAccount(a.id)}
+                                    >
+                                      Delete
+                                    </button>
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+
+                      {/* Grand total footer */}
+                      {accounts.length > 0 && (
+                        <tfoot>
+                          <tr className="border-t border-slate-600">
+                            <td colSpan={3} className="pt-2 text-xs text-slate-500 italic">Net position</td>
+                            <td className={`pt-2 text-right text-sm font-bold ${netLiquid >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {currency(netLiquid)}
+                            </td>
+                            <td />
+                          </tr>
+                        </tfoot>
+                      )}
+                    </table>
+
+                    {/* Edit hint */}
+                    {inlineEditAccountHint && (
+                      <p className="mt-2 text-sm text-amber-300">{inlineEditAccountHint}</p>
+                    )}
+                  </div>
+                )}
+              </Card>
+
+            </section>
+          )
+        })()}
 
         {/* ── SCENARIOS ── */}
         {tab === 'Scenarios' && (
