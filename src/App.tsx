@@ -423,12 +423,32 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
       return {
         ...base,
         tone: sevIdx > baseIdx ? severity : base.tone,
-        context: `Actuals are running ${actualOverspendPct.toFixed(0)}% over plan this period. ${base.context}`,
+        context: `Actual spending is tracking ${actualOverspendPct.toFixed(0)}% above plan this period — the real remaining cushion is tighter than the plan shows. ${base.context}`,
       }
     }
     return base
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+// eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inc.totalMonthly, monthlyBudget, monthlyLeft, savingsRate, fixedRatio, inc.commissionPct, categories, activeTargets, period, hasBudgetData, selectedPeriodRemaining, remainingTier.label, actualOverspendPct])
+
+  // ── V7.9.3 Primary Pressure Area ──────────────────────────────────────────────
+  // Single operational focus derived from current data only
+  const primaryPressureArea: string = (() => {
+    if (!hasBudgetData) return 'No Major Pressure Area'
+    if (selectedPeriodRemaining < 0) return 'Fixed Bills'
+    if (fixedRatio > 65) return 'Fixed Bills'
+    const varRatio = inc.totalMonthly > 0 ? (byType.variable / inc.totalMonthly) * 100 : 0
+    if (varRatio > 35) return 'Flexible Spending'
+    if (inc.commissionPct > 55) return 'Commission Dependency'
+    const behindCount = activeTargets.filter(t => computeTargetStatus(t) === 'Behind').length
+    if (behindCount > 0) return 'Goal Pressure'
+    if (savingsRate < 10) return 'Savings Pace'
+    return 'No Major Pressure Area'
+  })()
+  const primaryPressureTone: 'neutral' | 'good' | 'warn' | 'risk' | 'danger' =
+    primaryPressureArea === 'No Major Pressure Area' ? 'good' :
+    (primaryPressureArea === 'Fixed Bills' && selectedPeriodRemaining < 0) ? 'danger' :
+    (primaryPressureArea === 'Fixed Bills' || primaryPressureArea === 'Commission Dependency') ? 'risk' :
+    'warn'
 
   const createSnapshot = (): BudgetSnapshot => ({ categories: categories.map((c) => ({ ...c })), form: { ...form }, editId })
 
@@ -1273,7 +1293,11 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
               />
               <ActionCard
                 title="Test a Scenario"
-                description="Compare Slow, Medium, and Fast income levels against your current budget."
+                description={
+                  inc.commissionPct > 45
+                    ? `Commission is ${dep.toFixed(0)}% of income. Check a Slow scenario to see how the budget holds.`
+                    : "Compare Slow, Medium, and Fast income levels against your current budget."
+                }
                 onClick={() => setTab('Scenarios')}
                 tone={inc.commissionPct > 45 ? 'warn' : 'neutral'}
               />
@@ -1307,7 +1331,7 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                 <Info title="Savings Rate" value={`${savingsRate.toFixed(1)}%`} tone={savingsTone} />
                 <Info title="Commission Dependency" value={`${dep.toFixed(1)}%`} className={depColor} />
                 <Info title="Remaining Cushion" value={`${remainingCushionPct.toFixed(1)}%`} tone={cushionTone} />
-                <Info title="Budget Status / Health Tier" value={statusLabel} tone={statusTone} glow={selectedPeriodRemaining < 0} />
+                <Info title="Primary Pressure Area" value={primaryPressureArea} tone={primaryPressureTone} />
               </div>
             </Card>
           </section>
