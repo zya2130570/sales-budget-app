@@ -102,6 +102,9 @@ export default function App() {
   const [scenarioTitle, setScenarioTitle] = useState('')
   const [changeSummary, setChangeSummary] = useState<string[]>([])
   const [editId, setEditId] = useState<string | null>(null)
+  // V7.11.2 — inline row editing for Budget categories
+  const [inlineEditId, setInlineEditId] = useState<string | null>(null)
+  const [inlineEditForm, setInlineEditForm] = useState({ name: '', amount: '', type: 'fixed bill' as CategoryType })
   const [sIndex, setSIndex] = useState(-1)
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [showTargetSuggestions, setShowTargetSuggestions] = useState(false)
@@ -571,7 +574,7 @@ const suggestionList = form.name.trim() ? categorySuggestions.filter(s => s.toLo
     })
   }
 
-  const upsert = () => {
+ const upsert = () => {
     const amt = Math.max(0, Number(form.amount) || 0)
     const monthlyAmt = convertToMonthly(amt, period)
     const n = form.name.trim()
@@ -583,27 +586,30 @@ const suggestionList = form.name.trim() ? categorySuggestions.filter(s => s.toLo
     }
     setBudgetFormHint('')
     pushBudgetHistory()
-    if (editId) {
-      setCategories(prev => prev.map(c => c.id === editId ? { ...c, name: n, amount: monthlyAmt, type: form.type } : c))
-      setEditId(null)
-    } else {
-      setCategories(prev => {
-        const i = prev.findIndex(c => c.name.trim().toLowerCase() === n.toLowerCase() && c.type === form.type)
-        if (i >= 0) { const cp = [...prev]; cp[i] = { ...cp[i], amount: cp[i].amount + monthlyAmt }; return cp }
-        return [...prev, { id: crypto.randomUUID(), name: n, amount: monthlyAmt, type: form.type }]
-      })
-    }
+    setCategories(prev => {
+      const i = prev.findIndex(c => c.name.trim().toLowerCase() === n.toLowerCase() && c.type === form.type)
+      if (i >= 0) { const cp = [...prev]; cp[i] = { ...cp[i], amount: cp[i].amount + monthlyAmt }; return cp }
+      return [...prev, { id: crypto.randomUUID(), name: n, amount: monthlyAmt, type: form.type }]
+    })
     setForm({ name: '', amount: '', type: 'fixed bill' })
     budgetNameRef.current?.focus()
   }
 
-  const cancelBudgetEdit = () => {
-    setEditId(null)
-    setForm({ name: '', amount: '', type: 'fixed bill' })
-    setBudgetFormHint('')
-    budgetNameRef.current?.focus()
+  const saveInlineBudgetEdit = () => {
+    if (!inlineEditId) return
+    const amt = Math.max(0, Number(inlineEditForm.amount) || 0)
+    const monthlyAmt = convertToMonthly(amt, period)
+    const n = inlineEditForm.name.trim()
+    if (!n || monthlyAmt <= 0) return
+    pushBudgetHistory()
+    setCategories(prev => prev.map(c => c.id === inlineEditId
+      ? { ...c, name: n, amount: monthlyAmt, type: inlineEditForm.type }
+      : c
+    ))
+    setInlineEditId(null)
   }
 
+  const cancelInlineBudgetEdit = () => setInlineEditId(null)
   const addTargetContribution = (targetId: string, amount: number, date: string, note: string) => {
     if (amount <= 0) return
     setTargetsWithHistory(prev => prev.map((t) => t.id === targetId
@@ -1805,12 +1811,7 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
                   <option value="savings">3 - Savings</option>
                   <option value="investing">4 - Investing</option>
                 </select>
-                <div className="flex gap-2">
-                  <button onClick={upsert} className="flex-1 rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm transition-colors">{editId ? 'Save Changes' : 'Add'}</button>
-                  {editId && (
-                    <button onClick={cancelBudgetEdit} className="rounded-lg bg-slate-600 hover:bg-slate-500 px-3 py-2 text-sm transition-colors">Cancel</button>
-                  )}
-                </div>
+               <button onClick={upsert} className="w-full rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm transition-colors">Add</button>
               </div>
               <div className="mt-2 flex gap-2">
                 <button onClick={undoBudget} disabled={!budgetHistory.length} className={`rounded-lg px-3 py-1.5 ${budgetHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
@@ -1836,52 +1837,46 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
                   </div>
                 ))}
               </div>
-              <table className="w-full text-sm mt-3">
+             <table className="w-full text-sm mt-4 border-collapse">
                 <thead>
                   <tr className="text-left text-slate-400 border-b border-slate-700">
-                    <th className="pb-1.5 pr-2">Name</th>
-                    <th className="pb-1.5 pr-2">Type</th>
-                    {period === 'weekly'    && <th className="pb-1.5 pr-2">Weekly Planned</th>}
-                    {period === 'bi-weekly' && <th className="pb-1.5 pr-2">Bi-weekly Planned</th>}
-                    {period === 'monthly'   && <th className="pb-1.5 pr-2">Planned</th>}
-                    {period === 'yearly'    && <th className="pb-1.5 pr-2">Yearly Planned</th>}
-                    {(period === 'weekly' || period === 'bi-weekly') && <th className="pb-1.5 pr-2">Monthly</th>}
-                    {period === 'yearly'    && <th className="pb-1.5 pr-2">Monthly</th>}
-                    <th className="pb-1.5 pr-2">
+                    <th className="pb-1.5 pr-3 font-medium">Name</th>
+                    <th className="pb-1.5 pr-3 font-medium">Type</th>
+                    {period === 'weekly'    && <th className="pb-1.5 pr-3 font-medium">Wk Planned</th>}
+                    {period === 'bi-weekly' && <th className="pb-1.5 pr-3 font-medium">Bi-wk Planned</th>}
+                    {period === 'monthly'   && <th className="pb-1.5 pr-3 font-medium">Planned</th>}
+                    {period === 'yearly'    && <th className="pb-1.5 pr-3 font-medium">Yr Planned</th>}
+                    {(period === 'weekly' || period === 'bi-weekly' || period === 'yearly') && <th className="pb-1.5 pr-3 font-medium text-slate-500">Monthly</th>}
+                    <th className="pb-1.5 pr-3 font-medium">
                       <span className="inline-flex items-center gap-2">
                         <span>
-                          {period === 'weekly'    && 'Weekly Actual'}
-                          {period === 'bi-weekly' && 'Bi-weekly Actual'}
+                          {period === 'weekly'    && 'Wk Actual'}
+                          {period === 'bi-weekly' && 'Bi-wk Actual'}
                           {period === 'monthly'   && 'Actual'}
-                          {period === 'yearly'    && 'Yearly Actual'}
+                          {period === 'yearly'    && 'Yr Actual'}
                         </span>
                         {hasAnyActual && (
                           <button
                             className="rounded px-1.5 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 text-slate-300 font-normal normal-case tracking-normal transition-colors"
-                            onClick={() => {
-                              actualsBeforeFocusRef.current = null
-                              pushActualsHistory({ ...actuals })
-                              setActuals({})
-                              setPressureFocusCategoryId(null)
-                            }}
+                            onClick={() => { pushActualsHistory({ ...actuals }); setActuals({}); setPressureFocusCategoryId(null) }}
                           >
                             Clear All
                           </button>
                         )}
                       </span>
                     </th>
-                    <th className="pb-1.5 pr-2">Variance</th>
+                    <th className="pb-1.5 pr-3 font-medium">Variance</th>
                     <th className="pb-1.5" />
                   </tr>
                 </thead>
-                                <tbody>
+                <tbody>
                   {(
                     [
-                      { type: 'fixed bill',        label: 'Fixed Bills'       },
-                      { type: 'variable spending', label: 'Flexible Spending' },
-                      { type: 'savings',           label: 'Savings'           },
-                      { type: 'investing',         label: 'Investing'         },
-                    ] as { type: CategoryType; label: string }[]
+                      { type: 'fixed bill'        as CategoryType, label: 'Fixed Bills'       },
+                      { type: 'variable spending'  as CategoryType, label: 'Flexible Spending' },
+                      { type: 'savings'            as CategoryType, label: 'Savings'           },
+                      { type: 'investing'          as CategoryType, label: 'Investing'         },
+                    ]
                   ).map(({ type, label }) => {
                     const rows = top.filter(c => c.type === type)
                     if (!rows.length) return null
@@ -1911,157 +1906,243 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
                       <Fragment key={type}>
                         {/* ── Section header ── */}
                         <tr>
-                          <td
-                            colSpan={totalCols}
-                            className="pt-4 pb-1 pl-0.5 text-[11px] font-semibold uppercase tracking-widest text-slate-500 select-none"
-                          >
-                            {label}
+                          <td colSpan={totalCols} className="pt-4 pb-1.5">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-semibold uppercase tracking-wide text-slate-200 bg-slate-700 px-2 py-0.5 rounded border border-slate-600/60">
+                                {label}
+                              </span>
+                              <div className="flex-1 h-px bg-slate-700/50" />
+                              <span className="text-xs text-slate-600">{rows.length}</span>
+                            </div>
                           </td>
                         </tr>
 
                         {/* ── Category rows ── */}
                         {rows.map(c => {
-                          const planned = convertFromMonthly(c.amount, period)
-                          const rawActual = actuals[c.id]
-                          const hasActual = rawActual !== '' && rawActual !== undefined
-                          const actualVal = hasActual ? (Number(rawActual) || 0) : null
-                          const variance = actualVal !== null ? actualVal - planned : null
-                          const vTone = variance !== null ? varianceTone(variance, period) : 'neutral'
-                          const varClass =
+                          const planned    = convertFromMonthly(c.amount, period)
+                          const rawActual  = actuals[c.id]
+                          const hasActual  = rawActual !== '' && rawActual !== undefined
+                          const actualVal  = hasActual ? (Number(rawActual) || 0) : null
+                          const variance   = actualVal !== null ? actualVal - planned : null
+                          const vTone      = variance !== null ? varianceTone(variance, period) : 'neutral'
+                          const varClass   =
                             variance === null ? 'text-slate-500' :
                             vTone === 'good'    ? 'text-green-400' :
                             vTone === 'neutral' ? 'text-slate-300' :
                             vTone === 'warn'    ? 'text-yellow-300' : 'text-red-400'
                           const isPressure = pressureFocusCategoryId === c.id
+                          const isEditing  = inlineEditId === c.id
+
+                          // Inline edit: derive live monthly from the form's period-amount
+                          const inlineMonthly = isEditing
+                            ? convertToMonthly(Math.max(0, Number(inlineEditForm.amount) || 0), period)
+                            : 0
+
                           return (
                             <tr
                               key={c.id}
-                              className={`border-b border-slate-800 transition-colors duration-300 ${
-                                highlightedCategoryId === c.id
-                                  ? 'bg-blue-600/20'
-                                  : isPressure
-                                    ? 'bg-amber-500/15'
-                                    : ''
+                              className={`border-b border-slate-800/80 transition-colors duration-200 ${
+                                isEditing
+                                  ? 'bg-blue-950/30'
+                                  : highlightedCategoryId === c.id
+                                    ? 'bg-blue-600/20'
+                                    : isPressure
+                                      ? 'bg-amber-500/15'
+                                      : 'hover:bg-slate-800/40'
                               }`}
                             >
-                              <td className="py-1.5 pr-2">{c.name}</td>
-                              <td className="py-1.5 pr-2 text-slate-400 text-xs">
-                                {c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}
+                              {/* Name */}
+                              <td className="py-1.5 pr-3 align-middle">
+                                {isEditing ? (
+                                  <input
+                                    autoFocus
+                                    className="w-full px-1.5 py-1 rounded bg-slate-700 border border-blue-500 text-slate-100 text-sm focus:outline-none"
+                                    value={inlineEditForm.name}
+                                    onChange={e => setInlineEditForm(v => ({ ...v, name: e.target.value }))}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter')  { e.preventDefault(); saveInlineBudgetEdit() }
+                                      if (e.key === 'Escape') { e.preventDefault(); cancelInlineBudgetEdit() }
+                                    }}
+                                  />
+                                ) : (
+                                  c.name
+                                )}
                               </td>
-                              {period === 'weekly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'weekly'))}</td>}
-                              {period === 'bi-weekly' && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td>}
-                              {period === 'monthly'   && <td className="py-1.5 pr-2">{currency(c.amount)}</td>}
-                              {period === 'yearly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'yearly'))}</td>}
-                              {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
-                              {period === 'yearly' && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
-                              <td className="py-1 pr-2">
+
+                              {/* Type */}
+                              <td className="py-1.5 pr-3 align-middle">
+                                {isEditing ? (
+                                  <select
+                                    className="px-1 py-1 rounded bg-slate-700 border border-slate-500 text-slate-100 text-xs w-full focus:outline-none"
+                                    value={inlineEditForm.type}
+                                    onChange={e => setInlineEditForm(v => ({ ...v, type: e.target.value as CategoryType }))}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter')  { e.preventDefault(); saveInlineBudgetEdit() }
+                                      if (e.key === 'Escape') { e.preventDefault(); cancelInlineBudgetEdit() }
+                                    }}
+                                  >
+                                    <option value="fixed bill">Fixed Bill</option>
+                                    <option value="variable spending">Variable</option>
+                                    <option value="savings">Savings</option>
+                                    <option value="investing">Investing</option>
+                                  </select>
+                                ) : (
+                                  <span className="text-slate-400 text-xs">
+                                    {c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}
+                                  </span>
+                                )}
+                              </td>
+
+                              {/* Primary period planned / amount input */}
+                              {isEditing ? (
+                                <td className="py-1.5 pr-3 align-middle">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step={25}
+                                    className="w-28 px-1.5 py-1 rounded bg-slate-700 border border-blue-500 text-slate-100 text-sm focus:outline-none"
+                                    value={inlineEditForm.amount}
+                                    onChange={e => setInlineEditForm(v => ({ ...v, amount: e.target.value }))}
+                                    onFocus={e => e.target.select()}
+                                    onKeyDown={e => {
+                                      if (['e', 'E', '+', '-'].includes(e.key)) { e.preventDefault(); return }
+                                      if (e.key === 'Enter')  { e.preventDefault(); saveInlineBudgetEdit() }
+                                      if (e.key === 'Escape') { e.preventDefault(); cancelInlineBudgetEdit() }
+                                    }}
+                                  />
+                                </td>
+                              ) : (
+                                <>
+                                  {period === 'weekly'    && <td className="py-1.5 pr-3 align-middle">{currency(convertFromMonthly(c.amount, 'weekly'))}</td>}
+                                  {period === 'bi-weekly' && <td className="py-1.5 pr-3 align-middle">{currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td>}
+                                  {period === 'monthly'   && <td className="py-1.5 pr-3 align-middle">{currency(c.amount)}</td>}
+                                  {period === 'yearly'    && <td className="py-1.5 pr-3 align-middle">{currency(convertFromMonthly(c.amount, 'yearly'))}</td>}
+                                </>
+                              )}
+
+                              {/* Monthly reference column */}
+                              {(period === 'weekly' || period === 'bi-weekly') && (
+                                <td className="py-1.5 pr-3 align-middle text-slate-500">
+                                  {isEditing ? (inlineMonthly > 0 ? currency(inlineMonthly) : '—') : currency(c.amount)}
+                                </td>
+                              )}
+                              {period === 'yearly' && (
+                                <td className="py-1.5 pr-3 align-middle text-slate-500">
+                                  {isEditing ? (inlineMonthly > 0 ? currency(inlineMonthly) : '—') : currency(c.amount)}
+                                </td>
+                              )}
+
+                              {/* Actual input — identical in both modes */}
+                              <td className="py-1 pr-3 align-middle">
                                 <div className="flex items-center gap-1">
                                   <input
-                              ref={el => { actualInputRefs.current[c.id] = el }}
-                              type="text"
-                              inputMode="decimal"
-                              className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
-                              placeholder="—"
-                              value={rawActual ?? ''}
-                              onFocus={e => {
-                                actualsSessionStart.current[c.id] = rawActual ?? ''
-                                e.target.select()
-                              }}
-                              onChange={e => {
-                                // Allow digits and at most one decimal point; block everything else
-                                const raw = e.target.value
-                                const parts = raw.replace(/[^0-9.]/g, '').split('.')
-                                const cleaned = parts.length > 2
-                                  ? parts[0] + '.' + parts.slice(1).join('')
-                                  : parts.join('.')
-                                setActuals(prev => ({ ...prev, [c.id]: cleaned }))
-                              }}
-                              onBlur={() => {
-                                // Format to 2 dp; treat 0 or blank as blank
-                                const num = parseFloat(rawActual ?? '')
-                                const formatted = !isNaN(num) && num > 0 ? num.toFixed(2) : ''
-                                if (formatted !== (rawActual ?? '')) {
-                                  setActuals(prev => ({ ...prev, [c.id]: formatted }))
-                                }
-                                // Batched undo: push one entry only if value changed this session
-                                const startVal = actualsSessionStart.current[c.id] ?? ''
-                                const endVal = rawActual ?? ''
-                                if (endVal !== startVal) {
-                                  pushActualsHistory({ ...actuals, [c.id]: startVal })
-                                }
-                              }}
-                              onKeyDown={e => {
-                                // Block chars that type="text" would otherwise accept
-                                if (['e', 'E', '+', '-'].includes(e.key)) { e.preventDefault(); return }
-                                if (e.key === 'Enter') {
-                                  e.preventDefault()
-                                  const idx = visualOrder.findIndex(x => x.id === c.id)
-                                  if (e.shiftKey) {
-                                    const prev = visualOrder[idx - 1]
-                                    if (prev) actualInputRefs.current[prev.id]?.focus()
-                                    else e.currentTarget.blur()
-                                  } else {
-                                    const next = visualOrder[idx + 1]
-                                    if (next) actualInputRefs.current[next.id]?.focus()
-                                    else e.currentTarget.blur()
-                                  }
-                                  return
-                                }
-                                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                                  e.preventDefault()
-                                  const cur = parseFloat(rawActual ?? '') || 0
-                                  const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
-                                  setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
-                                }
-                              }}
-                            />
+                                    ref={el => { actualInputRefs.current[c.id] = el }}
+                                    type="number"
+                                    inputMode="decimal"
+                                    min={0}
+                                    step={25}
+                                    className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
+                                    placeholder="—"
+                                    value={rawActual ?? ''}
+                                    onFocus={e => { if (e.target.value !== '') e.target.select() }}
+                                    onChange={e => {
+                                      const cleaned = e.target.value.replace(/[^0-9.]/g, '')
+                                      if (cleaned === '' || Number(cleaned) === 0) {
+                                        setActuals(prev => ({ ...prev, [c.id]: '' }))
+                                      } else {
+                                        setActuals(prev => ({ ...prev, [c.id]: cleaned }))
+                                      }
+                                    }}
+                                    onBlur={() => { pushActualsHistory({ ...actuals }) }}
+                                    onKeyDown={e => {
+                                      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                        e.preventDefault()
+                                        const cur = Number(rawActual) || 0
+                                        const nxt = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
+                                        setActuals(prev => ({ ...prev, [c.id]: nxt === 0 ? '' : String(nxt) }))
+                                      }
+                                    }}
+                                  />
                                   {hasActual && (
                                     <button
                                       className="rounded px-1.5 py-0.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-700 hover:bg-slate-600 transition-colors"
                                       title="Clear actual"
-                                      onClick={() => {
-                                        pushActualsHistory({ ...actuals })
-                                        setActuals(prev => ({ ...prev, [c.id]: '' }))
-                                      }}
+                                      onClick={() => { pushActualsHistory({ ...actuals }); setActuals(prev => ({ ...prev, [c.id]: '' })) }}
                                     >
                                       ×
                                     </button>
                                   )}
                                 </div>
                               </td>
-                              <td className={`py-1.5 pr-2 font-medium ${varClass}`}>
+
+                              {/* Variance */}
+                              <td className={`py-1.5 pr-3 align-middle font-medium ${varClass}`}>
                                 {variance === null
                                   ? '—'
                                   : Math.abs(variance) < 0.005
                                     ? 'On plan'
                                     : variance < 0
-                                      ? `Under by ${currency(Math.abs(variance))}`
-                                      : `Over by ${currency(variance)}`}
+                                      ? `Under ${currency(Math.abs(variance))}`
+                                      : `Over ${currency(variance)}`}
                               </td>
-                              <td className="py-1.5 space-x-2 whitespace-nowrap">
-                                <button className="text-blue-300 hover:text-blue-200" onClick={() => { setForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type }); setEditId(c.id); budgetNameRef.current?.focus() }}>Edit</button>
-                                <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
+
+                              {/* Actions */}
+                              <td className="py-1.5 align-middle whitespace-nowrap">
+                                {isEditing ? (
+                                  <span className="flex gap-1.5">
+                                    <button
+                                      className="rounded px-2 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+                                      onClick={saveInlineBudgetEdit}
+                                    >
+                                      Save
+                                    </button>
+                                    <button
+                                      className="rounded px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
+                                      onClick={cancelInlineBudgetEdit}
+                                    >
+                                      Cancel
+                                    </button>
+                                  </span>
+                                ) : (
+                                  <span className="flex gap-2">
+                                    <button
+                                      className="text-blue-400 hover:text-blue-300 text-xs transition-colors"
+                                      onClick={() => {
+                                        setInlineEditId(c.id)
+                                        setInlineEditForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type })
+                                      }}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      className="text-red-400 hover:text-red-300 text-xs transition-colors"
+                                      onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}
+                                    >
+                                      Delete
+                                    </button>
+                                  </span>
+                                )}
                               </td>
                             </tr>
                           )
                         })}
 
                         {/* ── Section subtotal ── */}
-                        <tr className="border-b border-slate-700">
-                          <td colSpan={2} className="py-1.5 pl-0.5 pr-2 text-xs text-slate-500 italic">{label} total</td>
-                          <td className="py-1.5 pr-2 text-xs font-medium text-slate-400">{currency(sectionPlannedTotal)}</td>
-                          {hasMonthlyCol && <td className="py-1.5 pr-2 text-xs text-slate-500">{currency(sectionMonthlyTotal)}</td>}
-                          <td className="py-1.5 pr-2 text-xs font-medium text-slate-400">
+                        <tr className="border-b border-slate-700/60">
+                          <td colSpan={2} className="py-1.5 pl-0.5 text-xs text-slate-500 italic">{label} total</td>
+                          <td className="py-1.5 pr-3 text-xs font-semibold text-slate-400">{currency(sectionPlannedTotal)}</td>
+                          {hasMonthlyCol && <td className="py-1.5 pr-3 text-xs text-slate-600">{currency(sectionMonthlyTotal)}</td>}
+                          <td className="py-1.5 pr-3 text-xs font-semibold text-slate-400">
                             {sectionActualTotal !== null ? currency(sectionActualTotal) : '—'}
                           </td>
-                          <td className={`py-1.5 pr-2 text-xs font-medium ${svClass}`}>
+                          <td className={`py-1.5 pr-3 text-xs font-semibold ${svClass}`}>
                             {sectionVarianceTotal === null
                               ? '—'
                               : Math.abs(sectionVarianceTotal) < 0.005
                                 ? 'On plan'
                                 : sectionVarianceTotal < 0
-                                  ? `Under by ${currency(Math.abs(sectionVarianceTotal))}`
-                                  : `Over by ${currency(sectionVarianceTotal)}`}
+                                  ? `Under ${currency(Math.abs(sectionVarianceTotal))}`
+                                  : `Over ${currency(sectionVarianceTotal)}`}
                           </td>
                           <td />
                         </tr>
@@ -2069,7 +2150,6 @@ const [editTargetDupState, setEditTargetDupState] = useState<'hard' | 'soft' | n
                     )
                   })}
                 </tbody>
-
               </table>
             </Card>
           </section>
