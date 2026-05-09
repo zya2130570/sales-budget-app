@@ -168,13 +168,23 @@ export default function App() {
   const [form, setForm] = useState({ name: '', amount: '', type: 'fixed bill' as CategoryType })
 
   // ── V7.5 Plan vs Actual ──────────────────────────────────────────────────────
-  // Keyed by category id → raw string so blank stays blank, never forced to "0"
-  const [actuals, setActuals] = useState<Record<string, string>>({})
+    // Keyed by category id → raw string so blank stays blank, never forced to "0".
+  // Lazy-initialized directly from localStorage so the save effect never overwrites
+  // saved data with the empty default on first render.
+  const [actuals, setActuals] = useState<Record<string, string>>(() => {
+    try {
+      const raw = localStorage.getItem('flow_actuals')
+      return raw ? (JSON.parse(raw) as Record<string, string>) : {}
+    } catch {
+      return {}
+    }
+  })
 
-  // Persist actuals to localStorage
+  // Persist actuals — defined after lazy init so effect order is no longer a concern
   useEffect(() => {
     try { localStorage.setItem('flow_actuals', JSON.stringify(actuals)) } catch { /* ignore */ }
   }, [actuals])
+
 
   // Target edit state
   const [editTargetId, setEditTargetId] = useState<string | null>(null)
@@ -384,8 +394,8 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
     const ac = loadAccounts(); if (ac) setAccounts(ac)
     const tx = loadTransactions(); if (tx) setTransactions(tx)
     const rl = loadTransactionRules(); if (rl) setRules(rl)
-    try { const a = localStorage.getItem('flow_actuals'); if (a) setActuals(JSON.parse(a)) } catch { /* ignore */ }
-  }, [])
+     }, [])
+
   useEffect(() => saveTab(tab), [tab])
   useEffect(() => savePeriod(period), [period])
   useEffect(() => saveCategories(categories), [categories])
@@ -1760,7 +1770,10 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
               {/* ── Plan vs Actual summary — always visible ── */}
               <div className="mt-3 pt-3 border-t border-slate-700/60">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Plan vs Actual</span>
+                                   <div>
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Plan vs Actual</span>
+                    <p className="text-[10px] text-slate-500 mt-0.5 normal-case tracking-normal">Actuals combine categorized transactions plus any manual adjustment.</p>
+                  </div>
                   {hasAnyActual && (
                     <button
                       className="rounded px-2 py-0.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
@@ -1934,10 +1947,18 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                   <option value="savings">3 - Savings</option>
                   <option value="investing">4 - Investing</option>
                 </select>
-                <div className="flex gap-2">
-                  <button onClick={upsert} className="flex-1 rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm transition-colors">{editId ? 'Save Changes' : 'Add'}</button>
-                  {editId && (
-                    <button onClick={cancelBudgetEdit} className="rounded-lg bg-slate-600 hover:bg-slate-500 px-3 py-2 text-sm transition-colors">Cancel</button>
+                               <div className="flex gap-2 flex-col">
+                  <div className="flex gap-2">
+                    <button onClick={upsert} className="flex-1 rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm transition-colors">{editId ? 'Save Changes' : 'Add'}</button>
+                    {editId && (
+                      <button onClick={cancelBudgetEdit} className="rounded-lg bg-slate-600 hover:bg-slate-500 px-3 py-2 text-sm transition-colors">Cancel</button>
+                    )}
+                  </div>
+                  {!editId && (
+                    <button
+                      className="rounded-lg px-3 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors"
+                      onClick={() => { setForm({ name: 'Groceries', amount: '125', type: 'variable spending' }); setBudgetFormHint('') }}
+                    >Generate Sample</button>
                   )}
                 </div>
               </div>
@@ -2044,13 +2065,14 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                         {/* Actual cell: txn-driven breakdown or plain manual entry */}
                         <td className="py-1 pr-2">
                           {hasTxn ? (
-                            <div className="space-y-0.5 text-xs min-w-[7rem]">
-                              <div className="flex items-center gap-1.5 text-slate-400">
-                                <span className="w-5 shrink-0">Txn</span>
+                                                     <div className="space-y-0.5 text-xs min-w-[8rem]">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-slate-500">Transactions</span>
                                 <span className="font-medium text-slate-300">{currency(txnAmt)}</span>
                               </div>
                               <div className="flex items-center gap-1.5">
-                                <span className="w-5 shrink-0 text-slate-600">+adj</span>
+                                <span className="text-slate-600 shrink-0">+ Adj</span>
+
                                 <input
                                   ref={el => { actualInputRefs.current[c.id] = el }}
                                   type="number" inputMode="decimal" min={0} step={25}
@@ -2080,7 +2102,13 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                                   >×</button>
                                 )}
                               </div>
-                              {eff && <div className="font-semibold text-slate-200 pl-6">{currency(eff.total)}</div>}
+                                                          {eff && (
+                                <div className="flex items-center justify-between gap-2 border-t border-slate-700/60 pt-0.5 mt-0.5">
+                                  <span className="text-slate-500">Total Actual</span>
+                                  <span className="font-semibold text-slate-200">{currency(eff.total)}</span>
+                                </div>
+                              )}
+
                             </div>
                           ) : (
                             <div className="flex items-center gap-1">
@@ -2229,10 +2257,16 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                   />
                 </div>
               </div>
-              <div className="flex gap-2 mt-3 flex-wrap">
+                          <div className="flex gap-2 mt-3 flex-wrap">
                 <button onClick={createOrSaveAccount} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-1.5 text-sm transition-colors">
                   {editAccountId ? 'Save Changes' : 'Add Account'}
                 </button>
+                {!editAccountId && (
+                  <button
+                    className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors"
+                    onClick={() => setAccountForm({ name: 'Chase Checking', type: 'checking', balance: '1000.00', institution: 'Chase' })}
+                  >Generate Sample</button>
+                )}
                 {editAccountId
                   ? <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Cancel</button>
                   : <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
@@ -2421,8 +2455,16 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                   />
                 </div>
               </div>
-              <div className="flex gap-2 mt-3 flex-wrap">
+                           <div className="flex gap-2 mt-3 flex-wrap">
                 <button onClick={createOrSaveTxn} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-1.5 text-sm transition-colors">Add Transaction</button>
+                <button
+                  className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors"
+                  onClick={() => {
+                    const sampleAcctId = accounts[0]?.id ?? ''
+                    const sampleCatId = categories.find(c => c.type === 'variable spending')?.id ?? ''
+                    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: sampleAcctId, merchant: 'Target', amount: '45.00', type: 'expense', categoryId: sampleCatId, notes: '' })
+                  }}
+                >Generate Sample</button>
                 <button onClick={clearTxnForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
                 <button onClick={undoTxn} disabled={!txnHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoTxn} disabled={!txnRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
@@ -2593,8 +2635,15 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                   </select>
                 </div>
               </div>
-              <div className="flex gap-2 mt-3 flex-wrap">
+                           <div className="flex gap-2 mt-3 flex-wrap">
                 <button onClick={createOrSaveRule} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-1.5 text-sm transition-colors">Add Rule</button>
+                <button
+                  className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors"
+                  onClick={() => {
+                    const sampleCatId = categories.find(c => c.type === 'variable spending')?.id ?? ''
+                    setRuleForm({ name: 'Target shopping', matchText: 'Target, TGT', matchField: 'merchant', categoryId: sampleCatId, type: 'expense' })
+                  }}
+                >Generate Sample</button>
                 <button onClick={clearRuleForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
                 <button onClick={undoRule} disabled={!ruleHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoRule} disabled={!ruleRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
@@ -2913,8 +2962,16 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                     }}
                   />
                 </div>
-                <div>
+                              <div className="space-y-1.5">
                   <button className="w-full px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 transition-colors" onClick={createTarget}>Create Savings Goal</button>
+                  <button
+                    className="w-full px-3 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors"
+                    onClick={() => {
+                      const deadline = new Date()
+                      deadline.setMonth(deadline.getMonth() + 3)
+                      setTargetForm({ name: 'Emergency Fund', goalAmount: '1000', currentSaved: '100', startDate: new Date().toISOString().slice(0, 10), deadline: deadline.toISOString().slice(0, 10) })
+                    }}
+                  >Generate Sample</button>
                 </div>
               </div>
               {targetFormHint && (
