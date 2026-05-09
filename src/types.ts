@@ -36,6 +36,7 @@ export type Transaction = {
   type: TransactionType
   categoryId?: string
   notes?: string
+  appliedByRule?: string   // rule id that auto-assigned the category (V8.5)
   createdAt: string
 }
 
