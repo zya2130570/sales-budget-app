@@ -753,12 +753,60 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
           ? 'bg-red-900/60 text-red-300 border border-red-700/50'
           : 'bg-slate-700/80 text-slate-200 border border-slate-600/50'
 
-    const barColor =
+   const barColor =
       status === 'Complete' || status === 'Ahead'
         ? 'bg-green-500'
         : status === 'Behind'
           ? 'bg-red-500'
           : 'bg-blue-500'
+
+    // ── V7.10 Original pace vs current pace ─────────────────────────────────
+    // originalWeekly = what the saving rate would have been from start → deadline
+    //   at zero saved (the pace set on day one).
+    // req.weekly     = what must be saved per week *starting today* to hit the goal.
+    const origStartMs = (() => {
+      const s = t.startDate ?? t.createdAt
+      if (!s) return null
+      const d = new Date(s + 'T00:00:00')
+      if (isNaN(d.getTime())) return null
+      d.setHours(0, 0, 0, 0)
+      return d.getTime()
+    })()
+    const deadlineMs = (() => {
+      if (!t.deadline) return null
+      const d = new Date(t.deadline + 'T00:00:00')
+      if (isNaN(d.getTime())) return null
+      d.setHours(0, 0, 0, 0)
+      return d.getTime()
+    })()
+    const originalDays = (origStartMs !== null && deadlineMs !== null && deadlineMs > origStartMs)
+      ? Math.max(1, (deadlineMs - origStartMs) / 86400000)
+      : null
+    const originalWeekly  = originalDays !== null ? t.goalAmount / (originalDays / 7)       : null
+    const originalMonthly = originalDays !== null ? t.goalAmount / (originalDays / 30.4375) : null
+    const catchUpWeekly   = originalWeekly !== null ? req.weekly - originalWeekly : null
+
+    const pacingSentence: string | null = (() => {
+      if (status === 'Complete') return null
+      if (originalWeekly === null) {
+        return `Saving ${currency(req.weekly)}/week will reach the goal by the deadline.`
+      }
+      const extra = req.weekly - originalWeekly
+      if (status === 'Behind') {
+        return extra > 0.5
+          ? `You now need ${currency(req.weekly)}/week to catch up. Original pace was ${currency(originalWeekly)}/week.`
+          : `Slightly behind but close to the original pace of ${currency(originalWeekly)}/week.`
+      }
+      if (status === 'Ahead') {
+        return `Ahead of the original pace — originally ${currency(originalWeekly)}/week was needed.`
+      }
+      // On Track
+      return Math.abs(extra) < 0.5
+        ? 'Current pace still matches the original plan.'
+        : extra > 0
+          ? `Needs ${currency(req.weekly)}/week from today — original pace was ${currency(originalWeekly)}/week.`
+          : `Slightly ahead of the original pace of ${currency(originalWeekly)}/week.`
+    })()
 
     return (
       <Card
@@ -973,20 +1021,46 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
             </div>
 
             {/* REQUIRED SAVINGS SUMMARY */}
-            <div className="grid grid-cols-3 gap-2 mb-3">
+            {/* REQUIRED SAVINGS SUMMARY — amounts needed starting today */}
+            <div className="grid grid-cols-3 gap-2 mb-2">
               <div className="rounded-lg bg-slate-700/50 border border-slate-600/50 px-3 py-2 text-center">
-                <div className="text-xs text-slate-400 mb-0.5">Weekly</div>
+                <div className="text-xs text-slate-400 mb-0.5">Weekly needed now</div>
                 <div className="text-sm font-semibold text-slate-100">{currency(req.weekly)}</div>
               </div>
               <div className="rounded-lg bg-slate-700/50 border border-slate-600/50 px-3 py-2 text-center">
-                <div className="text-xs text-slate-400 mb-0.5">Bi-weekly</div>
+                <div className="text-xs text-slate-400 mb-0.5">Bi-weekly needed now</div>
                 <div className="text-sm font-semibold text-slate-100">{currency(req.biWeekly)}</div>
               </div>
               <div className="rounded-lg bg-slate-700/50 border border-slate-600/50 px-3 py-2 text-center">
-                <div className="text-xs text-slate-400 mb-0.5">Monthly</div>
+                <div className="text-xs text-slate-400 mb-0.5">Monthly needed now</div>
                 <div className="text-sm font-semibold text-slate-100">{currency(req.monthly)}</div>
               </div>
             </div>
+
+            {/* PACING SENTENCE */}
+            {pacingSentence && (
+              <p className={`text-xs mb-3 leading-relaxed ${status === 'Behind' ? 'text-red-300' : 'text-slate-400'}`}>
+                {pacingSentence}
+              </p>
+            )}
+
+            {/* CATCH-UP COMPARISON — shown prominently when Behind */}
+            {status === 'Behind' && originalWeekly !== null && catchUpWeekly !== null && catchUpWeekly > 0.5 && (
+              <div className="rounded-lg bg-red-900/20 border border-red-700/30 px-3 py-2 mb-3 grid grid-cols-3 gap-2 text-center text-xs">
+                <div>
+                  <div className="text-slate-400 mb-0.5">Original pace</div>
+                  <div className="font-medium text-slate-300">{currency(originalWeekly)}/wk</div>
+                </div>
+                <div>
+                  <div className="text-slate-400 mb-0.5">Needed now</div>
+                  <div className="font-medium text-red-300">{currency(req.weekly)}/wk</div>
+                </div>
+                <div>
+                  <div className="text-slate-400 mb-0.5">Extra catch-up</div>
+                  <div className="font-medium text-red-300">+{currency(catchUpWeekly)}/wk</div>
+                </div>
+              </div>
+            )}
 
             {/* COLLAPSIBLE DETAILS */}
             <div className="mb-3">
@@ -1002,6 +1076,24 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                   <Row l="Days remaining" v={`${req.days}`} />
                   <Row l="Est. pay periods remaining" v={`${req.payPeriods}`} />
                   <Row l="Yearly required" v={currency(req.yearly)} />
+                  {/* Original pace comparison inside details for On Track / Ahead goals */}
+                  {originalWeekly !== null && status !== 'Behind' && status !== 'Complete' && (
+                    <>
+                      <Row l="Original weekly pace" v={`${currency(originalWeekly)}/wk`} />
+                      {originalMonthly !== null && (
+                        <Row l="Original monthly pace" v={`${currency(originalMonthly)}/mo`} />
+                      )}
+                      {catchUpWeekly !== null && Math.abs(catchUpWeekly) > 0.5 && (
+                        <Row
+                          l={catchUpWeekly > 0 ? 'Extra vs original pace' : 'Ahead of original pace'}
+                          v={catchUpWeekly > 0
+                            ? `+${currency(catchUpWeekly)}/wk`
+                            : `${currency(Math.abs(catchUpWeekly))}/wk ahead`}
+                          valueClass={catchUpWeekly > 0 ? 'text-yellow-300' : 'text-green-400'}
+                        />
+                      )}
+                    </>
+                  )}
                   {t.contributions.length > 0 && (
                     <div className="mt-2 pt-2 border-t border-slate-700/60">
                       <div className="text-xs text-slate-400 mb-1.5">Contribution history ({t.contributions.length})</div>
