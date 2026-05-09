@@ -184,25 +184,13 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
   // Blur-save timer: delays save so focus moving between edit fields doesn't trigger premature save
   const editBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Auto-clear timers for inline hint/warning messages
+ // Auto-clear timers for inline hint/warning messages
   const budgetHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const targetHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const editTargetHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const setTimedBudgetFormHint = (msg: string) => {
     setBudgetFormHint(msg)
     if (budgetHintTimerRef.current) clearTimeout(budgetHintTimerRef.current)
     if (msg) budgetHintTimerRef.current = setTimeout(() => setBudgetFormHint(''), 10000)
-  }
-  const setTimedTargetFormHint = (msg: string) => {
-    setTargetFormHint(msg)
-    if (targetHintTimerRef.current) clearTimeout(targetHintTimerRef.current)
-    if (msg) targetHintTimerRef.current = setTimeout(() => setTargetFormHint(''), 10000)
-  }
-  const setTimedEditTargetHint = (msg: string) => {
-    setEditTargetHint(msg)
-    if (editTargetHintTimerRef.current) clearTimeout(editTargetHintTimerRef.current)
-    if (msg) editTargetHintTimerRef.current = setTimeout(() => setEditTargetHint(''), 10000)
   }
 
   // Refs for Log Contribution fields per target card (keyed by target id)
@@ -628,16 +616,37 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
     const sameGoal = (t: Target) => t.goalAmount === goalAmount
     const hardConflict = targets.find(t => sameName(t) && sameDeadline(t) && sameGoal(t))
     if (hardConflict) {
-      setTimedTargetFormHint('A savings goal with this name, deadline, and goal amount already exists.')
-      targetNameRef.current?.focus()
+      setTargetFormDupState('hard')
+      setTargetFormHint('')
       return
     }
     const softConflict = targets.find(t => (sameName(t) && sameDeadline(t)) || (sameName(t) && sameGoal(t)))
-    if (softConflict && !targetFormHint.startsWith('Possible duplicate')) {
-      setTimedTargetFormHint('Possible duplicate: please confirm this is not the same savings goal.')
+    if (softConflict && targetFormDupState !== 'soft') {
+      setTargetFormDupState('soft')
+      setTargetFormHint('')
       return
     }
+    // No conflict, or user pressed Create a second time after the soft warning (implicit proceed)
+    setTargetFormDupState(null)
+    const today = new Date().toISOString().slice(0, 10)
+    setTargetsWithHistory(prev => [
+      { id: crypto.randomUUID(), name, goalAmount, currentSaved, startDate: startDate || today, deadline, createdAt: today, type: 'savings', contributions: [], completed: false },
+      ...prev,
+    ])
+    setTargetFormHint('')
+    setTargetForm({ name: '', goalAmount: '', currentSaved: '', startDate: new Date().toISOString().slice(0, 10), deadline: '' })
+    setTimeout(() => targetNameRef.current?.focus(), 0)
+  }
 
+  // Bypasses soft-conflict check — called by "Save Anyway" button
+  const createTargetForce = () => {
+    const name = targetForm.name.trim()
+    const goalAmount = Number(targetForm.goalAmount) || 0
+    const currentSaved = Number(targetForm.currentSaved) || 0
+    const startDate = targetForm.startDate
+    const deadline = targetForm.deadline
+    if (!name || goalAmount <= 0 || !deadline) return
+    setTargetFormDupState(null)
     const today = new Date().toISOString().slice(0, 10)
     setTargetsWithHistory(prev => [
       { id: crypto.randomUUID(), name, goalAmount, currentSaved, startDate: startDate || today, deadline, createdAt: today, type: 'savings', contributions: [], completed: false },
@@ -663,14 +672,17 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
     const sameGoal = (t: Target) => t.goalAmount === goalAmount
     const hardConflict = targets.find(t => other(t) && sameName(t) && sameDeadline(t) && sameGoal(t))
     if (hardConflict) {
-      setTimedEditTargetHint('A savings goal with this name, deadline, and goal amount already exists.')
+      setEditTargetDupState('hard')
+      setEditTargetHint('')
       return
     }
     const softConflict = targets.find(t => other(t) && ((sameName(t) && sameDeadline(t)) || (sameName(t) && sameGoal(t))))
-    if (softConflict && !editTargetHint.startsWith('Possible duplicate')) {
-      setTimedEditTargetHint('Possible duplicate: please confirm this is not the same savings goal.')
+    if (softConflict && editTargetDupState !== 'soft') {
+      setEditTargetDupState('soft')
+      setEditTargetHint('')
       return
     }
+    setEditTargetDupState(null)
     setEditTargetHint('')
     setTargetsWithHistory(prev => prev.map(t => t.id === targetId
       ? { ...t, name, goalAmount, currentSaved, startDate, deadline }
@@ -680,8 +692,27 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
     setEditTargetOriginal(null)
   }
 
-  const cancelEditTarget = (targetId: string) => {
+  // Bypasses soft-conflict check — called by "Save Anyway" button in edit mode
+  const saveEditTargetForce = (targetId: string) => {
+    const name = editTargetForm.name.trim()
+    const goalAmount = Number(editTargetForm.goalAmount) || 0
+    const currentSaved = Number(editTargetForm.currentSaved) || 0
+    const startDate = editTargetForm.startDate
+    const deadline = editTargetForm.deadline
+    if (!name || goalAmount <= 0 || !deadline) return
+    setEditTargetDupState(null)
+    setEditTargetHint('')
+    setTargetsWithHistory(prev => prev.map(t => t.id === targetId
+      ? { ...t, name, goalAmount, currentSaved, startDate, deadline }
+      : t
+    ))
+    setEditTargetId(null)
+    setEditTargetOriginal(null)
+  }
+
+ const cancelEditTarget = (targetId: string) => {
     if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current)
+    setEditTargetDupState(null)
     if (editTargetOriginal && editTargetOriginal.id === targetId) {
       setTargets(prev => prev.map(t => t.id === targetId ? editTargetOriginal! : t))
     }
@@ -986,7 +1017,51 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                 Cancel
               </button>
             </div>
-            {editTargetHint && (
+           {editTargetDupState === 'hard' && (
+              <div className="mt-3 rounded-lg border border-red-700/50 bg-red-900/20 px-3 py-2.5">
+                <p className="text-sm text-red-200 mb-2">This looks like an existing savings goal.</p>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    className="rounded px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors"
+                    onClick={() => setEditTargetDupState(null)}
+                  >
+                    Continue Editing
+                  </button>
+                  <button
+                    className="rounded px-3 py-1.5 text-xs bg-red-800 hover:bg-red-700 text-red-100 transition-colors"
+                    onClick={() => { if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current); setEditTargetDupState(null); setEditTargetId(null); setEditTargetOriginal(null); setEditTargetHint(''); setTargetsWithHistory(prev => prev.filter(x => x.id !== t.id)) }}
+                  >
+                    Delete This Goal
+                  </button>
+                </div>
+              </div>
+            )}
+            {editTargetDupState === 'soft' && (
+              <div className="mt-3 rounded-lg border border-amber-700/50 bg-amber-900/20 px-3 py-2.5">
+                <p className="text-sm text-amber-200 mb-2">Possible duplicate — this shares key details with another savings goal.</p>
+                <div className="flex gap-2 flex-wrap">
+                  <button
+                    className="rounded px-3 py-1.5 text-xs bg-blue-700 hover:bg-blue-600 text-blue-100 transition-colors"
+                    onClick={() => saveEditTargetForce(t.id)}
+                  >
+                    Save Anyway
+                  </button>
+                  <button
+                    className="rounded px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors"
+                    onClick={() => setEditTargetDupState(null)}
+                  >
+                    Continue Editing
+                  </button>
+                  <button
+                    className="rounded px-3 py-1.5 text-xs bg-red-800 hover:bg-red-700 text-red-100 transition-colors"
+                    onClick={() => { if (editBlurTimerRef.current) clearTimeout(editBlurTimerRef.current); setEditTargetDupState(null); setEditTargetId(null); setEditTargetOriginal(null); setEditTargetHint(''); setTargetsWithHistory(prev => prev.filter(x => x.id !== t.id)) }}
+                  >
+                    Delete This Goal
+                  </button>
+                </div>
+              </div>
+            )}
+            {!editTargetDupState && editTargetHint && (
               <p className="mt-2 text-sm text-amber-300">{editTargetHint}</p>
             )}
           </div>
@@ -2186,7 +2261,51 @@ const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
                   <button className="w-full px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 transition-colors" onClick={createTarget}>Create Savings Goal</button>
                 </div>
               </div>
-              {targetFormHint && (
+              {targetFormDupState === 'hard' && (
+                <div className="mt-3 rounded-lg border border-red-700/50 bg-red-900/20 px-3 py-2.5">
+                  <p className="text-sm text-red-200 mb-2">This looks like an existing savings goal.</p>
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      className="rounded px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors"
+                      onClick={() => { setTargetFormDupState(null); targetNameRef.current?.focus() }}
+                    >
+                      Continue Editing
+                    </button>
+                    <button
+                      className="rounded px-3 py-1.5 text-xs bg-red-800 hover:bg-red-700 text-red-100 transition-colors"
+                      onClick={() => { setTargetFormDupState(null); setTargetFormHint(''); setTargetForm({ name: '', goalAmount: '', currentSaved: '', startDate: new Date().toISOString().slice(0, 10), deadline: '' }); targetNameRef.current?.focus() }}
+                    >
+                      Clear Form
+                    </button>
+                  </div>
+                </div>
+              )}
+              {targetFormDupState === 'soft' && (
+                <div className="mt-3 rounded-lg border border-amber-700/50 bg-amber-900/20 px-3 py-2.5">
+                  <p className="text-sm text-amber-200 mb-2">Possible duplicate — this shares key details with another savings goal.</p>
+                  <div className="flex gap-2 flex-wrap">
+                    <button
+                      className="rounded px-3 py-1.5 text-xs bg-blue-700 hover:bg-blue-600 text-blue-100 transition-colors"
+                      onClick={createTargetForce}
+                    >
+                      Save Anyway
+                    </button>
+                    <button
+                      className="rounded px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-200 transition-colors"
+                      onClick={() => { setTargetFormDupState(null); targetNameRef.current?.focus() }}
+                    >
+                      Continue Editing
+                    </button>
+                    <button
+                      className="rounded px-3 py-1.5 text-xs bg-red-800 hover:bg-red-700 text-red-100 transition-colors"
+                      onClick={() => { setTargetFormDupState(null); setTargetFormHint(''); setTargetForm({ name: '', goalAmount: '', currentSaved: '', startDate: new Date().toISOString().slice(0, 10), deadline: '' }); targetNameRef.current?.focus() }}
+                    >
+                      Clear Form
+                    </button>
+                  </div>
+                </div>
+              )}
+              {!targetFormDupState && targetFormHint && (
                 <p className="mt-2 text-sm text-amber-300">{targetFormHint}</p>
               )}
             </Card>
