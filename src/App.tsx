@@ -1301,7 +1301,7 @@ export default function App() {
     setCsvImportError('')
     try {
       const sessionId = crypto.randomUUID().slice(0, 8)
-      const preview = runimportpipeline({
+      const preview = runImportPipeline({
         csvText: text,
         defaultAccountId: accounts[0]?.id ?? '',
         existingTransactions: transactions,
