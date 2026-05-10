@@ -1269,7 +1269,9 @@ export default function App() {
     const startMs = new Date(range.start + 'T00:00:00').getTime()
     const endMs   = Math.min(new Date(range.end + 'T23:59:59').getTime(), Date.now())
     // Build 10 varied transactions — mix of types, ~30% uncategorized, ~15% duplicate-like
-   const roll     = Math.random()
+    const batch: Transaction[] = []
+    for (let i = 0; i < 10; i++) {
+      const roll     = Math.random()
       const type: TransactionType = roll < 0.72 ? 'expense' : roll < 0.84 ? 'income' : roll < 0.93 ? 'transfer' : 'credit card payment'
       const merchant =
         type === 'income'               ? INCOME_MERCHANTS[Math.floor(Math.random() * INCOME_MERCHANTS.length)]
