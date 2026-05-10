@@ -40,8 +40,8 @@ import {
 } from './utils/storage'
 // V9.0 — CSV import pipeline
 import { runImportPipeline, buildImportedTransactions } from './utils/importHelpers'
-import type { ImportRow, ImportPipelineResult } from './utils/importHelpers'
-import { generateSampleCsvString } from './utils/csv'
+import type { ImportPipelineResult } from './utils/importHelpers'
+import { parseCsv, detectColumns, generateSampleCsvString } from './utils/csv'
 const presetTypeMap: Record<string, CategoryType> = {
   Bike: 'fixed bill',
   Braiding: 'fixed bill',
@@ -1297,7 +1297,23 @@ export default function App() {
     setCsvImportLoading(true)
     setCsvImportError('')
     try {
-      const preview = runImportPipeline(text)
+      const parsed = parseCsv(text)
+      if (parsed.errorMessage) {
+        setCsvImportError(parsed.errorMessage)
+        return
+      }
+      if (parsed.rows.length === 0) {
+        setCsvImportError('No rows found. Make sure the CSV has a header row and at least one data row.')
+        return
+      }
+      const mapping = detectColumns(parsed.headers)
+      const preview = runImportPipeline({
+        rows: parsed.rows,
+        mapping,
+        existing: transactions,
+        rules,
+        defaultAccountId: accounts[0]?.id ?? '',
+      })
       setCsvImportPreview(preview)
     } catch {
       setCsvImportError('Failed to parse the CSV. Please check the file format and try again.')
@@ -1329,19 +1345,13 @@ export default function App() {
   }
   const commitCsvImport = () => {
     if (!csvImportPreview) return
-    // ImportPipelineResult contains the ImportRow[] under a property — extract it.
-    // The result object itself is not an array; find the array property at runtime.
-    const resultAsRecord = csvImportPreview as unknown as Record<string, unknown>
-    const rowsArray = (
-      Array.isArray(resultAsRecord.rows)         ? resultAsRecord.rows         :
-      Array.isArray(resultAsRecord.items)        ? resultAsRecord.items        :
-      Array.isArray(resultAsRecord.parsed)       ? resultAsRecord.parsed       :
-      Array.isArray(resultAsRecord.data)         ? resultAsRecord.data         :
-      Array.isArray(resultAsRecord.results)      ? resultAsRecord.results      :
-      Array.isArray(resultAsRecord.transactions) ? resultAsRecord.transactions :
-      []
-    ) as ImportRow[]
-    const newTxns = buildImportedTransactions(rowsArray)
+    const batchId = crypto.randomUUID().slice(0, 8)
+    const newTxns = buildImportedTransactions(
+      csvImportPreview.importRows,
+      accounts[0]?.id ?? '',
+      batchId,
+      false,
+    )
     if (newTxns.length === 0) { closeCsvImport(); return }
     setTxnWithHistory(prev => [...newTxns, ...prev])
     showToast(`Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''}.`)
@@ -3949,19 +3959,34 @@ function CsvImportModal({
 
           {/* Preview ready state — confirm or cancel */}
           {preview && !loading && (
-            <div className="rounded-xl border border-green-700/40 bg-green-900/10 px-4 py-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="text-green-400 text-lg">✓</span>
-                <p className="text-sm text-slate-200 font-medium">CSV parsed successfully — ready to import.</p>
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
+                  <div className="text-xs text-slate-400 mb-0.5">Ready</div>
+                  <div className="text-xl font-bold text-green-400">{preview.readyCount}</div>
+                </div>
+                <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
+                  <div className="text-xs text-slate-400 mb-0.5">Duplicates</div>
+                  <div className={`text-xl font-bold ${preview.duplicateCount > 0 ? 'text-amber-300' : 'text-slate-400'}`}>{preview.duplicateCount}</div>
+                </div>
+                <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
+                  <div className="text-xs text-slate-400 mb-0.5">Invalid</div>
+                  <div className={`text-xl font-bold ${preview.invalidCount > 0 ? 'text-red-400' : 'text-slate-400'}`}>{preview.invalidCount}</div>
+                </div>
               </div>
-              <p className="text-xs text-slate-400">
-                Duplicate detection, rule matching, and type inference have been applied.
-                Click <span className="font-medium text-slate-300">Import Transactions</span> to commit, or{' '}
-                <button onClick={onResetPreview} className="underline text-blue-400 hover:text-blue-300">choose a different file</button>.
-              </p>
-              <p className="text-xs text-slate-500">
-                Imported transactions will appear in your Transactions list with a <span className="text-violet-400">CSV Import</span> badge.
-              </p>
+              {preview.duplicateCount > 0 && (
+                <p className="text-xs text-amber-300/80">Duplicates are excluded by default. Click Import to bring in only the {preview.readyCount} ready row{preview.readyCount !== 1 ? 's' : ''}.</p>
+              )}
+              {preview.readyCount === 0 && (
+                <p className="text-xs text-red-300">No importable rows found — all rows are duplicates or invalid. Check your CSV format.</p>
+              )}
+              {preview.readyCount > 0 && (
+                <p className="text-xs text-slate-400">
+                  Duplicate detection, rule matching, and type inference applied.
+                  Click <span className="font-medium text-slate-300">Import Transactions</span> to commit, or{' '}
+                  <button onClick={onResetPreview} className="underline text-blue-400 hover:text-blue-300">choose a different file</button>.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -3975,9 +4000,9 @@ function CsvImportModal({
               </button>
             )}
           </div>
-          {preview && (
+          {preview && preview.readyCount > 0 && (
             <button onClick={onCommit} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-5 py-2 text-sm font-medium transition-colors">
-              Import Transactions
+              Import {preview.readyCount} transaction{preview.readyCount !== 1 ? 's' : ''}
             </button>
           )}
         </div>
