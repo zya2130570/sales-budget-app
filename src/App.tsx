@@ -1109,7 +1109,7 @@ export default function App() {
 
   // V9.0.1 — Predictive rule preview. V9.0.2 — respects opt-out + returns ruleId for toggle.
   const computeRulePreview = (
-    merchant: string, notes: string, categoryId: string, optOutOverride?: string | null
+    merchant: string, notes: string, categoryId: string, _optOutOverride?: string | null
   ): { hint: string; ruleId: string | null } => {
     if (categoryId) return { hint: '', ruleId: null }
     if (!merchant.trim()) return { hint: '', ruleId: null }
