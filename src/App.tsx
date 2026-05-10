@@ -896,6 +896,12 @@ export default function App() {
     setTxnHint('')
     setTxnDupWarning(false)
   }
+  // Soft reset after a successful add — keeps account, type, date so rapid entry stays frictionless
+  const resetTxnFormAfterAdd = () => {
+    setTxnForm(prev => ({ ...prev, merchant: '', amount: '', categoryId: '', notes: '' }))
+    setTxnHint('')
+    setTxnDupWarning(false)
+  }
   // Soft reset after a successful add — keeps account, type, date so rapid entry is frictionless
   const resetTxnFormAfterAdd = () => {
     setTxnForm(prev => ({ ...prev, merchant: '', amount: '', categoryId: '', notes: '' }))
@@ -1931,6 +1937,28 @@ export default function App() {
     )
   }
 
+  // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
+  const merchantSuggestion: { text: string; kind: 'rule' | 'history' } | null = (() => {
+    const m = txnForm.merchant.trim()
+    if (!m || txnForm.categoryId) return null
+    const mLower = m.toLowerCase()
+    // Rule match takes priority
+    for (const rule of rules) {
+      const hay = rule.matchField === 'merchant' ? mLower : txnForm.notes.toLowerCase()
+      if (matchesAnyAlias(hay, rule.matchText)) {
+        const cat = categories.find(c => c.id === rule.categoryId)
+        return { kind: 'rule', text: `Rule will apply: ${cat?.name ?? 'a category'}` }
+      }
+    }
+    // Past transaction match
+    const past = transactions.find(x => x.categoryId && x.merchant.toLowerCase() === mLower)
+    if (past) {
+      const cat = categories.find(c => c.id === past.categoryId)
+      if (cat) return { kind: 'history', text: `Suggested category: ${cat.name}` }
+    }
+    return null
+  })()
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
       <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
@@ -2777,15 +2805,22 @@ export default function App() {
                         const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
                         setTxnForm(v => ({ ...v, amount: next === 0 ? '' : String(next) }))
                       }
-                      if (e.key === 'Enter') {
+                     if (e.key === 'Enter') {
                         e.preventDefault()
                         if (e.shiftKey) {
                           txnMerchantRef.current?.focus()
-                       } else if ((txnForm.accountId || accounts.length === 1) && txnForm.merchant.trim() && parseFloat(txnForm.amount) > 0) {
-                          // All required fields filled — log the transaction directly
-                          createOrSaveTxn()
+                        } else if (!txnForm.accountId) {
+                          txnAccountRef.current?.focus()
+                          setTimedTxnHint('Choose an account first.')
+                        } else if (!txnForm.merchant.trim()) {
+                          txnMerchantRef.current?.focus()
+                          setTimedTxnHint('Enter a merchant or description.')
+                        } else if (parseFloat(txnForm.amount) <= 0) {
+                          // stay on amount — user needs to fill it
+                          txnAmountRef.current?.focus()
                         } else {
-                          txnTypeRef.current?.focus()
+                          // all required fields filled → submit
+                          createOrSaveTxn()
                         }
                       }
                     }}
@@ -2799,14 +2834,31 @@ export default function App() {
                     className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
                     value={txnForm.type}
                     onChange={e => setTxnForm(v => ({ ...v, type: e.target.value as TransactionType }))}
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) txnAmountRef.current?.focus(); else txnCategoryRef.current?.focus() } }}
+                   onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (e.shiftKey) {
+                          txnAccountRef.current?.focus()
+                        } else if (!txnForm.accountId) {
+                          txnAccountRef.current?.focus()
+                          setTimedTxnHint('Choose an account first.')
+                        } else if (!txnForm.merchant.trim()) {
+                          // stay — user hasn't typed yet
+                        } else if (parseFloat(txnForm.amount) > 0) {
+                          // merchant + account + amount all good → submit
+                          createOrSaveTxn()
+                        } else {
+                          txnAmountRef.current?.focus()
+                        }
+                      }
+                    }}
                   >
                     {TXN_TYPES.map(t => <option key={t} value={t}>{TXN_TYPE_LABELS[t]}</option>)}
                   </select>
                   <p className="text-[10px] text-slate-500 mt-0.5">Use Credit Card Payment when checking pays down a credit card.</p>
                 </div>
                 {/* Category */}
-                <div>
+               <div>
                   <label className="block text-xs text-slate-400 mb-1">Category <span className="text-slate-600">(optional)</span></label>
                   <select
                     ref={txnCategoryRef}
@@ -2818,6 +2870,11 @@ export default function App() {
                     <option value="">— none —</option>
                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
+                  {merchantSuggestion && (
+                    <p className={`mt-0.5 text-[10px] ${merchantSuggestion.kind === 'rule' ? 'text-indigo-400' : 'text-slate-400'}`}>
+                      {merchantSuggestion.text}
+                    </p>
+                  )}
                 </div>
                 {/* Notes */}
                 <div className="lg:col-span-2">
