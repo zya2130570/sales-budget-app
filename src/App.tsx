@@ -1933,26 +1933,6 @@ export default function App() {
   }
 
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
-  const merchantSuggestion: { text: string; kind: 'rule' | 'history' } | null = (() => {
-    const m = txnForm.merchant.trim()
-    if (!m || txnForm.categoryId) return null
-    const mLower = m.toLowerCase()
-    // Rule match takes priority
-    for (const rule of rules) {
-      const hay = rule.matchField === 'merchant' ? mLower : txnForm.notes.toLowerCase()
-      if (matchesAnyAlias(hay, rule.matchText)) {
-        const cat = categories.find(c => c.id === rule.categoryId)
-        return { kind: 'rule', text: `Rule will apply: ${cat?.name ?? 'a category'}` }
-      }
-    }
-    // Past transaction match
-    const past = transactions.find(x => x.categoryId && x.merchant.toLowerCase() === mLower)
-    if (past) {
-      const cat = categories.find(c => c.id === past.categoryId)
-      if (cat) return { kind: 'history', text: `Suggested category: ${cat.name}` }
-    }
-    return null
-  })()
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
