@@ -400,9 +400,11 @@ export default function App() {
   const [txnHistory, setTxnHistory]           = useState<Transaction[][]>([])
   const [txnRedo, setTxnRedo]                 = useState<Transaction[][]>([])
 
-  // V8.5 — review / filter
+// V8.5 — review / filter
   const [txnFilter, setTxnFilter]             = useState<typeof TXN_FILTER_OPTIONS[number]['value']>('all')
   const [txnDupWarning, setTxnDupWarning]     = useState(false)
+  // V8.7 — tracks how many uncategorized txns were visible when pill was last clicked
+  const [seenUncatCount, setSeenUncatCount]   = useState(0)
   const [accountHint, setAccountHint]         = useState('')
   const [txnHint, setTxnHint]                 = useState('')
 
@@ -482,7 +484,14 @@ export default function App() {
   useEffect(() => saveSavedTargetSets(savedTargetSets), [savedTargetSets])
   useEffect(() => saveAccounts(accounts), [accounts])
   useEffect(() => saveTransactions(transactions), [transactions])
-  useEffect(() => saveTransactionRules(rules), [rules])
+ useEffect(() => saveTransactionRules(rules), [rules])
+
+  // V8.7 — auto-select the only account in the transaction form
+  useEffect(() => {
+    if (accounts.length === 1) {
+      setTxnForm(prev => ({ ...prev, accountId: accounts[0].id }))
+    }
+  }, [accounts.length, accounts[0]?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Deadline-passed detection: show a one-time prompt per target when today is past the deadline
   // and the target is still active (not completed, not fully funded).
@@ -2820,7 +2829,22 @@ export default function App() {
                     placeholder="optional"
                     value={txnForm.notes}
                     onChange={e => setTxnForm(v => ({ ...v, notes: e.target.value }))}
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) txnCategoryRef.current?.focus(); else createOrSaveTxn() } }}
+                onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (e.shiftKey) {
+                          txnCategoryRef.current?.focus()
+                        } else if (txnForm.accountId && txnForm.merchant.trim() && parseFloat(txnForm.amount) > 0) {
+                          createOrSaveTxn()
+                        } else if (!txnForm.accountId) {
+                          txnAccountRef.current?.focus()
+                        } else if (!txnForm.merchant.trim()) {
+                          txnMerchantRef.current?.focus()
+                        } else {
+                          txnAmountRef.current?.focus()
+                        }
+                      }
+                    }}
                   />
                 </div>
               </div>
@@ -2871,18 +2895,18 @@ export default function App() {
                     )
                   })}
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+               <div className="overflow-x-auto -mx-1 px-1">
+                  <table className="w-full text-sm min-w-[640px]">
                     <thead>
                       <tr className="text-left text-slate-400 border-b border-slate-700">
-                        <th className="pb-1.5 pr-3 font-medium">Date</th>
+                        <th className="pb-1.5 pr-3 font-medium whitespace-nowrap">Date</th>
                         <th className="pb-1.5 pr-3 font-medium">Account</th>
                         <th className="pb-1.5 pr-3 font-medium">Merchant</th>
                         <th className="pb-1.5 pr-3 font-medium">Type</th>
                         <th className="pb-1.5 pr-3 font-medium">Category</th>
-                        <th className="pb-1.5 pr-3 font-medium text-right">Amount</th>
-                        <th className="pb-1.5 pr-3 font-medium">Notes</th>
-                        <th className="pb-1.5" />
+                        <th className="pb-1.5 pr-3 font-medium text-right whitespace-nowrap">Amount</th>
+                        <th className="pb-1.5 pr-3 font-medium hidden sm:table-cell">Notes</th>
+                        <th className="pb-1.5 sticky right-0 bg-slate-800" />
                       </tr>
                     </thead>
                     <tbody>
@@ -3066,7 +3090,7 @@ export default function App() {
                             <td className={`py-2 pr-3 text-right font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-100'}`}>
                               {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : ''}{currency(tx.amount)}
                             </td>
-                            <td className="py-2 pr-3 text-slate-500 text-xs max-w-[100px] truncate">{tx.notes ?? '—'}</td>
+                            <td className="py-2 pr-3 text-slate-500 text-xs max-w-[100px] truncate hidden sm:table-cell">{tx.notes ?? '—'}</td>
                             <td className="py-2 whitespace-nowrap space-x-2">
                               <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
                                 setInlineTxnEditId(tx.id)
