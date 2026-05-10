@@ -40,7 +40,7 @@ import {
 } from './utils/storage'
 // V9.0 — CSV import pipeline
 import { runImportPipeline, buildImportedTransactions } from './utils/importHelpers'
-import type { ImportRow, ImportPipelineResult } from './utils/importHelpers'
+import type { ImportPipelineResult } from './utils/importHelpers'
 import { generateSampleCsvString } from './utils/csv'
 const presetTypeMap: Record<string, CategoryType> = {
   Bike: 'fixed bill',
@@ -414,7 +414,6 @@ export default function App() {
   const [csvImportPreview, setCsvImportPreview] = useState<ImportPipelineResult | null>(null)
   const [csvImportLoading, setCsvImportLoading] = useState(false)
   const [csvImportError, setCsvImportError]     = useState('')
-  const [csvExcluded, setCsvExcluded]           = useState<Set<string>>(new Set())
   const csvFileInputRef                         = useRef<HTMLInputElement>(null)
 
   // V9.0.1 — Predictive rule hint shown while merchant/notes/type changes in Log Transaction form
@@ -1288,13 +1287,11 @@ export default function App() {
     setCsvImportOpen(true)
     setCsvImportPreview(null)
     setCsvImportError('')
-    setCsvExcluded(new Set())
   }
   const closeCsvImport = () => {
     setCsvImportOpen(false)
     setCsvImportPreview(null)
     setCsvImportError('')
-    setCsvExcluded(new Set())
   }
   const processCsvText = (text: string) => {
     setCsvImportLoading(true)
@@ -1309,13 +1306,7 @@ export default function App() {
         categories,
         importSessionId: sessionId,
       })
-      if (preview.candidates.length === 0 && preview.skippedRows.length === 0) {
-        setCsvImportError('No rows found. Make sure the CSV has a header row and at least one data row with date, merchant, and amount.')
-      } else {
-        const autoDups = new Set(preview.candidates.filter(c => c.status === 'duplicate').map(c => c.key))
-        setCsvExcluded(autoDups)
-        setCsvImportPreview(preview)
-      }
+      setCsvImportPreview(preview)
     } catch {
       setCsvImportError('Failed to parse the CSV. Please check the file format and try again.')
     } finally {
@@ -1346,9 +1337,8 @@ export default function App() {
   }
   const commitCsvImport = () => {
     if (!csvImportPreview) return
-    const accepted = csvImportPreview.candidates.filter(c => c.status !== 'invalid' && !csvExcluded.has(c.key))
-    if (accepted.length === 0) { closeCsvImport(); return }
-    const newTxns = buildImportedTransactions(accepted)
+    const newTxns = buildImportedTransactions(csvImportPreview)
+    if (newTxns.length === 0) { closeCsvImport(); return }
     setTxnWithHistory(prev => [...newTxns, ...prev])
     showToast(`Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''}.`)
     closeCsvImport()
@@ -3813,24 +3803,9 @@ export default function App() {
           preview={csvImportPreview}
           loading={csvImportLoading}
           error={csvImportError}
-          excluded={csvExcluded}
-          categories={categories}
           accounts={accounts}
           onFileSelect={handleCsvFileSelect}
           onDrop={handleCsvDrop}
-          onToggleCandidate={(key) => setCsvExcluded(prev => {
-            const next = new Set(prev)
-            if (next.has(key)) next.delete(key); else next.add(key)
-            return next
-          })}
-          onToggleAllDuplicates={(select) => setCsvExcluded(prev => {
-            const next = new Set(prev)
-            if (!csvImportPreview) return next
-            csvImportPreview.candidates.filter(c => c.status === 'duplicate').forEach(c => {
-              if (select) next.add(c.key); else next.delete(c.key)
-            })
-            return next
-          })}
           onCommit={commitCsvImport}
           onCancel={closeCsvImport}
           onResetPreview={() => { setCsvImportPreview(null); setCsvImportError('') }}
@@ -3894,13 +3869,9 @@ interface CsvImportModalProps {
   preview: ImportPipelineResult | null
   loading: boolean
   error: string
-  excluded: Set<string>
-  categories: Category[]
   accounts: Account[]
   onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void
   onDrop: (e: React.DragEvent<HTMLDivElement>) => void
-  onToggleCandidate: (key: string) => void
-  onToggleAllDuplicates: (select: boolean) => void
   onCommit: () => void
   onCancel: () => void
   onDownloadSample: () => void
@@ -3910,28 +3881,22 @@ interface CsvImportModalProps {
 }
 
 function CsvImportModal({
-  preview, loading, error, excluded, categories, accounts,
-  onFileSelect, onDrop, onToggleCandidate, onToggleAllDuplicates,
+  preview, loading, error, accounts,
+  onFileSelect, onDrop,
   onCommit, onCancel, onDownloadSample, onUseSampleData, fileInputRef, onResetPreview,
 }: CsvImportModalProps) {
   const [dragOver, setDragOver] = useState(false)
 
-  const accepted = preview?.candidates.filter(c => c.status !== 'invalid' && !excluded.has(c.key)) ?? []
-  const dupCount  = preview?.candidates.filter(c => c.status === 'duplicate').length ?? 0
-  const okCount   = preview?.candidates.filter(c => c.status === 'ok').length ?? 0
-  const allDupsExcluded = preview?.candidates.filter(c => c.status === 'duplicate').every(c => excluded.has(c.key)) ?? false
-
-  // Account context note: let user know which account imports will go to
   const defaultAccount = accounts[0]
   const accountNote = accounts.length === 0
     ? 'No accounts set up yet — add an account first so imports can be assigned correctly.'
     : accounts.length === 1
-      ? `Transactions will be assigned to: ${defaultAccount.name}. Account-specific import handling will be expanded in a future transfer/credit-card engine.`
-      : `Imports are assigned to the first account (${defaultAccount.name}) by default. Account-specific import handling will be expanded in a future transfer/credit-card engine.`
+      ? `Transactions will be assigned to: ${defaultAccount.name}. Account-specific import handling will be expanded in a future update.`
+      : `Imports are assigned to the first account (${defaultAccount.name}) by default. Account-specific import handling will be expanded in a future update.`
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-8 px-4 pb-8 bg-black/70 overflow-y-auto">
-      <div className="w-full max-w-3xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col">
+      <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-700">
           <div>
@@ -3947,8 +3912,8 @@ function CsvImportModal({
             <span className="text-slate-300 font-medium">Account: </span>{accountNote}
           </div>
 
-          {/* Drop zone */}
-          {!preview && (
+          {/* Drop zone — shown when no preview yet */}
+          {!preview && !loading && (
             <div
               className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${dragOver ? 'border-blue-500 bg-blue-900/20' : 'border-slate-600 hover:border-slate-500 bg-slate-800/50'}`}
               onDragOver={e => { e.preventDefault(); setDragOver(true) }}
@@ -3978,98 +3943,22 @@ function CsvImportModal({
             </div>
           )}
 
+          {/* Preview ready state — confirm or cancel */}
           {preview && !loading && (
-            <>
-              <div className="grid grid-cols-3 gap-3">
-                <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
-                  <div className="text-xs text-slate-400 mb-0.5">Ready to import</div>
-                  <div className="text-xl font-bold text-green-400">{accepted.length}</div>
-                </div>
-                <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
-                  <div className="text-xs text-slate-400 mb-0.5">Duplicates detected</div>
-                  <div className={`text-xl font-bold ${dupCount > 0 ? 'text-amber-300' : 'text-slate-400'}`}>{dupCount}</div>
-                </div>
-                <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
-                  <div className="text-xs text-slate-400 mb-0.5">Skipped (invalid)</div>
-                  <div className="text-xl font-bold text-slate-400">{preview.skippedRows.length}</div>
-                </div>
+            <div className="rounded-xl border border-green-700/40 bg-green-900/10 px-4 py-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-green-400 text-lg">✓</span>
+                <p className="text-sm text-slate-200 font-medium">CSV parsed successfully — ready to import.</p>
               </div>
-
-              <div className="text-xs text-slate-500 flex flex-wrap gap-3">
-                <span>Detected columns:</span>
-                {(['date', 'merchant', 'amount', 'notes'] as const).map(k => (
-                  <span key={k}>
-                    <span className="text-slate-400">{k}:</span>{' '}
-                    <span className={preview.mapping[k] ? 'text-slate-300' : 'text-red-400'}>{preview.mapping[k] ?? 'not found'}</span>
-                  </span>
-                ))}
-              </div>
-
-              {dupCount > 0 && (
-                <div className="flex items-center gap-3 rounded-lg border border-amber-700/40 bg-amber-900/10 px-3 py-2.5">
-                  <span className="text-amber-300 text-sm flex-1">{dupCount} duplicate{dupCount !== 1 ? 's' : ''} detected — excluded by default.</span>
-                  <button className="text-xs text-amber-400 hover:text-amber-300 underline underline-offset-2" onClick={() => onToggleAllDuplicates(allDupsExcluded)}>
-                    {allDupsExcluded ? 'Include all duplicates' : 'Exclude all duplicates'}
-                  </button>
-                </div>
-              )}
-
-              <div className="overflow-x-auto rounded-lg border border-slate-700">
-                <table className="w-full text-xs min-w-[540px]">
-                  <thead>
-                    <tr className="text-left text-slate-400 border-b border-slate-700 bg-slate-800/80">
-                      <th className="px-2 py-2">✓</th>
-                      <th className="px-2 py-2">Date</th>
-                      <th className="px-2 py-2">Merchant</th>
-                      <th className="px-2 py-2 text-right">Amount</th>
-                      <th className="px-2 py-2">Type</th>
-                      <th className="px-2 py-2">Category</th>
-                      <th className="px-2 py-2">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preview.candidates.map((c: ImportRow) => {
-                      const isExcluded = excluded.has(c.key)
-                      const cat = categories.find(x => x.id === c.txn.categoryId)
-                      const rowBg =
-                        c.status === 'duplicate' && isExcluded  ? 'bg-slate-800/30 opacity-50' :
-                        c.status === 'duplicate' && !isExcluded ? 'bg-amber-900/10' :
-                        isExcluded ? 'bg-slate-800/30 opacity-50' : 'hover:bg-slate-800/40'
-                      return (
-                        <tr key={c.key} className={`border-b border-slate-800 transition-colors ${rowBg}`}>
-                          <td className="px-2 py-1.5">
-                            <input type="checkbox" checked={!isExcluded} disabled={c.status === 'invalid'} onChange={() => onToggleCandidate(c.key)} className="rounded accent-blue-500" />
-                          </td>
-                          <td className="px-2 py-1.5 text-slate-300 whitespace-nowrap">{c.txn.date}</td>
-                          <td className="px-2 py-1.5 font-medium text-slate-200 max-w-[130px] truncate">{c.txn.merchant}</td>
-                          <td className="px-2 py-1.5 text-right font-semibold text-slate-100">{currency(c.txn.amount)}</td>
-                          <td className="px-2 py-1.5 text-slate-400 capitalize">{c.txn.type}</td>
-                          <td className="px-2 py-1.5 text-slate-400">
-                            {cat ? <span>{cat.name}{c.txn.appliedByRule && <span className="ml-1 text-[9px] text-indigo-400"> Rule</span>}</span> : '—'}
-                          </td>
-                          <td className="px-2 py-1.5">
-                            {c.status === 'ok'        && <span className="text-green-400">Ready</span>}
-                            {c.status === 'duplicate' && <span className="text-amber-300" title={c.statusReason}>Duplicate</span>}
-                            {c.status === 'invalid'   && <span className="text-red-400">Invalid</span>}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {(preview.mapping.date === null || preview.mapping.merchant === null || preview.mapping.amount === null) && (
-                <p className="text-xs text-amber-300">
-                  Some required columns could not be auto-detected. Make sure your CSV has headers named <span className="font-mono">date</span>, <span className="font-mono">merchant</span> (or <span className="font-mono">description</span>), and <span className="font-mono">amount</span>.{' '}
-                  <button onClick={onDownloadSample} className="underline text-blue-400 hover:text-blue-300">Download a sample CSV</button> to see the expected format.
-                </p>
-              )}
-
-              {okCount === 0 && dupCount === 0 && (
-                <p className="text-center text-slate-400 text-sm py-2">No importable rows found. Check your CSV format.</p>
-              )}
-            </>
+              <p className="text-xs text-slate-400">
+                Duplicate detection, rule matching, and type inference have been applied.
+                Click <span className="font-medium text-slate-300">Import Transactions</span> to commit, or{' '}
+                <button onClick={onResetPreview} className="underline text-blue-400 hover:text-blue-300">choose a different file</button>.
+              </p>
+              <p className="text-xs text-slate-500">
+                Imported transactions will appear in your Transactions list with a <span className="text-violet-400">CSV Import</span> badge.
+              </p>
+            </div>
           )}
         </div>
 
@@ -4082,9 +3971,9 @@ function CsvImportModal({
               </button>
             )}
           </div>
-          {preview && accepted.length > 0 && (
+          {preview && (
             <button onClick={onCommit} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-5 py-2 text-sm font-medium transition-colors">
-              Import {accepted.length} transaction{accepted.length !== 1 ? 's' : ''}
+              Import Transactions
             </button>
           )}
         </div>
