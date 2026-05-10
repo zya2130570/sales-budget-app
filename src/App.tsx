@@ -389,6 +389,22 @@ export default function App() {
   const [accountHistory, setAccountHistory]   = useState<Account[][]>([])
   const [accountRedo, setAccountRedo]         = useState<Account[][]>([])
 
+  // V9.0.2 — Inline account edit (row stays in place; top form is create-only)
+  const [inlineAccountEditId, setInlineAccountEditId]     = useState<string | null>(null)
+  const [inlineAccountEditForm, setInlineAccountEditForm] = useState({ name: '', type: 'checking' as AccountType, balance: '', institution: '' })
+  const [inlineAccountHint, setInlineAccountHint]         = useState('')
+  const inlineAccountNameRef    = useRef<HTMLInputElement>(null)
+  const inlineAccountBalanceRef = useRef<HTMLInputElement>(null)
+
+  // V9.0.2 — Inline budget category edit (row stays in place; top form is create-only)
+  const [inlineCatEditId, setInlineCatEditId]     = useState<string | null>(null)
+  const [inlineCatEditForm, setInlineCatEditForm] = useState({ name: '', amount: '', type: 'fixed bill' as CategoryType })
+  const inlineCatNameRef   = useRef<HTMLInputElement>(null)
+  const inlineCatAmountRef = useRef<HTMLInputElement>(null)
+
+  // V9.0.2 — Rule opt-out: prevents auto-apply of a matched rule for current txn form entry
+  const [txnRuleOptOutId, setTxnRuleOptOutId] = useState<string | null>(null)
+
   // V8 — Transactions
   const [transactions, setTransactions]       = useState<Transaction[]>([])
   const [txnForm, setTxnForm]                 = useState({
@@ -860,6 +876,41 @@ export default function App() {
     accountNameRef.current?.focus()
   }
 
+  // V9.0.2 — Inline account edit helpers
+  const saveInlineAccountEdit = () => {
+    if (!inlineAccountEditId) return
+    const name = inlineAccountEditForm.name.trim()
+    if (!name) { setInlineAccountHint('Enter an account name.'); inlineAccountNameRef.current?.focus(); return }
+    const rawBalance = parseFloat(inlineAccountEditForm.balance) || 0
+    const balance = inlineAccountEditForm.type === 'credit card' && rawBalance > 0 ? -rawBalance : rawBalance
+    setAccountsWithHistory(prev => prev.map(a => a.id === inlineAccountEditId
+      ? { ...a, name, type: inlineAccountEditForm.type, balance, institution: inlineAccountEditForm.institution.trim() }
+      : a
+    ))
+    setInlineAccountEditId(null)
+    setInlineAccountHint('')
+  }
+  const cancelInlineAccountEdit = () => {
+    if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
+    setInlineAccountEditId(null)
+    setInlineAccountHint('')
+  }
+
+  // V9.0.2 — Inline budget category edit helpers
+  const saveInlineCatEdit = (catId: string) => {
+    const name = inlineCatEditForm.name.trim()
+    const amt  = Math.max(0, Number(inlineCatEditForm.amount) || 0)
+    const monthlyAmt = convertToMonthly(amt, period)
+    if (!name || monthlyAmt <= 0) return
+    pushBudgetHistory()
+    setCategories(prev => prev.map(c => c.id === catId
+      ? { ...c, name, amount: monthlyAmt, type: inlineCatEditForm.type }
+      : c
+    ))
+    setInlineCatEditId(null)
+  }
+  const cancelInlineCatEdit = () => setInlineCatEditId(null)
+
   // ── V8 Transaction helpers ────────────────────────────────────────────────────
 
   const setTxnWithHistory = (updater: (prev: Transaction[]) => Transaction[]) => {
@@ -891,12 +942,15 @@ export default function App() {
     setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '' })
     setTxnHint('')
     setTxnDupWarning(false)
+    setTxnRuleOptOutId(null)
+    setTxnRulePreviewHint('')
   }
   // Soft reset after a successful add — keeps account, type, date so rapid entry is frictionless
   const resetTxnFormAfterAdd = () => {
     setTxnForm(prev => ({ ...prev, merchant: '', amount: '', categoryId: '', notes: '' }))
     setTxnHint('')
     setTxnDupWarning(false)
+    setTxnRuleOptOutId(null)
     setTxnRulePreviewHint('')
   }
   const createOrSaveTxn = () => {
@@ -928,6 +982,7 @@ export default function App() {
       const mLower = normalizeAlias(merchant)
       const nLower = normalizeAlias(txnForm.notes)
       for (const rule of rules) {
+        if (rule.id === txnRuleOptOutId) continue  // V9.0.2 — skip opted-out rule
         const haystack = rule.matchField === 'merchant' ? mLower : nLower
         if (matchesAnyAlias(haystack, rule.matchText)) {
           autoCategoryId = rule.categoryId
@@ -1022,19 +1077,21 @@ export default function App() {
 
   // V9.0.1 — Predictive rule preview: compute what rule would apply for current form state
   // Returns a hint string or '' if no rule matches or user already picked a category.
-  const computeRulePreview = (merchant: string, notes: string, categoryId: string): string => {
-    if (categoryId) return '' // user already chose — don't suggest
-    if (!merchant.trim()) return ''
+  // V9.0.2 — Also respects opt-out: if the matched rule is opted out, returns ''.
+  const computeRulePreview = (merchant: string, notes: string, categoryId: string, optOutId?: string | null): { hint: string; ruleId: string | null } => {
+    if (categoryId) return { hint: '', ruleId: null } // user already chose — don't suggest
+    if (!merchant.trim()) return { hint: '', ruleId: null }
     const mLower = normalizeAlias(merchant)
     const nLower = normalizeAlias(notes)
     for (const rule of rules) {
       const haystack = rule.matchField === 'merchant' ? mLower : nLower
       if (matchesAnyAlias(haystack, rule.matchText)) {
+        if (rule.id === (optOutId ?? txnRuleOptOutId)) return { hint: '', ruleId: null }
         const cat = categories.find(c => c.id === rule.categoryId)
-        if (cat) return `Rule will apply: ${rule.name} → ${cat.name}`
+        if (cat) return { hint: `Rule will apply: ${rule.name} \u2192 ${cat.name}`, ruleId: rule.id }
       }
     }
-    return ''
+    return { hint: '', ruleId: null }
   }
 
   const setRulesWithHistory = (updater: (prev: TransactionRule[]) => TransactionRule[]) => {
@@ -1354,9 +1411,9 @@ export default function App() {
     )
     if (newTxns.length === 0) { closeCsvImport(); return }
     setTxnWithHistory(prev => [...newTxns, ...prev])
-    showToast(`Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''}.`)
     closeCsvImport()
     if (newTxns[0]) flashHighlight(newTxns[0].id, setHighlightedTxnId, highlightTxnTimerRef)
+    showUndoableToast(`Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''}.`, undoTxn)
   }
   const downloadSampleCsv = () => {
     const text = generateSampleCsvString()
@@ -2492,21 +2549,55 @@ export default function App() {
                         className={`border-b border-slate-800 transition-colors duration-300 ${
                           highlightedCategoryId === c.id
                             ? 'bg-blue-600/20'
-                            : isPressure
-                              ? 'bg-amber-500/15'
-                              : ''
+                            : inlineCatEditId === c.id
+                              ? 'bg-slate-700/40'
+                              : isPressure
+                                ? 'bg-amber-500/15'
+                                : ''
                         }`}
                       >
-                        <td className="py-1.5 pr-2">{c.name}</td>
-                        <td className="py-1.5 pr-2 text-slate-400 text-xs">
-                          {c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}
+                        <td className="py-1.5 pr-2">
+                          {inlineCatEditId === c.id ? (
+                            <input
+                              ref={inlineCatNameRef}
+                              className="w-full px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none"
+                              value={inlineCatEditForm.name}
+                              onChange={e => setInlineCatEditForm(v => ({ ...v, name: e.target.value }))}
+                              onFocus={e => e.target.select()}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) }
+                                if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
+                                if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineCatAmountRef.current?.focus() }
+                              }}
+                            />
+                          ) : c.name}
                         </td>
-                        {period === 'weekly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'weekly'))}</td>}
-                        {period === 'bi-weekly' && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td>}
-                        {period === 'monthly'   && <td className="py-1.5 pr-2">{currency(c.amount)}</td>}
-                        {period === 'yearly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'yearly'))}</td>}
-                        {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
-                        {period === 'yearly' && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
+                        <td className="py-1.5 pr-2 text-slate-400 text-xs">
+                          {inlineCatEditId === c.id ? (
+                            <select
+                              className="rounded bg-slate-800 border border-slate-500 text-xs px-1 py-0.5 focus:border-blue-500 focus:outline-none"
+                              value={inlineCatEditForm.type}
+                              onChange={e => setInlineCatEditForm(v => ({ ...v, type: e.target.value as CategoryType }))}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) }
+                                if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
+                              }}
+                            >
+                              <option value="fixed bill">Fixed</option>
+                              <option value="variable spending">Variable</option>
+                              <option value="savings">Savings</option>
+                              <option value="investing">Investing</option>
+                            </select>
+                          ) : (
+                            c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'
+                          )}
+                        </td>
+                        {period === 'weekly'    && <td className="py-1.5 pr-2">{inlineCatEditId === c.id ? <input ref={inlineCatAmountRef} type="number" min={0} step={5} className="w-20 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none" value={inlineCatEditForm.amount} onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))} onFocus={e => e.target.select()} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) } if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() } }} /> : currency(convertFromMonthly(c.amount, 'weekly'))}</td>}
+                        {period === 'bi-weekly' && <td className="py-1.5 pr-2">{inlineCatEditId === c.id ? <input ref={inlineCatAmountRef} type="number" min={0} step={5} className="w-20 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none" value={inlineCatEditForm.amount} onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))} onFocus={e => e.target.select()} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) } if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() } }} /> : currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td>}
+                        {period === 'monthly'   && <td className="py-1.5 pr-2">{inlineCatEditId === c.id ? <input ref={inlineCatAmountRef} type="number" min={0} step={5} className="w-24 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none" value={inlineCatEditForm.amount} onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))} onFocus={e => e.target.select()} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) } if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() } }} /> : currency(c.amount)}</td>}
+                        {period === 'yearly'    && <td className="py-1.5 pr-2">{inlineCatEditId === c.id ? <input ref={inlineCatAmountRef} type="number" min={0} step={5} className="w-24 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none" value={inlineCatEditForm.amount} onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))} onFocus={e => e.target.select()} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) } if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() } }} /> : currency(convertFromMonthly(c.amount, 'yearly'))}</td>}
+                        {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{inlineCatEditId === c.id ? null : currency(c.amount)}</td>}
+                        {period === 'yearly' && <td className="py-1.5 pr-2 text-slate-400">{inlineCatEditId === c.id ? null : currency(c.amount)}</td>}
                         {/* Actual cell: txn-driven breakdown or plain manual entry */}
                         <td className="py-1 pr-2">
                           {hasTxn ? (
@@ -2596,8 +2687,21 @@ export default function App() {
                                 : `Over by ${currency(variance)}`}
                         </td>
                         <td className="py-1.5 space-x-2 whitespace-nowrap">
-                          <button className="text-blue-300 hover:text-blue-200" onClick={() => { setForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type }); setEditId(c.id); budgetNameRef.current?.focus() }}>Edit</button>
-                          <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
+                          {inlineCatEditId === c.id ? (
+                            <>
+                              <button className="text-green-300 hover:text-green-200 text-xs" onClick={() => saveInlineCatEdit(c.id)}>Save</button>
+                              <button className="text-slate-400 hover:text-slate-200 text-xs" onClick={cancelInlineCatEdit}>Cancel</button>
+                            </>
+                          ) : (
+                            <>
+                              <button className="text-blue-300 hover:text-blue-200 text-xs" onClick={() => {
+                                setInlineCatEditId(c.id)
+                                setInlineCatEditForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type })
+                                setTimeout(() => { inlineCatAmountRef.current?.focus(); inlineCatAmountRef.current?.select() }, 0)
+                              }}>Edit</button>
+                              <button className="text-red-300 hover:text-red-200 text-xs" onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
+                            </>
+                          )}
                         </td>
                       </tr>
                     )
@@ -2611,7 +2715,7 @@ export default function App() {
         {/* ── ACCOUNTS ── */}
         {tab === 'Accounts' && (
           <section className="space-y-4 transition-all duration-300">
-            <Card title={editAccountId ? 'Edit Account' : 'Add Account'} noHover>
+            <Card title="Add Account" noHover>
               <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
                 {/* Account Name */}
                 <div>
@@ -2702,20 +2806,15 @@ export default function App() {
               </div>
               <div className="flex gap-2 mt-3 flex-wrap">
                 <button onClick={createOrSaveAccount} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-1.5 text-sm transition-colors">
-                  {editAccountId ? 'Save Changes' : 'Add Account'}
+                  Add Account
                 </button>
-                {editAccountId
-                  ? <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Cancel</button>
-                  : <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
-                }
+                <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
                 <button onClick={undoAccount} disabled={!accountHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoAccount} disabled={!accountRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
-                {!editAccountId && accounts.length > 0 && (
+                {accounts.length > 0 && (
                   <button onClick={() => { if (window.confirm(`Clear all ${accounts.length} account${accounts.length !== 1 ? 's' : ''}? This cannot be undone.`)) { setAccountsWithHistory(() => []); showUndoableToast('Accounts cleared.', undoAccount) } }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
-                {!editAccountId && (
-                  <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
-                )}
+                <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
               </div>
               {accountHint && <p className="mt-2 text-sm text-amber-300">{accountHint}</p>}
             </Card>
@@ -2734,24 +2833,96 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {accounts.map(a => (
-                        <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedAccountId === a.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
-                          <td className="py-2 pr-4 font-medium">{a.name}</td>
-                          <td className="py-2 pr-4 text-slate-400">{ACCOUNT_TYPE_LABELS[a.type]}</td>
-                          <td className={`py-2 pr-4 text-right font-semibold ${a.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)}
-                          </td>
-                          <td className="py-2 pr-4 text-slate-400 text-xs">{a.institution || '—'}</td>
-                          <td className="py-2 whitespace-nowrap space-x-2">
-                          <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
-                              setEditAccountId(a.id)
-                              setAccountForm({ name: a.name, type: a.type, balance: a.balance === 0 ? '' : String(a.balance), institution: a.institution })
-                              setTimeout(() => { accountBalanceRef.current?.focus(); accountBalanceRef.current?.select() }, 0)
-                            }}>Edit</button>
-                            <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))}>Delete</button>
-                          </td>
-                        </tr>
-                      ))}
+                      {accounts.map(a => {
+                        const isEditingAcct = inlineAccountEditId === a.id
+                        return (
+                          <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedAccountId === a.id ? 'bg-blue-600/20' : isEditingAcct ? 'bg-slate-700/40' : 'hover:bg-slate-800/40'}`}>
+                            <td className="py-2 pr-4 font-medium">
+                              {isEditingAcct ? (
+                                <input
+                                  ref={inlineAccountNameRef}
+                                  className="w-full px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none"
+                                  value={inlineAccountEditForm.name}
+                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, name: e.target.value }))}
+                                  onFocus={e => e.target.select()}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit() }
+                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineAccountBalanceRef.current?.focus() }
+                                  }}
+                                />
+                              ) : a.name}
+                            </td>
+                            <td className="py-2 pr-4 text-slate-400 text-sm">
+                              {isEditingAcct ? (
+                                <select
+                                  className="rounded bg-slate-800 border border-slate-500 text-xs px-1 py-0.5 focus:border-blue-500 focus:outline-none"
+                                  value={inlineAccountEditForm.type}
+                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, type: e.target.value as AccountType }))}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit() }
+                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
+                                  }}
+                                >
+                                  {ACCOUNT_TYPES.map(t => <option key={t} value={t}>{ACCOUNT_TYPE_LABELS[t]}</option>)}
+                                </select>
+                              ) : ACCOUNT_TYPE_LABELS[a.type]}
+                            </td>
+                            <td className={`py-2 pr-4 text-right font-semibold ${isEditingAcct ? '' : a.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {isEditingAcct ? (
+                                <input
+                                  ref={inlineAccountBalanceRef}
+                                  type="text" inputMode="decimal"
+                                  className="w-24 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm text-right focus:border-blue-500 focus:outline-none"
+                                  value={inlineAccountEditForm.balance}
+                                  onChange={e => { const raw = e.target.value.replace(/[^0-9.\-]/g, ''); setInlineAccountEditForm(v => ({ ...v, balance: raw })) }}
+                                  onFocus={e => e.target.select()}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit() }
+                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineAccountNameRef.current?.focus() }
+                                  }}
+                                />
+                              ) : (
+                                a.balance < 0 ? `\u2212${currency(Math.abs(a.balance))}` : currency(a.balance)
+                              )}
+                            </td>
+                            <td className="py-2 pr-4 text-slate-400 text-xs">
+                              {isEditingAcct ? (
+                                <input
+                                  className="w-full px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-xs focus:border-blue-500 focus:outline-none"
+                                  value={inlineAccountEditForm.institution}
+                                  placeholder="Institution"
+                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, institution: e.target.value }))}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit() }
+                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
+                                  }}
+                                />
+                              ) : (a.institution || '—')}
+                            </td>
+                            <td className="py-2 whitespace-nowrap space-x-2">
+                              {isEditingAcct ? (
+                                <>
+                                  <button className="text-green-400 hover:text-green-300 text-xs" onClick={saveInlineAccountEdit}>Save</button>
+                                  <button className="text-slate-400 hover:text-slate-200 text-xs" onClick={cancelInlineAccountEdit}>Cancel</button>
+                                  {inlineAccountHint && <span className="text-amber-300 text-xs">{inlineAccountHint}</span>}
+                                </>
+                              ) : (
+                                <>
+                                  <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
+                                    setInlineAccountEditId(a.id)
+                                    setInlineAccountEditForm({ name: a.name, type: a.type, balance: a.balance === 0 ? '' : String(a.balance), institution: a.institution })
+                                    setInlineAccountHint('')
+                                    setTimeout(() => { inlineAccountBalanceRef.current?.focus(); inlineAccountBalanceRef.current?.select() }, 0)
+                                  }}>Edit</button>
+                                  <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))}>Delete</button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                     <tfoot>
                       <tr className="border-t border-slate-700">
@@ -2837,7 +3008,8 @@ export default function App() {
                     onChange={e => {
                       const merchant = e.target.value
                       setTxnForm(v => ({ ...v, merchant }))
-                      setTxnRulePreviewHint(computeRulePreview(merchant, txnForm.notes, txnForm.categoryId))
+                      const { hint } = computeRulePreview(merchant, txnForm.notes, txnForm.categoryId)
+                      setTxnRulePreviewHint(hint)
                     }}
                     onKeyDown={e => {
                       if (e.key === 'Enter') {
@@ -2939,7 +3111,8 @@ export default function App() {
                     onChange={e => {
                       const notes = e.target.value
                       setTxnForm(v => ({ ...v, notes }))
-                      setTxnRulePreviewHint(computeRulePreview(txnForm.merchant, notes, txnForm.categoryId))
+                      const { hint } = computeRulePreview(txnForm.merchant, notes, txnForm.categoryId)
+                      setTxnRulePreviewHint(hint)
                     }}
                     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) txnCategoryRef.current?.focus(); else createOrSaveTxn() } }}
                   />
@@ -2961,9 +3134,20 @@ export default function App() {
               </div>
               {txnHint && <p className="mt-2 text-sm text-amber-300">{txnHint}</p>}
               {!txnHint && txnRulePreviewHint && (
-                <p className="mt-2 text-xs text-indigo-300/80 flex items-center gap-1.5">
-                  <span className="text-indigo-400">⚡</span>{txnRulePreviewHint}
-                </p>
+                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                  <p className="text-xs text-indigo-300/80 flex items-center gap-1.5">
+                    <span className="text-indigo-400">⚡</span>{txnRulePreviewHint}
+                  </p>
+                  <button
+                    className="text-xs px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
+                    onClick={() => {
+                      // Find the matching rule id and opt out
+                      const { ruleId } = computeRulePreview(txnForm.merchant, txnForm.notes, txnForm.categoryId, null)
+                      setTxnRuleOptOutId(ruleId)
+                      setTxnRulePreviewHint('')
+                    }}
+                  >Do Not Apply</button>
+                </div>
               )}
             </Card>
 
