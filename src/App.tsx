@@ -3910,7 +3910,7 @@ export default function App() {
       )}
     </div>
   )
-}
+}}
 
 // ── V7.3 Dashboard Status Banner ─────────────────────────────────────────────
 
