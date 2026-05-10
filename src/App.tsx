@@ -1298,14 +1298,13 @@ export default function App() {
     setCsvImportError('')
     try {
       const sessionId = crypto.randomUUID().slice(0, 8)
-      const preview = runImportPipeline({
-        csvText: text,
-        defaultAccountId: accounts[0]?.id ?? '',
-        existingTransactions: transactions,
+      const preview = runImportPipeline(
+        text,
+        transactions,
         rules,
-        categories,
-        importSessionId: sessionId,
-      })
+        accounts[0]?.id ?? '',
+        sessionId,
+      )
       setCsvImportPreview(preview)
     } catch {
       setCsvImportError('Failed to parse the CSV. Please check the file format and try again.')
@@ -1337,7 +1336,7 @@ export default function App() {
   }
   const commitCsvImport = () => {
     if (!csvImportPreview) return
-    const newTxns = buildImportedTransactions(csvImportPreview)
+    const newTxns = buildImportedTransactions(csvImportPreview, accounts, rules, categories)
     if (newTxns.length === 0) { closeCsvImport(); return }
     setTxnWithHistory(prev => [...newTxns, ...prev])
     showToast(`Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''}.`)
@@ -3876,7 +3875,7 @@ interface CsvImportModalProps {
   onCancel: () => void
   onDownloadSample: () => void
   onUseSampleData: () => void
-  fileInputRef: React.RefObject<HTMLInputElement>
+  fileInputRef: React.RefObject<HTMLInputElement | null>
   onResetPreview: () => void
 }
 
