@@ -1113,7 +1113,6 @@ export default function App() {
   ): { hint: string; ruleId: string | null } => {
     if (categoryId) return { hint: '', ruleId: null }
     if (!merchant.trim()) return { hint: '', ruleId: null }
-    const effectiveOptOut = optOutOverride !== undefined ? optOutOverride : txnRuleOptOutId
     const mLower = normalizeAlias(merchant)
     const nLower = normalizeAlias(notes)
     for (const rule of rules) {
@@ -3246,7 +3245,7 @@ export default function App() {
                     onChange={e => {
                       setTxnForm(v => ({ ...v, categoryId: e.target.value }))
                       // User explicitly choosing a category suppresses the rule preview
-                      setTxnRulePreviewHint('')
+                      setTxnHint('')
                     }}
                     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) txnTypeRef.current?.focus(); else txnNotesRef.current?.focus() } }}
                   >
