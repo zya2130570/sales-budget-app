@@ -374,16 +374,6 @@ export default function App() {
   const inlineEditBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Refs for Log Contribution fields per target card (keyed by target id)
-
-  // V8.6 — Inline txn edit field refs (for programmatic focus on Edit click)
-  const inlineTxnAmountRef    = useRef<HTMLInputElement>(null)
-  const inlineTxnMerchantRef  = useRef<HTMLInputElement>(null)
-  const inlineTxnTypeRef      = useRef<HTMLSelectElement>(null)
-  const inlineTxnCategoryRef  = useRef<HTMLSelectElement>(null)
-  // V8.6 — Inline rule edit field ref
-  const inlineRuleMatchRef    = useRef<HTMLInputElement>(null)
-
-  // Refs for Log Contribution fields per target card (keyed by target id)
   const logDateRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const logAmountRefs = useRef<Record<string, HTMLInputElement | null>>({})
   const logNoteRefs = useRef<Record<string, HTMLInputElement | null>>({})
