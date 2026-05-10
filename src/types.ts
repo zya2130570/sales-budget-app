@@ -38,6 +38,10 @@ export type Transaction = {
   notes?: string
   appliedByRule?: string   // rule id that auto-assigned the category (V8.5)
   createdAt: string
+  // ── V9.0 CSV import metadata (optional; only present on imported transactions) ──
+  importedAt?: string      // ISO timestamp of when the import was committed
+  importBatchId?: string   // groups all rows from one import session
+  importSource?: 'csv'     // always 'csv' for now; extensible later
 }
 
 // ── V8.3 — Transaction Rules ──────────────────────────────────────────────────
