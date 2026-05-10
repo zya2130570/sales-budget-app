@@ -359,9 +359,21 @@ export default function App() {
   const txnCategoryRef = useRef<HTMLSelectElement>(null)
   const txnNotesRef    = useRef<HTMLInputElement>(null)
 
- // V8.3 — Rule form refs
+// V8.3 — Rule form refs
   const ruleNameRef           = useRef<HTMLInputElement>(null)
   const ruleMatchTextRef      = useRef<HTMLInputElement>(null)
+
+  // V8.6.1 — Inline txn edit field refs (programmatic focus on Edit click + ArrowLeft/Right nav)
+  const inlineTxnAmountRef    = useRef<HTMLInputElement>(null)
+  const inlineTxnMerchantRef  = useRef<HTMLInputElement>(null)
+  const inlineTxnTypeRef      = useRef<HTMLSelectElement>(null)
+  const inlineTxnCategoryRef  = useRef<HTMLSelectElement>(null)
+  // V8.6.1 — Inline rule edit ref (focus Match Text on Edit click)
+  const inlineRuleMatchRef    = useRef<HTMLInputElement>(null)
+  // V8.6.1 — Blur-save: timer lets focus move between inline fields without premature save
+  const inlineEditBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Refs for Log Contribution fields per target card (keyed by target id)
 
   // V8.6 — Inline txn edit field refs (for programmatic focus on Edit click)
   const inlineTxnAmountRef    = useRef<HTMLInputElement>(null)
@@ -861,13 +873,17 @@ export default function App() {
     })
   }
   const clearTxnForm = () => {
-    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '' })
+    // V8.6.1 — Auto-select the account when exactly one account exists
+    const defaultAccountId = accounts.length === 1 ? accounts[0].id : ''
+    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: defaultAccountId, merchant: '', amount: '', type: 'expense', categoryId: '', notes: '' })
     setTxnHint('')
     setTxnDupWarning(false)
   }
   const createOrSaveTxn = () => {
     const merchant = txnForm.merchant.trim()
-    if (!txnForm.accountId) { setTimedTxnHint('Choose an account before logging this transaction.'); txnAccountRef.current?.focus(); return }
+    // V8.6.1 — If exactly one account exists, treat it as implicitly selected
+    const resolvedAccountId = txnForm.accountId || (accounts.length === 1 ? accounts[0].id : '')
+    if (!resolvedAccountId) { setTimedTxnHint('Choose an account before logging this transaction.'); txnAccountRef.current?.focus(); return }
     if (!merchant) { setTimedTxnHint('Enter a merchant or description before logging.'); txnMerchantRef.current?.focus(); return }
     const amount = parseFloat(txnForm.amount) || 0
     if (amount <= 0) { setTimedTxnHint('Enter a transaction amount before logging.'); txnAmountRef.current?.focus(); return }
@@ -902,7 +918,7 @@ export default function App() {
     }
 
     setTxnWithHistory(prev => [
-      { id: crypto.randomUUID(), date: txnForm.date, accountId: txnForm.accountId, merchant, amount, type: txnForm.type, categoryId: autoCategoryId || undefined, appliedByRule: matchedRuleId, notes: txnForm.notes.trim() || undefined, createdAt: new Date().toISOString() },
+      { id: crypto.randomUUID(), date: txnForm.date, accountId: resolvedAccountId, merchant, amount, type: txnForm.type, categoryId: autoCategoryId || undefined, appliedByRule: matchedRuleId, notes: txnForm.notes.trim() || undefined, createdAt: new Date().toISOString() },
       ...prev,
     ])
     clearTxnForm()
@@ -912,7 +928,10 @@ export default function App() {
     if (!inlineTxnEditId) return
     const merchant = inlineTxnEditForm.merchant.trim()
     const amount = parseFloat(inlineTxnEditForm.amount) || 0
-    if (!inlineTxnEditForm.accountId || !merchant || amount <= 0) return
+    // Show validation hints rather than silently refusing
+    if (!inlineTxnEditForm.accountId) { setTimedTxnHint('Choose an account for this transaction.'); return }
+    if (!merchant) { setTimedTxnHint('Enter a merchant or description.'); return }
+    if (amount <= 0) { setTimedTxnHint('Enter a valid amount greater than zero.'); return }
 
     // V8.5.2 — Duplicate detection: same merchant + amount + date, excluding self
     const isDup = transactions.some(x =>
@@ -929,13 +948,36 @@ export default function App() {
     setTxnDupWarning(false)
     setTxnHint('')
 
-    setTxnWithHistory(prev => prev.map(x => x.id === inlineTxnEditId
-      ? { ...x, date: inlineTxnEditForm.date, accountId: inlineTxnEditForm.accountId, merchant, amount, type: inlineTxnEditForm.type, categoryId: inlineTxnEditForm.categoryId || undefined, notes: inlineTxnEditForm.notes.trim() || undefined }
-      : x
-    ))
+    // V8.6.1 — Determine the original transaction to detect manual category changes
+    const originalTx = transactions.find(x => x.id === inlineTxnEditId)
+    const categoryChangedManually =
+      originalTx?.appliedByRule &&
+      inlineTxnEditForm.categoryId !== (originalTx.categoryId ?? '')
+
+    setTxnWithHistory(prev => prev.map(x => {
+      if (x.id !== inlineTxnEditId) return x
+      return {
+        ...x,
+        date: inlineTxnEditForm.date,
+        accountId: inlineTxnEditForm.accountId,
+        merchant,
+        amount,
+        type: inlineTxnEditForm.type,
+        categoryId: inlineTxnEditForm.categoryId || undefined,
+        notes: inlineTxnEditForm.notes.trim() || undefined,
+        // V8.6.1 — If user manually changed the category, strip rule ownership
+        // so deleting the rule later won't clear this user-owned category.
+        appliedByRule: categoryChangedManually ? undefined : x.appliedByRule,
+      }
+    }))
     setInlineTxnEditId(null)
   }
-  const cancelInlineTxnEdit = () => { setInlineTxnEditId(null); setTxnDupWarning(false); setTxnHint('') }
+  const cancelInlineTxnEdit = () => {
+    if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
+    setInlineTxnEditId(null)
+    setTxnDupWarning(false)
+    setTxnHint('')
+  }
 
   // ── V8.3 Rule helpers ─────────────────────────────────────────────────────────
 
@@ -1052,13 +1094,17 @@ export default function App() {
     setInlineRuleEditId(null)
   }
   const cancelInlineRuleEdit = () => setInlineRuleEditId(null)
-  const applyAllRules = () => {
+ const applyAllRules = () => {
     const activeRuleIds = new Set(rules.map(r => r.id))
     let count = 0
     setTxnWithHistory(prev => prev.map(tx => {
-      // V8.5.2 — Strip stale rule-applied marker for deleted rules
-      const baseTx = (tx.appliedByRule && !activeRuleIds.has(tx.appliedByRule))
-        ? { ...tx, appliedByRule: undefined }
+      // V8.6.1 — Strip stale badge AND category for deleted-rule transactions.
+      // Only clears if the category is still rule-owned (appliedByRule points to
+      // a deleted rule). User-manually-changed categories already have appliedByRule
+      // cleared (via saveInlineTxnEdit), so they are untouched here.
+      const isStaleRule = tx.appliedByRule && !activeRuleIds.has(tx.appliedByRule)
+      const baseTx = isStaleRule
+        ? { ...tx, categoryId: undefined, appliedByRule: undefined }
         : tx
       if (!overwriteCategories && baseTx.categoryId) return baseTx
       const mLower = normalizeAlias(baseTx.merchant)
@@ -2647,11 +2693,11 @@ export default function App() {
                   <select
                     ref={txnAccountRef}
                     className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
-                    value={txnForm.accountId}
+                    value={txnForm.accountId || (accounts.length === 1 ? accounts[0].id : '')}
                     onChange={e => setTxnForm(v => ({ ...v, accountId: e.target.value }))}
                     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) txnDateRef.current?.focus(); else txnMerchantRef.current?.focus() } }}
                   >
-                    <option value="">Select account…</option>
+                    {accounts.length !== 1 && <option value="">Select account…</option>}
                     {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                   </select>
                 </div>
@@ -2700,7 +2746,7 @@ export default function App() {
                         e.preventDefault()
                         if (e.shiftKey) {
                           txnMerchantRef.current?.focus()
-                        } else if (txnForm.accountId && txnForm.merchant.trim() && parseFloat(txnForm.amount) > 0) {
+                       } else if ((txnForm.accountId || accounts.length === 1) && txnForm.merchant.trim() && parseFloat(txnForm.amount) > 0) {
                           // All required fields filled — log the transaction directly
                           createOrSaveTxn()
                         } else {
@@ -2815,39 +2861,108 @@ export default function App() {
                         const cat  = categories.find(c => c.id === tx.categoryId)
                         const isInlineEdit = inlineTxnEditId === tx.id
 
-                       if (isInlineEdit) {
+                      if (isInlineEdit) {
+                          // Blur-save helpers: schedule save on blur, cancel if focus moves within the row
+                          const scheduleBlurSave = () => {
+                            if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
+                            inlineEditBlurTimerRef.current = setTimeout(saveInlineTxnEdit, 150)
+                          }
+                          const cancelBlurSave = () => {
+                            if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
+                          }
                           return (
                             <tr key={tx.id} className="border-b border-slate-700 bg-blue-950/20">
+                              {/* Date */}
                               <td className="py-1.5 pr-2">
-                                <input type="date" className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineTxnEditForm.date} onChange={e => { setInlineTxnEditForm(v => ({ ...v, date: e.target.value })); setTxnDupWarning(false); }} />
+                                <input
+                                  type="date"
+                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineTxnEditForm.date}
+                                  onChange={e => { setInlineTxnEditForm(v => ({ ...v, date: e.target.value })); setTxnDupWarning(false) }}
+                                  onFocus={cancelBlurSave}
+                                  onBlur={scheduleBlurSave}
+                                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() } if (e.key === 'Escape') cancelInlineTxnEdit() }}
+                                />
                               </td>
+                              {/* Account */}
                               <td className="py-1.5 pr-2">
-                                <select className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineTxnEditForm.accountId} onChange={e => setInlineTxnEditForm(v => ({ ...v, accountId: e.target.value }))}>
+                                <select
+                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineTxnEditForm.accountId}
+                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, accountId: e.target.value }))}
+                                  onFocus={cancelBlurSave}
+                                  onBlur={scheduleBlurSave}
+                                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() } if (e.key === 'Escape') cancelInlineTxnEdit() }}
+                                >
                                   <option value="">Account…</option>
                                   {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                                 </select>
                               </td>
+                              {/* Merchant — ArrowRight moves to Type */}
                               <td className="py-1.5 pr-2">
-                                <input ref={inlineTxnMerchantRef} className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineTxnEditForm.merchant} onChange={e => { setInlineTxnEditForm(v => ({ ...v, merchant: e.target.value })); setTxnDupWarning(false); }} onKeyDown={e => { if (e.key === 'Enter') saveInlineTxnEdit(); if (e.key === 'Escape') cancelInlineTxnEdit() }} />
+                                <input
+                                  ref={inlineTxnMerchantRef}
+                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineTxnEditForm.merchant}
+                                  onFocus={e => { e.target.select(); cancelBlurSave() }}
+                                  onBlur={scheduleBlurSave}
+                                  onChange={e => { setInlineTxnEditForm(v => ({ ...v, merchant: e.target.value })); setTxnDupWarning(false) }}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnTypeRef.current?.focus(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
+                                    if (e.key === 'Escape') cancelInlineTxnEdit()
+                                  }}
+                                />
                               </td>
+                              {/* Type — ArrowLeft → Merchant, ArrowRight → Category */}
                               <td className="py-1.5 pr-2">
-                                <select ref={inlineTxnTypeRef} className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineTxnEditForm.type} onChange={e => setInlineTxnEditForm(v => ({ ...v, type: e.target.value as TransactionType }))}>
+                                <select
+                                  ref={inlineTxnTypeRef}
+                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineTxnEditForm.type}
+                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, type: e.target.value as TransactionType }))}
+                                  onFocus={cancelBlurSave}
+                                  onBlur={scheduleBlurSave}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineTxnMerchantRef.current?.focus(); inlineTxnMerchantRef.current?.select(); return }
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnCategoryRef.current?.focus(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
+                                    if (e.key === 'Escape') cancelInlineTxnEdit()
+                                  }}
+                                >
                                   {TXN_TYPES.map(t => <option key={t} value={t}>{TXN_TYPE_LABELS[t]}</option>)}
                                 </select>
                               </td>
+                              {/* Category — ArrowLeft → Type, ArrowRight → Amount */}
                               <td className="py-1.5 pr-2">
-                                <select ref={inlineTxnCategoryRef} className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineTxnEditForm.categoryId} onChange={e => setInlineTxnEditForm(v => ({ ...v, categoryId: e.target.value }))}>
+                                <select
+                                  ref={inlineTxnCategoryRef}
+                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineTxnEditForm.categoryId}
+                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, categoryId: e.target.value }))}
+                                  onFocus={cancelBlurSave}
+                                  onBlur={scheduleBlurSave}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineTxnTypeRef.current?.focus(); return }
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
+                                    if (e.key === 'Escape') cancelInlineTxnEdit()
+                                  }}
+                                >
                                   <option value="">— none —</option>
                                   {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                 </select>
                               </td>
+                              {/* Amount — default focus target; ArrowLeft → Category */}
                               <td className="py-1.5 pr-2">
                                 <input
+                                  ref={inlineTxnAmountRef}
                                   type="text"
                                   inputMode="decimal"
                                   className="w-24 px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none text-right"
                                   value={inlineTxnEditForm.amount}
-                                  onFocus={e => e.target.select()}
+                                  onFocus={e => { e.target.select(); cancelBlurSave() }}
+                                  onBlur={scheduleBlurSave}
                                   onChange={e => {
                                     const raw = e.target.value.replace(/[^0-9.]/g, '')
                                     const parts = raw.split('.')
@@ -2863,18 +2978,36 @@ export default function App() {
                                       const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
                                       setInlineTxnEditForm(v => ({ ...v, amount: next === 0 ? '' : String(next) }))
                                       setTxnDupWarning(false)
+                                      return
                                     }
-                                    if (e.key === 'Enter') saveInlineTxnEdit()
+                                    if (e.key === 'ArrowLeft') { e.preventDefault(); inlineTxnCategoryRef.current?.focus(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
                                     if (e.key === 'Escape') cancelInlineTxnEdit()
                                   }}
                                 />
                               </td>
+                              {/* Notes */}
                               <td className="py-1.5 pr-2">
-                                <input className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineTxnEditForm.notes} onChange={e => setInlineTxnEditForm(v => ({ ...v, notes: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') saveInlineTxnEdit(); if (e.key === 'Escape') cancelInlineTxnEdit() }} />
+                                <input
+                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineTxnEditForm.notes}
+                                  onFocus={cancelBlurSave}
+                                  onBlur={scheduleBlurSave}
+                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, notes: e.target.value }))}
+                                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() } if (e.key === 'Escape') cancelInlineTxnEdit() }}
+                                />
                               </td>
                               <td className="py-1.5 whitespace-nowrap space-x-2">
-                                <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={saveInlineTxnEdit}>Save</button>
-                                <button className="text-slate-400 hover:text-slate-300 text-xs" onClick={cancelInlineTxnEdit}>Cancel</button>
+                                <button
+                                  className="text-blue-400 hover:text-blue-300 text-xs"
+                                  onMouseDown={cancelBlurSave}
+                                  onClick={saveInlineTxnEdit}
+                                >Save</button>
+                                <button
+                                  className="text-slate-400 hover:text-slate-300 text-xs"
+                                  onMouseDown={cancelBlurSave}
+                                  onClick={cancelInlineTxnEdit}
+                                >Cancel</button>
                               </td>
                             </tr>
                           )
@@ -3101,8 +3234,15 @@ export default function App() {
                         if (isInlineEdit) {
                           return (
                             <tr key={r.id} className="border-b border-slate-700 bg-blue-950/20">
-                              <td className="py-1.5 pr-2">
-                                <input className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineRuleEditForm.name} onChange={e => setInlineRuleEditForm(v => ({ ...v, name: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') saveInlineRuleEdit(); if (e.key === 'Escape') cancelInlineRuleEdit() }} />
+                           <td className="py-1.5 pr-2">
+                                <input
+                                  ref={inlineRuleMatchRef}
+                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none font-mono"
+                                  value={inlineRuleEditForm.matchText}
+                                  onFocus={e => e.target.select()}
+                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, matchText: e.target.value }))}
+                                  onKeyDown={e => { if (e.key === 'Enter') saveInlineRuleEdit(); if (e.key === 'Escape') cancelInlineRuleEdit() }}
+                                />
                               </td>
                              <td className="py-1.5 pr-2">
                                 <input
@@ -3147,7 +3287,7 @@ export default function App() {
                             <td className="py-2 pr-3 text-xs">{cat ? <span className="text-slate-400">{cat.name}</span> : <span className="text-red-400">missing</span>}</td>
                             <td className="py-2 pr-3 text-slate-400 text-xs">{r.type ? TXN_TYPE_LABELS[r.type] : '—'}</td>
                             <td className="py-2 whitespace-nowrap space-x-2">
-                            <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
+                           <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
                                 setInlineRuleEditId(r.id)
                                 setInlineRuleEditForm({ name: r.name, matchText: r.matchText, matchField: r.matchField, categoryId: r.categoryId, type: r.type ?? '' })
                                 setTimeout(() => { inlineRuleMatchRef.current?.focus(); inlineRuleMatchRef.current?.select() }, 0)
