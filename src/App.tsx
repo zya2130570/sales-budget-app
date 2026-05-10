@@ -2897,11 +2897,10 @@ export default function App() {
                                   onFocus={e => { e.target.select(); cancelBlurSave() }}
                                   onBlur={scheduleBlurSave}
                                   onChange={e => { setInlineTxnEditForm(v => ({ ...v, merchant: e.target.value })); setTxnDupWarning(false) }}
-                                  onKeyDown={e => {
-                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnTypeRef.current?.focus(); return }
-                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
-                                    if (e.key === 'Escape') cancelInlineTxnEdit()
-                                  }}
+                                 onKeyDown={e => {
+  if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
+  if (e.key === 'Escape') cancelInlineTxnEdit()
+}}
                                 />
                               </td>
                               {/* Type — ArrowLeft → Merchant, ArrowRight → Category */}
