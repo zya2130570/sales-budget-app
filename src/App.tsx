@@ -404,7 +404,7 @@ export default function App() {
   const [txnFilter, setTxnFilter]             = useState<typeof TXN_FILTER_OPTIONS[number]['value']>('all')
   const [txnDupWarning, setTxnDupWarning]     = useState(false)
   // V8.7 — tracks how many uncategorized txns were visible when pill was last clicked
-  const [seenUncatCount, setSeenUncatCount]   = useState(0)
+  const [, setSeenUncatCount]   = useState(0)
   const [accountHint, setAccountHint]         = useState('')
   const [txnHint, setTxnHint]                 = useState('')
 
