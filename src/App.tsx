@@ -39,10 +39,9 @@ import {
   runMigrations,
 } from './utils/storage'
 // V9.0 — CSV import pipeline
-import { buildImportPreview, commitImportCandidates } from './utils/importCsv'
-import type { ImportCandidate, ImportPreviewResult } from './utils/importCsv'
-import { generateSampleCsvText } from './utils/csv'
-
+import { runImportPipeline, buildImportedTransactions } from './utils/importHelpers'
+import type { ImportRow, ImportPipelineResult } from './utils/importHelpers'
+import { generateSampleCsvString } from './utils/csv'
 const presetTypeMap: Record<string, CategoryType> = {
   Bike: 'fixed bill',
   Braiding: 'fixed bill',
@@ -1356,7 +1355,7 @@ export default function App() {
     if (newTxns[0]) flashHighlight(newTxns[0].id, setHighlightedTxnId, highlightTxnTimerRef)
   }
   const downloadSampleCsv = () => {
-    const text = generateSampleCsvText()
+    const text = generateSampleCsvString()
     const blob = new Blob([text], { type: 'text/csv' })
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
@@ -3836,7 +3835,7 @@ export default function App() {
           onCancel={closeCsvImport}
           onResetPreview={() => { setCsvImportPreview(null); setCsvImportError('') }}
           onDownloadSample={downloadSampleCsv}
-          onUseSampleData={() => processCsvText(generateSampleCsvText())}
+          onUseSampleData={() => processCsvText(generateSampleCsvString())}
           fileInputRef={csvFileInputRef}
         />
       )}
