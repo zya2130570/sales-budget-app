@@ -1273,12 +1273,12 @@ export default function App() {
       const roll     = Math.random()
       const type: TransactionType = roll < 0.72 ? 'expense' : roll < 0.84 ? 'income' : roll < 0.93 ? 'transfer' : 'credit card payment'
       const merchant =
-        type === 'income'               ? INCOME_MERCHANTS[Math.floor(Math.random() * INCOME_MERCHANTS.length)]
-        : type === 'transfer'           ? TRANSFER_MERCHANTS[Math.floor(Math.random() * TRANSFER_MERCHANTS.length)]
-        : type === 'credit card payment'? 'Credit Card Payment'
+        type === 'income'                ? INCOME_MERCHANTS[Math.floor(Math.random() * INCOME_MERCHANTS.length)]
+        : type === 'transfer'            ? TRANSFER_MERCHANTS[Math.floor(Math.random() * TRANSFER_MERCHANTS.length)]
+        : type === 'credit card payment' ? 'Credit Card Payment'
         : EXPENSE_MERCHANTS[Math.floor(Math.random() * EXPENSE_MERCHANTS.length)]
-      const amount   = (Math.floor(Math.random() * 19) + 1) * 5
-        const catPool  = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
+      const amount     = (Math.floor(Math.random() * 19) + 1) * 5
+      const catPool    = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
       const categoryId = Math.random() < 0.7 && catPool.length ? catPool[Math.floor(Math.random() * catPool.length)].id : undefined
       const accountId  = accounts[0]?.id ?? ''
       const date       = new Date(startMs + Math.random() * (endMs - startMs)).toISOString().slice(0, 10)
@@ -1289,6 +1289,7 @@ export default function App() {
         : { id: crypto.randomUUID(), date, accountId, merchant, amount, type, categoryId, createdAt: new Date().toISOString() }
       )
     }
+    if (!batch.length) return
     const firstId = batch[0].id
     // Single undo entry for the whole batch
     setTxnWithHistory(prev => [...batch, ...prev])
