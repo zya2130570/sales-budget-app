@@ -3429,10 +3429,9 @@ const clearTxnForm = () => {
                             <td className="py-2 pr-3 text-xs">{cat ? <span className="text-slate-400">{cat.name}</span> : <span className="text-red-400">missing</span>}</td>
                             <td className="py-2 pr-3 text-slate-400 text-xs">{r.type ? TXN_TYPE_LABELS[r.type] : '—'}</td>
                             <td className="py-2 pr-3 text-xs">
-                              {usageCount > 0
-                                ? <span className="text-indigo-400 bg-indigo-900/30 border border-indigo-700/40 px-1.5 py-0.5 rounded text-[10px]">Used {usageCount}</span>
-                                : <span className="text-slate-600 text-[10px]">Active</span>
-                              }
+                              {usageCount > 0 && (
+                                <span className="text-indigo-400 bg-indigo-900/30 border border-indigo-700/40 px-1.5 py-0.5 rounded text-[10px]">Used {usageCount}</span>
+                              )}
                             </td>
                             <td className="py-2 whitespace-nowrap space-x-2">
                            <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
