@@ -902,12 +902,6 @@ export default function App() {
     setTxnHint('')
     setTxnDupWarning(false)
   }
-  // Soft reset after a successful add — keeps account, type, date so rapid entry stays frictionless
-  const resetTxnFormAfterAdd = () => {
-    setTxnForm(prev => ({ ...prev, merchant: '', amount: '', categoryId: '', notes: '' }))
-    setTxnHint('')
-    setTxnDupWarning(false)
-  }
   // Soft reset after a successful add — keeps account, type, date so rapid entry is frictionless
   const createOrSaveTxn = () => {
     const merchant = txnForm.merchant.trim()
