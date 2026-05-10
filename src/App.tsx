@@ -891,8 +891,14 @@ export default function App() {
       return next
     })
   }
-  const clearTxnForm = () => {
+ const clearTxnForm = () => {
     setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '' })
+    setTxnHint('')
+    setTxnDupWarning(false)
+  }
+  // Soft reset after successful add — preserves accountId/type/date for fast sequential entry
+  const resetTxnFormAfterAdd = () => {
+    setTxnForm(prev => ({ ...prev, merchant: '', amount: '', categoryId: '', notes: '' }))
     setTxnHint('')
     setTxnDupWarning(false)
   }
@@ -2721,8 +2727,8 @@ export default function App() {
               )
             })()}
             <Card title="Log Transaction" noHover>
-              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
-                {/* Date */}
+             <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+                {/* Date — native left/right used by date picker; Enter navigates forward */}
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Date</label>
                   <input
@@ -2731,7 +2737,9 @@ export default function App() {
                     className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
                     value={txnForm.date}
                     onChange={e => setTxnForm(v => ({ ...v, date: e.target.value }))}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); txnAccountRef.current?.focus() } }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); txnAccountRef.current?.focus() }
+                    }}
                   />
                 </div>
                 {/* Account */}
@@ -2740,15 +2748,23 @@ export default function App() {
                   <select
                     ref={txnAccountRef}
                     className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
-                    value={txnForm.accountId || (accounts.length === 1 ? accounts[0].id : '')}
+                    value={txnForm.accountId}
                     onChange={e => setTxnForm(v => ({ ...v, accountId: e.target.value }))}
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) txnDateRef.current?.focus(); else txnMerchantRef.current?.focus() } }}
+                    onKeyDown={e => {
+                      if (e.key === 'ArrowLeft')  { e.preventDefault(); txnDateRef.current?.focus() }
+                      if (e.key === 'ArrowRight') { e.preventDefault(); txnMerchantRef.current?.focus(); txnMerchantRef.current?.select() }
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (e.shiftKey) { txnDateRef.current?.focus() }
+                        else { txnMerchantRef.current?.focus(); txnMerchantRef.current?.select() }
+                      }
+                    }}
                   >
-                    {accounts.length !== 1 && <option value="">Select account…</option>}
+                    <option value="">Select account…</option>
                     {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                   </select>
                 </div>
-                {/* Merchant */}
+                {/* Merchant — boundary-aware arrows so normal cursor movement still works */}
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Merchant / Description</label>
                   <input
@@ -2757,15 +2773,25 @@ export default function App() {
                     placeholder="e.g. Whole Foods"
                     value={txnForm.merchant}
                     onChange={e => setTxnForm(v => ({ ...v, merchant: e.target.value }))}
-              onKeyDown={e => {
+                    onKeyDown={e => {
+                      if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) {
+                        e.preventDefault(); txnAccountRef.current?.focus()
+                      }
+                      if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) {
+                        e.preventDefault(); txnAmountRef.current?.focus(); txnAmountRef.current?.select()
+                      }
                       if (e.key === 'Enter') {
                         e.preventDefault()
                         if (e.shiftKey) {
                           txnAccountRef.current?.focus()
-                        } else if (txnForm.accountId && txnForm.merchant.trim() && parseFloat(txnForm.amount) > 0) {
+                        } else if (!txnForm.accountId) {
+                          txnAccountRef.current?.focus(); setTimedTxnHint('Choose an account first.')
+                        } else if (!txnForm.merchant.trim()) {
+                          // stay — still typing
+                        } else if (parseFloat(txnForm.amount) > 0) {
                           createOrSaveTxn()
                         } else {
-                          txnAmountRef.current?.focus()
+                          txnAmountRef.current?.focus(); txnAmountRef.current?.select()
                         }
                       }
                     }}
@@ -2794,34 +2820,32 @@ export default function App() {
                     }}
                     onKeyDown={e => {
                       if (['e', 'E', '+', '-'].includes(e.key)) { e.preventDefault(); return }
+                      if (e.key === 'ArrowLeft')  { e.preventDefault(); txnMerchantRef.current?.focus(); txnMerchantRef.current?.select(); return }
+                      if (e.key === 'ArrowRight') { e.preventDefault(); txnTypeRef.current?.focus(); return }
                       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                         e.preventDefault()
                         const cur = parseFloat(txnForm.amount) || 0
                         const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
                         setTxnForm(v => ({ ...v, amount: next === 0 ? '' : String(next) }))
                       }
-                     if (e.key === 'Enter') {
+                      if (e.key === 'Enter') {
                         e.preventDefault()
                         if (e.shiftKey) {
-                          txnMerchantRef.current?.focus()
+                          txnMerchantRef.current?.focus(); txnMerchantRef.current?.select()
                         } else if (!txnForm.accountId) {
-                          txnAccountRef.current?.focus()
-                          setTimedTxnHint('Choose an account first.')
+                          txnAccountRef.current?.focus(); setTimedTxnHint('Choose an account first.')
                         } else if (!txnForm.merchant.trim()) {
-                          txnMerchantRef.current?.focus()
-                          setTimedTxnHint('Enter a merchant or description.')
+                          txnMerchantRef.current?.focus(); setTimedTxnHint('Enter a merchant or description.')
                         } else if (parseFloat(txnForm.amount) <= 0) {
-                          // stay on amount — user needs to fill it
-                          txnAmountRef.current?.focus()
+                          txnAmountRef.current?.focus(); txnAmountRef.current?.select()
                         } else {
-                          // all required fields filled → submit
                           createOrSaveTxn()
                         }
                       }
                     }}
                   />
                 </div>
-                {/* Type */}
+                {/* Type — left/right navigate between fields; up/down cycle options natively */}
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Type</label>
                   <select
@@ -2829,22 +2853,13 @@ export default function App() {
                     className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
                     value={txnForm.type}
                     onChange={e => setTxnForm(v => ({ ...v, type: e.target.value as TransactionType }))}
-                   onKeyDown={e => {
+                    onKeyDown={e => {
+                      if (e.key === 'ArrowLeft')  { e.preventDefault(); txnAmountRef.current?.focus(); txnAmountRef.current?.select() }
+                      if (e.key === 'ArrowRight') { e.preventDefault(); txnCategoryRef.current?.focus() }
                       if (e.key === 'Enter') {
                         e.preventDefault()
-                        if (e.shiftKey) {
-                          txnAccountRef.current?.focus()
-                        } else if (!txnForm.accountId) {
-                          txnAccountRef.current?.focus()
-                          setTimedTxnHint('Choose an account first.')
-                        } else if (!txnForm.merchant.trim()) {
-                          // stay — user hasn't typed yet
-                        } else if (parseFloat(txnForm.amount) > 0) {
-                          // merchant + account + amount all good → submit
-                          createOrSaveTxn()
-                        } else {
-                          txnAmountRef.current?.focus()
-                        }
+                        if (e.shiftKey) { txnAmountRef.current?.focus(); txnAmountRef.current?.select() }
+                        else txnCategoryRef.current?.focus()
                       }
                     }}
                   >
@@ -2853,23 +2868,26 @@ export default function App() {
                   <p className="text-[10px] text-slate-500 mt-0.5">Use Credit Card Payment when checking pays down a credit card.</p>
                 </div>
                 {/* Category */}
-               <div>
+                <div>
                   <label className="block text-xs text-slate-400 mb-1">Category <span className="text-slate-600">(optional)</span></label>
                   <select
                     ref={txnCategoryRef}
                     className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
                     value={txnForm.categoryId}
                     onChange={e => setTxnForm(v => ({ ...v, categoryId: e.target.value }))}
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) txnTypeRef.current?.focus(); else txnNotesRef.current?.focus() } }}
+                    onKeyDown={e => {
+                      if (e.key === 'ArrowLeft')  { e.preventDefault(); txnTypeRef.current?.focus() }
+                      if (e.key === 'ArrowRight') { e.preventDefault(); txnNotesRef.current?.focus() }
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (e.shiftKey) txnTypeRef.current?.focus()
+                        else txnNotesRef.current?.focus()
+                      }
+                    }}
                   >
                     <option value="">— none —</option>
                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
-                  {merchantSuggestion && (
-                    <p className={`mt-0.5 text-[10px] ${merchantSuggestion.kind === 'rule' ? 'text-indigo-400' : 'text-slate-400'}`}>
-                      {merchantSuggestion.text}
-                    </p>
-                  )}
                 </div>
                 {/* Notes */}
                 <div className="lg:col-span-2">
@@ -2880,19 +2898,22 @@ export default function App() {
                     placeholder="optional"
                     value={txnForm.notes}
                     onChange={e => setTxnForm(v => ({ ...v, notes: e.target.value }))}
-                onKeyDown={e => {
+                    onKeyDown={e => {
+                      if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) {
+                        e.preventDefault(); txnCategoryRef.current?.focus()
+                      }
                       if (e.key === 'Enter') {
                         e.preventDefault()
                         if (e.shiftKey) {
                           txnCategoryRef.current?.focus()
-                        } else if (txnForm.accountId && txnForm.merchant.trim() && parseFloat(txnForm.amount) > 0) {
-                          createOrSaveTxn()
                         } else if (!txnForm.accountId) {
-                          txnAccountRef.current?.focus()
+                          txnAccountRef.current?.focus(); setTimedTxnHint('Choose an account first.')
                         } else if (!txnForm.merchant.trim()) {
-                          txnMerchantRef.current?.focus()
+                          txnMerchantRef.current?.focus(); setTimedTxnHint('Enter a merchant or description.')
+                        } else if (parseFloat(txnForm.amount) <= 0) {
+                          txnAmountRef.current?.focus(); setTimedTxnHint('Enter a transaction amount.')
                         } else {
-                          txnAmountRef.current?.focus()
+                          createOrSaveTxn()
                         }
                       }
                     }}
@@ -3329,12 +3350,13 @@ export default function App() {
                 <div className="mt-4 overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="text-left text-slate-400 border-b border-slate-700">
+                     <tr className="text-left text-slate-400 border-b border-slate-700">
                         <th className="pb-1.5 pr-3 font-medium">Rule Name</th>
                         <th className="pb-1.5 pr-3 font-medium">Matches</th>
                         <th className="pb-1.5 pr-3 font-medium">In Field</th>
                         <th className="pb-1.5 pr-3 font-medium">Assign to Category</th>
                         <th className="pb-1.5 pr-3 font-medium">Type Filter</th>
+                        <th className="pb-1.5 pr-3 font-medium">Usage</th>
                         <th className="pb-1.5" />
                       </tr>
                     </thead>
@@ -3390,6 +3412,7 @@ export default function App() {
                             </tr>
                           )
                         }
+                      const usageCount = transactions.filter(tx => tx.appliedByRule === r.id).length
                         return (
                           <tr key={r.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedRuleId === r.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
                             <td className="py-2 pr-3 font-medium">{r.name}</td>
@@ -3397,6 +3420,12 @@ export default function App() {
                             <td className="py-2 pr-3 text-slate-400 text-xs capitalize">{r.matchField}</td>
                             <td className="py-2 pr-3 text-xs">{cat ? <span className="text-slate-400">{cat.name}</span> : <span className="text-red-400">missing</span>}</td>
                             <td className="py-2 pr-3 text-slate-400 text-xs">{r.type ? TXN_TYPE_LABELS[r.type] : '—'}</td>
+                            <td className="py-2 pr-3 text-xs">
+                              {usageCount > 0
+                                ? <span className="text-indigo-400 bg-indigo-900/30 border border-indigo-700/40 px-1.5 py-0.5 rounded text-[10px]">Used {usageCount}</span>
+                                : <span className="text-slate-600 text-[10px]">Active</span>
+                              }
+                            </td>
                             <td className="py-2 whitespace-nowrap space-x-2">
                            <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
                                 setInlineRuleEditId(r.id)
