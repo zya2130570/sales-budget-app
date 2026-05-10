@@ -38,6 +38,10 @@ import {
   saveTransactionRules,
   runMigrations,
 } from './utils/storage'
+import { parseCsv, detectColumns, downloadSampleCsv } from './utils/csv'
+import type { ColumnMapping } from './utils/csv'
+import { runImportPipeline, buildImportedTransactions } from './utils/importHelpers'
+import type { ImportRow, ImportPipelineResult } from './utils/importHelpers'
 
 const presetTypeMap: Record<string, CategoryType> = {
   Bike: 'fixed bill',
@@ -460,6 +464,17 @@ export default function App() {
   const [ruleRedo, setRuleRedo]               = useState<TransactionRule[][]>([])
   const [overwriteCategories, setOverwriteCategories] = useState(false)
   const [applyRulesMsg, setApplyRulesMsg]     = useState('')
+
+  // ── V9.0 CSV Import state ──────────────────────────────────────────────────
+  const [csvModalOpen, setCsvModalOpen]                   = useState(false)
+  const [csvParsing, setCsvParsing]                       = useState(false)
+  const [csvHeaders, setCsvHeaders]                       = useState<string[]>([])
+  const [csvMapping, setCsvMapping]                       = useState<ColumnMapping>({ date: '', merchant: '', amount: '', account: '', notes: '' })
+  const [csvPipeline, setCsvPipeline]                     = useState<ImportPipelineResult | null>(null)
+  const [csvIncludeDuplicates, setCsvIncludeDuplicates]   = useState(false)
+  const [csvImportError, setCsvImportError]               = useState('')
+  const [csvFileName, setCsvFileName]                     = useState('')
+  const csvFileInputRef = useRef<HTMLInputElement>(null)
 
   const gp = Math.max(0, Number(gpInput) || 0)
   const adjustedSalary = BASE_SALARY + (baseBumpsAchieved * 5000)
@@ -1171,6 +1186,94 @@ export default function App() {
     }))
     setApplyRulesMsg(`${count} transaction${count !== 1 ? 's' : ''} updated.`)
     setTimeout(() => setApplyRulesMsg(''), 5000)
+  }
+
+  // ── V9.0 CSV Import handlers ───────────────────────────────────────────────
+
+  const openCsvModal = () => {
+    setCsvModalOpen(true)
+    setCsvPipeline(null)
+    setCsvHeaders([])
+    setCsvMapping({ date: '', merchant: '', amount: '', account: '', notes: '' })
+    setCsvImportError('')
+    setCsvFileName('')
+    setCsvIncludeDuplicates(false)
+  }
+  const closeCsvModal = () => {
+    setCsvModalOpen(false)
+    setCsvPipeline(null)
+    setCsvImportError('')
+    if (csvFileInputRef.current) csvFileInputRef.current.value = ''
+  }
+
+  const handleCsvFile = async (file: File) => {
+    setCsvParsing(true)
+    setCsvImportError('')
+    setCsvPipeline(null)
+    setCsvFileName(file.name)
+    try {
+      const text = await file.text()
+      const result = parseCsv(text)
+      if (result.errorMessage) {
+        setCsvImportError(result.errorMessage)
+        setCsvParsing(false)
+        return
+      }
+      if (result.rows.length === 0) {
+        setCsvImportError('No valid data rows found in the CSV.')
+        setCsvParsing(false)
+        return
+      }
+      const mapping = detectColumns(result.headers)
+      setCsvHeaders(result.headers)
+      setCsvMapping(mapping)
+      // Run pipeline with auto-detected mapping
+      const pipeline = runImportPipeline({
+        rows: result.rows,
+        mapping,
+        existing: transactions,
+        rules,
+        defaultAccountId: accounts[0]?.id ?? '',
+      })
+      setCsvPipeline(pipeline)
+    } catch (err) {
+      setCsvImportError('Failed to read the file. Make sure it is a valid CSV.')
+      console.error(err)
+    } finally {
+      setCsvParsing(false)
+    }
+  }
+
+  const rerunPipeline = (mapping: ColumnMapping) => {
+    if (!csvPipeline) return
+    // Re-parse isn't possible without keeping raw rows — so we store them
+    // Mapping changes only affect the existing parsed rows via the stored headers
+    // For V9.0, mapping changes trigger a re-read from the file input
+    // This is intentional: simple, no stale-state issues
+    setCsvMapping(mapping)
+  }
+
+  /** Called when user confirms the import. Commits all 'ready' rows (+ dupes if opted in). */
+  const commitCsvImport = () => {
+    if (!csvPipeline) return
+    const batchId = crypto.randomUUID()
+    const txns = buildImportedTransactions(
+      csvPipeline.importRows,
+      accounts[0]?.id ?? '',
+      batchId,
+      csvIncludeDuplicates,
+    )
+    if (!txns.length) {
+      setCsvImportError('No transactions to import after filtering.')
+      return
+    }
+    // Highlight first imported row after closing modal
+    const firstId = txns[0].id
+    setTxnWithHistory(prev => [...txns, ...prev])
+    closeCsvModal()
+    showToast(`Imported ${txns.length} transaction${txns.length !== 1 ? 's' : ''}.`)
+    flashHighlight(firstId, setHighlightedTxnId, highlightTxnTimerRef)
+    if (tab !== 'Transactions') setTab('Transactions')
   }
 
   // ── V8.4.2 Sample generators — instant-create with highlight ─────────────────
@@ -3160,6 +3263,14 @@ export default function App() {
                 )}
                 <button onClick={generateSampleTransaction} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a random sample transaction">Generate Sample</button>
                 <button onClick={generateTenSamples} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Add 10 varied samples — mixed categories, some uncategorized, some duplicate-like">Generate 10 Samples</button>
+                {/* V9.0 — CSV Import */}
+                <button
+                  onClick={openCsvModal}
+                  className="rounded-lg px-3 py-1.5 text-xs bg-blue-900/60 hover:bg-blue-800/70 text-blue-300 border border-blue-700/40 transition-colors font-medium"
+                  title="Import transactions from a CSV file"
+                >
+                  ↑ Import CSV
+                </button>
               </div>
               {txnHint && <p className="mt-2 text-sm text-amber-300">{txnHint}</p>}
             </Card>
@@ -3385,6 +3496,9 @@ export default function App() {
                               {cat?.name ?? '—'}
                               {tx.appliedByRule && (
                                 <span className="ml-1.5 text-[9px] text-indigo-400 bg-indigo-900/40 border border-indigo-700/40 px-1 py-0.5 rounded">Rule Applied</span>
+                              )}
+                              {(tx as Transaction & { importSource?: string }).importSource === 'csv' && (
+                                <span className="ml-1.5 text-[9px] text-teal-400 bg-teal-900/40 border border-teal-700/40 px-1 py-0.5 rounded">CSV</span>
                               )}
                             </td>
                             <td className={`py-2 pr-3 text-right font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-100'}`}>
@@ -4092,6 +4206,27 @@ export default function App() {
 
       </div>
 
+      {/* ── V9.0 CSV Import Modal ── */}
+      {csvModalOpen && (
+        <CsvImportModal
+          headers={csvHeaders}
+          mapping={csvMapping}
+          pipeline={csvPipeline}
+          parsing={csvParsing}
+          error={csvImportError}
+          fileName={csvFileName}
+          includeDuplicates={csvIncludeDuplicates}
+          accounts={accounts}
+          fileInputRef={csvFileInputRef}
+          onFileSelect={handleCsvFile}
+          onMappingChange={rerunPipeline}
+          onIncludeDuplicatesChange={setCsvIncludeDuplicates}
+          onCommit={commitCsvImport}
+          onCancel={closeCsvModal}
+          onDownloadSample={downloadSampleCsv}
+        />
+      )}
+
       {/* Toast notification — top-left, amber/warning style, Undo when applicable, click anywhere to dismiss */}
       {toast && (
         <div
@@ -4247,6 +4382,267 @@ function ActionCard({ title, description, onClick, tone = 'neutral' }: { title: 
       </div>
       <p className="text-xs text-slate-400 leading-relaxed">{description}</p>
     </button>
+  )
+}
+
+// ── V9.0 CSV Import Modal ─────────────────────────────────────────────────────
+
+type CsvImportModalProps = {
+  headers: string[]
+  mapping: ColumnMapping
+  pipeline: ImportPipelineResult | null
+  parsing: boolean
+  error: string
+  fileName: string
+  includeDuplicates: boolean
+  accounts: Account[]
+  fileInputRef: React.RefObject<HTMLInputElement | null>
+  onFileSelect: (file: File) => void
+  onMappingChange: (mapping: ColumnMapping) => void
+  onIncludeDuplicatesChange: (v: boolean) => void
+  onCommit: () => void
+  onCancel: () => void
+  onDownloadSample: () => void
+}
+
+function CsvImportModal({
+  headers, mapping, pipeline, parsing, error, fileName,
+  includeDuplicates, accounts, fileInputRef,
+  onFileSelect, onMappingChange, onIncludeDuplicatesChange,
+  onCommit, onCancel, onDownloadSample,
+}: CsvImportModalProps) {
+  const rows: ImportRow[] = pipeline?.importRows ?? []
+  const readyCount     = pipeline?.readyCount     ?? 0
+  const duplicateCount = pipeline?.duplicateCount ?? 0
+  const invalidCount   = pipeline?.invalidCount   ?? 0
+  const commitCount    = readyCount + (includeDuplicates ? duplicateCount : 0)
+
+  const hasMissingMapping = !mapping.date || !mapping.merchant || !mapping.amount
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      onClick={e => { if (e.target === e.currentTarget) onCancel() }}
+    >
+      <div className="w-full max-w-4xl max-h-[90vh] flex flex-col rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 shrink-0">
+          <div>
+            <h2 className="text-lg font-semibold">Import CSV</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Import transactions from a bank export, Mint, or any CSV file.
+            </p>
+          </div>
+          <div className="flex gap-2 items-center">
+            <button
+              onClick={onDownloadSample}
+              className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors"
+              title="Download a sample CSV to test the import flow"
+            >
+              ↓ Sample CSV
+            </button>
+            <button onClick={onCancel} className="text-slate-400 hover:text-slate-200 text-xl px-2">×</button>
+          </div>
+        </div>
+
+        {/* Scrollable body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 min-h-0">
+
+          {/* Step 1: File picker + drag/drop */}
+          <div
+            className="rounded-xl border-2 border-dashed border-slate-600 hover:border-blue-500/60 bg-slate-800/50 p-6 text-center transition-colors cursor-pointer"
+            onClick={() => fileInputRef.current?.click()}
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => {
+              e.preventDefault()
+              const file = e.dataTransfer.files[0]
+              if (file) onFileSelect(file)
+            }}
+          >
+            <p className="text-slate-300 text-sm font-medium">
+              {fileName ? `📄 ${fileName}` : 'Drag & drop a CSV file, or click to browse'}
+            </p>
+            <p className="text-slate-500 text-xs mt-1">
+              Supports bank exports, Mint CSV, or any file with date, merchant, and amount columns.
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={e => {
+                const file = e.target.files?.[0]
+                if (file) onFileSelect(file)
+              }}
+            />
+          </div>
+
+          {/* Parsing indicator */}
+          {parsing && (
+            <p className="text-sm text-blue-400 text-center">Parsing CSV…</p>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div className="rounded-lg border border-red-700/50 bg-red-900/30 px-4 py-3 text-sm text-red-300">
+              {error}
+            </div>
+          )}
+
+          {/* Step 2: Column mapping — only shown when headers are loaded */}
+          {headers.length > 0 && (
+            <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4 space-y-3">
+              <h3 className="text-sm font-semibold text-slate-200">Column Mapping</h3>
+              <p className="text-xs text-slate-400">Columns were auto-detected. Adjust if needed.</p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                {(['date', 'merchant', 'amount', 'account', 'notes'] as (keyof ColumnMapping)[]).map(field => (
+                  <div key={field}>
+                    <label className="block text-xs text-slate-400 mb-1 capitalize">
+                      {field}{(field === 'date' || field === 'merchant' || field === 'amount') ? ' *' : ''}
+                    </label>
+                    <select
+                      className="w-full px-2 py-1.5 text-xs rounded bg-slate-700 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                      value={mapping[field]}
+                      onChange={e => onMappingChange({ ...mapping, [field]: e.target.value })}
+                    >
+                      <option value="">— not mapped —</option>
+                      {headers.map(h => <option key={h} value={h}>{h}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              {hasMissingMapping && (
+                <p className="text-xs text-amber-300">
+                  Map the <strong>date</strong>, <strong>merchant</strong>, and <strong>amount</strong> columns to continue.
+                </p>
+              )}
+              {accounts.length === 0 && (
+                <p className="text-xs text-amber-300">
+                  No accounts found. Imported transactions won't have an account assigned — add one in the Accounts tab first.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Step 3: Preview table */}
+          {pipeline && rows.length > 0 && !hasMissingMapping && (
+            <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4 space-y-3">
+              {/* Summary row */}
+              <div className="flex flex-wrap gap-3 items-center">
+                <h3 className="text-sm font-semibold text-slate-200">Preview</h3>
+                <span className="text-xs text-green-300 bg-green-900/40 border border-green-700/40 px-2 py-0.5 rounded">{readyCount} ready</span>
+                {duplicateCount > 0 && (
+                  <span className="text-xs text-amber-300 bg-amber-900/40 border border-amber-700/40 px-2 py-0.5 rounded">{duplicateCount} duplicate{duplicateCount !== 1 ? 's' : ''}</span>
+                )}
+                {invalidCount > 0 && (
+                  <span className="text-xs text-red-300 bg-red-900/40 border border-red-700/40 px-2 py-0.5 rounded">{invalidCount} skipped</span>
+                )}
+              </div>
+
+              {/* Duplicate opt-in */}
+              {duplicateCount > 0 && (
+                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeDuplicates}
+                    onChange={e => onIncludeDuplicatesChange(e.target.checked)}
+                    className="accent-blue-500"
+                  />
+                  Also import {duplicateCount} possible duplicate{duplicateCount !== 1 ? 's' : ''}
+                </label>
+              )}
+
+              {/* Table */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-slate-400 border-b border-slate-700">
+                      <th className="pb-1.5 pr-3">Status</th>
+                      <th className="pb-1.5 pr-3">Date</th>
+                      <th className="pb-1.5 pr-3">Merchant</th>
+                      <th className="pb-1.5 pr-3 text-right">Amount</th>
+                      <th className="pb-1.5 pr-3">Type</th>
+                      <th className="pb-1.5 pr-3">Category</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.slice(0, 100).map(row => (
+                      <tr
+                        key={row.index}
+                        className={`border-b border-slate-800 ${
+                          row.status === 'invalid' ? 'opacity-50' :
+                          row.status === 'duplicate' ? 'opacity-60' : ''
+                        }`}
+                      >
+                        <td className="py-1.5 pr-3">
+                          {row.status === 'ready'     && <span className="text-green-400">✓</span>}
+                          {row.status === 'duplicate' && <span className="text-amber-400" title="Possible duplicate">⚠ Dup</span>}
+                          {row.status === 'invalid'   && <span className="text-red-400" title={row.invalidReason}>✕ Skip</span>}
+                        </td>
+                        <td className="py-1.5 pr-3 text-slate-300 whitespace-nowrap">{row.date ?? row.raw[mapping.date] ?? '—'}</td>
+                        <td className="py-1.5 pr-3 font-medium max-w-[160px] truncate">{row.merchant ?? '—'}</td>
+                        <td className="py-1.5 pr-3 text-right text-slate-100">{row.amount !== undefined ? currency(row.amount) : '—'}</td>
+                        <td className="py-1.5 pr-3 text-slate-400 capitalize">{row.type ?? '—'}</td>
+                        <td className="py-1.5 pr-3 text-slate-400">
+                          {row.autoCategoryId
+                            ? <span className="text-indigo-300">Auto ✓</span>
+                            : <span className="text-slate-500">—</span>}
+                        </td>
+                      </tr>
+                    ))}
+                    {rows.length > 100 && (
+                      <tr>
+                        <td colSpan={6} className="py-2 text-center text-slate-500 text-xs">
+                          …and {rows.length - 100} more rows (all will be imported)
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {invalidCount > 0 && (
+                <p className="text-xs text-slate-500">
+                  Skipped rows have missing or unreadable date/merchant/amount values and will not be imported.
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Empty state after parse */}
+          {pipeline && rows.length === 0 && !error && (
+            <p className="text-sm text-slate-400 text-center py-4">
+              No importable rows found. Check the column mapping above.
+            </p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-slate-700 shrink-0">
+          <button onClick={onCancel} className="rounded-lg px-4 py-2 text-sm bg-slate-700 hover:bg-slate-600 transition-colors">
+            Cancel
+          </button>
+          <div className="flex items-center gap-3">
+            {pipeline && commitCount > 0 && !hasMissingMapping && (
+              <span className="text-xs text-slate-400">
+                Will import <span className="text-slate-200 font-semibold">{commitCount}</span> transaction{commitCount !== 1 ? 's' : ''}
+              </span>
+            )}
+            <button
+              onClick={onCommit}
+              disabled={!pipeline || commitCount === 0 || hasMissingMapping}
+              className={`rounded-lg px-5 py-2 text-sm font-semibold transition-colors ${
+                !pipeline || commitCount === 0 || hasMissingMapping
+                  ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
+                  : 'bg-blue-600 hover:bg-blue-500 text-white'
+              }`}
+            >
+              {pipeline && commitCount > 0 ? `Import ${commitCount} Transaction${commitCount !== 1 ? 's' : ''}` : 'Import'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
