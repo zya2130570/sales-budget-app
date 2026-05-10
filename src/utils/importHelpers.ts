@@ -166,7 +166,7 @@ export type ImportPipelineResult = {
 }
 
 export function runImportPipeline(input: ImportPipelineInput): ImportPipelineResult {
-  const { rows, mapping, existing, rules, defaultAccountId } = input
+  const { rows, mapping, existing, rules } = input
   const importRows: ImportRow[] = []
   // Track valid rows for sibling dup detection
   const validSiblings: Array<{ date: string; merchant: string; amount: number }> = []
