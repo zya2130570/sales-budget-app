@@ -1253,25 +1253,36 @@ export default function App() {
     const range = getPeriodDateRange(period)
     const startMs = new Date(range.start + 'T00:00:00').getTime()
     const endMs   = Math.min(new Date(range.end + 'T23:59:59').getTime(), Date.now())
+    // Build 10 varied transactions — mix of types, ~30% uncategorized, ~15% duplicate-like
+    const merchantPool = [...new Set(SAMPLE_MERCHANTS)] // dedup pool
+    const usedMerchants: string[] = []
     const batch: Transaction[] = []
     for (let i = 0; i < 10; i++) {
-      const merchant = SAMPLE_MERCHANTS[Math.floor(Math.random() * SAMPLE_MERCHANTS.length)]
+      // Prefer merchants not yet used in this batch for variety
+      const freshPool = merchantPool.filter(m => !usedMerchants.includes(m))
+      const pool = freshPool.length >= 3 ? freshPool : merchantPool
+      const merchant = pool[Math.floor(Math.random() * pool.length)]
+      usedMerchants.push(merchant)
       const amount   = (Math.floor(Math.random() * 19) + 1) * 5
       const roll     = Math.random()
       const type: TransactionType = roll < 0.72 ? 'expense' : roll < 0.84 ? 'income' : roll < 0.93 ? 'transfer' : 'credit card payment'
-      // ~30% intentionally uncategorized
       const catPool  = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
       const categoryId = Math.random() < 0.7 && catPool.length ? catPool[Math.floor(Math.random() * catPool.length)].id : undefined
       const accountId  = accounts[0]?.id ?? ''
       const date       = new Date(startMs + Math.random() * (endMs - startMs)).toISOString().slice(0, 10)
-      // ~15% duplicate a previous entry in this batch
+      // ~15% chance to duplicate a previous entry in this batch (realistic scenario)
       const dupSrc = batch.length >= 2 && Math.random() < 0.15 ? batch[Math.floor(Math.random() * batch.length)] : null
       batch.push(dupSrc
         ? { ...dupSrc, id: crypto.randomUUID(), createdAt: new Date().toISOString() }
         : { id: crypto.randomUUID(), date, accountId, merchant, amount, type, categoryId, createdAt: new Date().toISOString() }
       )
     }
+    const firstId = batch[0].id
+    // Single undo entry for the whole batch
     setTxnWithHistory(prev => [...batch, ...prev])
+    // Highlight the first generated row so the user knows where to look
+    flashHighlight(firstId, setHighlightedTxnId, highlightTxnTimerRef)
+    showToast(`${batch.length} sample transactions added.`)
   }
 
   const upsert = () => {
@@ -2620,7 +2631,7 @@ export default function App() {
                 <button onClick={undoAccount} disabled={!accountHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoAccount} disabled={!accountRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 {!editAccountId && accounts.length > 0 && (
-                  <button onClick={() => { if (window.confirm(`Clear all ${accounts.length} account${accounts.length !== 1 ? 's' : ''}? This cannot be undone.`)) { setAccountsWithHistory(() => []); showUndoableToast('Accounts cleared.', undoAccount) } }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                  <button onClick={() => { if (!accounts.length) return; setAccountsWithHistory(() => []); showUndoableToast(`${accounts.length} account${accounts.length !== 1 ? 's' : ''} cleared.`, undoAccount) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
                 {!editAccountId && (
                   <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
@@ -2675,7 +2686,10 @@ export default function App() {
                 </div>
               </Card>
             ) : (
-              <p className="text-center text-slate-500 text-sm py-8">No accounts yet. Add one above to get started.</p>
+              <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 p-6 text-center">
+                <p className="text-slate-400 text-sm font-medium">No accounts yet</p>
+                <p className="text-slate-500 text-xs mt-1">Add a checking, savings, or investment account above to start tracking your net worth.</p>
+              </div>
             )}
           </section>
         )}
@@ -2926,7 +2940,7 @@ export default function App() {
                 <button onClick={undoTxn} disabled={!txnHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoTxn} disabled={!txnRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 {transactions.length > 0 && (
-                  <button onClick={() => { if (window.confirm(`Clear all ${transactions.length} transaction${transactions.length !== 1 ? 's' : ''}?`)) { setTxnWithHistory(() => []); showUndoableToast('Transactions cleared.', undoTxn) } }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                  <button onClick={() => { if (!transactions.length) return; setTxnWithHistory(() => []); showUndoableToast(`${transactions.length} transaction${transactions.length !== 1 ? 's' : ''} cleared.`, undoTxn) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
                 <button onClick={generateSampleTransaction} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a random sample transaction">Generate Sample</button>
                 <button onClick={generateTenSamples} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Add 10 varied samples — mixed categories, some uncategorized, some duplicate-like">Generate 10 Samples</button>
@@ -3178,10 +3192,12 @@ export default function App() {
                 </div>
               </Card>
             ) : (
-              <p className="text-center text-slate-500 text-sm py-8">
-                No transactions yet.
-                {accounts.length === 0 && <span className="block mt-1 text-slate-600 text-xs">Add an account first to start logging transactions.</span>}
-              </p>
+              <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 p-6 text-center">
+                <p className="text-slate-400 text-sm font-medium">No transactions yet</p>
+                {accounts.length === 0
+                  ? <p className="text-slate-500 text-xs mt-1">Add an account first, then log your first transaction above.</p>
+                  : <p className="text-slate-500 text-xs mt-1">Log your first transaction above. Use Generate Sample to try it out.</p>}
+              </div>
             )}
 
             {/* ── V8.5.1 Uncategorized Expenses ── only expense transactions need budget categories */}
@@ -3327,7 +3343,7 @@ export default function App() {
                 <button onClick={undoRule} disabled={!ruleHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoRule} disabled={!ruleRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 {rules.length > 0 && (
-                  <button onClick={() => { if (window.confirm(`Clear all ${rules.length} rule${rules.length !== 1 ? 's' : ''}?`)) { setRulesWithHistory(() => []); showUndoableToast('Transaction rules cleared.', undoRule) } }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                  <button onClick={() => { if (!rules.length) return; setRulesWithHistory(() => []); showUndoableToast(`${rules.length} rule${rules.length !== 1 ? 's' : ''} cleared.`, undoRule) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
                 <button onClick={generateSampleRule} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample rule">Generate Sample</button>
               </div>
@@ -3450,7 +3466,10 @@ export default function App() {
                   </table>
                 </div>
               ) : (
-                <p className="mt-3 text-sm text-slate-500">No rules yet. Add a rule above to auto-categorize new transactions.</p>
+                <div className="mt-3 rounded-lg border border-slate-700/50 bg-slate-800/40 px-4 py-3 text-center">
+                  <p className="text-slate-400 text-sm font-medium">No rules yet</p>
+                  <p className="text-slate-500 text-xs mt-0.5">Add a rule above to auto-categorize new transactions by merchant name or notes.</p>
+                </div>
               )}
             </Card>
           </section>
@@ -3710,7 +3729,7 @@ export default function App() {
                 Redo
               </button>
               <button
-                onClick={() => { if (!targets.length) return; setTargetsWithHistory(() => []) }}
+                onClick={() => { if (!targets.length) return; setTargetsWithHistory(() => []); showUndoableToast(`${targets.length} savings goal${targets.length !== 1 ? 's' : ''} cleared.`, undoTarget) }}
                 className="rounded-lg px-3 py-1.5 text-sm bg-red-900 hover:bg-red-800 text-red-200"
               >
                 Clear Savings Goals
@@ -3744,7 +3763,10 @@ export default function App() {
                   {activeTargets.map(t => renderTargetCard(t))}
                 </div>
               ) : (
-                <p className="text-slate-500 text-sm">No active savings goals.</p>
+                <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 p-5 text-center">
+                  <p className="text-slate-400 text-sm font-medium">No active savings goals</p>
+                  <p className="text-slate-500 text-xs mt-1">Create a goal above — set a name, target amount, and deadline to start tracking your progress.</p>
+                </div>
               )}
             </section>
 
@@ -3792,7 +3814,7 @@ export default function App() {
 
       </div>
 
-      {/* Toast notification — top-left, warning style, Undo when applicable */}
+      {/* Toast notification — top-left, amber/warning style, Undo when applicable, click anywhere to dismiss */}
       {toast && (
         <div
           className="fixed top-5 left-5 z-50 flex items-center gap-3 rounded-xl border border-amber-600/60 bg-amber-950/90 px-4 py-3 shadow-2xl text-sm text-amber-100 transition-all duration-300 cursor-pointer max-w-sm"
@@ -3800,7 +3822,7 @@ export default function App() {
           onClick={() => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); setToast(null) }}
         >
           <span className="flex-1">{toast.message}</span>
-          {toast.onUndo ? (
+          {toast.onUndo && (
             <button
               className="ml-1 rounded bg-amber-700 hover:bg-amber-600 px-2 py-0.5 text-xs font-semibold transition-colors shrink-0"
               onClick={e => {
@@ -3811,13 +3833,6 @@ export default function App() {
               }}
             >
               Undo
-            </button>
-          ) : (
-            <button
-              className="ml-1 rounded bg-amber-800 hover:bg-amber-700 px-2 py-0.5 text-xs transition-colors shrink-0"
-              onClick={e => { e.stopPropagation(); if (toastTimerRef.current) clearTimeout(toastTimerRef.current); setToast(null) }}
-            >
-              OK
             </button>
           )}
         </div>
