@@ -126,7 +126,7 @@ function getPeriodDateRange(period: Period): { start: string; end: string } {
 const EXPENSE_MERCHANTS  = ['Target', 'Walmart', "Fry's", 'Shell', 'Chevron', 'Costco', 'Amazon', 'Starbucks', 'Chipotle', 'Uber', 'Best Buy', 'CVS', "McDonald's", 'Walgreens', 'Apple', 'Lyft']
 const INCOME_MERCHANTS   = ['Payroll', 'Direct Deposit', 'Paycheck', 'Bonus', 'Refund', 'Venmo Cashout', 'Tax Refund']
 const TRANSFER_MERCHANTS = ['Chase Transfer', 'Savings Transfer', 'Internal Transfer', 'Brokerage Transfer']
-// Keep for backward-compat references (generateTenSamples uses it)
+const SAMPLE_MERCHANTS   = EXPENSE_MERCHANTS
 const SAMPLE_ACCOUNT_TEMPLATES: Array<{ name: string; type: AccountType; balance: number; institution: string }> = [
   { name: 'Chase Checking',       type: 'checking',    balance: 2500,   institution: 'Chase'            },
   { name: 'Ally Savings',         type: 'savings',     balance: 8500,   institution: 'Ally'             },
@@ -290,6 +290,18 @@ export default function App() {
   // V7.7.1: Parallel undo/redo stacks for actuals (mirrors budget history timing)
   const [, setActualsHistory] = useState<Array<Record<string, string>>>([])
   const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
+
+  // V8.12.1: Inline budget category edit (row stays in place; top form is create-only)
+  const [inlineCatEditId, setInlineCatEditId] = useState<string | null>(null)
+  const [inlineCatEditForm, setInlineCatEditForm] = useState({ name: '', amount: '', type: 'fixed bill' as CategoryType })
+  const inlineCatNameRef = useRef<HTMLInputElement>(null)
+  const inlineCatAmountRef = useRef<HTMLInputElement>(null)
+
+  // V8.12.1: Inline account edit (row stays in place; top form is create-only)
+  const [inlineAccountEditId, setInlineAccountEditId] = useState<string | null>(null)
+  const [inlineAccountEditForm, setInlineAccountEditForm] = useState({ name: '', type: 'checking' as AccountType, balance: '', institution: '' })
+  const inlineAccountNameRef = useRef<HTMLInputElement>(null)
+  const inlineAccountBalanceRef = useRef<HTMLInputElement>(null)
 
   const showToast = (message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
@@ -1263,6 +1275,44 @@ export default function App() {
     flashHighlight(id, setHighlightedTargetId, highlightTargetTimerRef)
   }
 
+  const generateTenBudgetCategories = () => {
+    const used = new Set(categories.map(c => c.name))
+    // Full pool of 10 varied, realistic categories
+    const pool: Array<{ name: string; type: CategoryType; monthly: number }> = [
+      { name: 'Rent',            type: 'fixed bill',        monthly: 1800 },
+      { name: 'Groceries',       type: 'variable spending', monthly: 400  },
+      { name: 'Gas',             type: 'variable spending', monthly: 120  },
+      { name: 'Dining',          type: 'variable spending', monthly: 200  },
+      { name: 'Internet',        type: 'fixed bill',        monthly: 60   },
+      { name: 'Phone',           type: 'fixed bill',        monthly: 80   },
+      { name: 'Insurance',       type: 'fixed bill',        monthly: 180  },
+      { name: 'Emergency Fund',  type: 'savings',           monthly: 200  },
+      { name: 'Roth IRA',        type: 'investing',         monthly: 300  },
+      { name: 'Entertainment',   type: 'variable spending', monthly: 80   },
+      { name: 'Travel',          type: 'savings',           monthly: 150  },
+      { name: 'Car Payment',     type: 'fixed bill',        monthly: 350  },
+      { name: 'Subscriptions',   type: 'fixed bill',        monthly: 50   },
+      { name: 'Shopping',        type: 'variable spending', monthly: 150  },
+      { name: 'Utilities',       type: 'fixed bill',        monthly: 120  },
+    ]
+    const available = pool.filter(c => !used.has(c.name))
+    const toAdd = available.slice(0, Math.min(10, available.length))
+    if (!toAdd.length) { showToast('All sample categories already exist.'); return }
+    pushBudgetHistory()
+    const newCats = toAdd.map(tpl => {
+      const jitter = Math.round((tpl.monthly * (Math.random() * 0.2 - 0.1)) / 5) * 5
+      const monthly = Math.max(5, tpl.monthly + jitter)
+      return { id: crypto.randomUUID(), name: tpl.name, amount: monthly, type: tpl.type }
+    })
+    const lastId = newCats[newCats.length - 1].id
+    setCategories(prev => [...prev, ...newCats])
+    // Briefly highlight the last added row so the user knows where to look
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
+    setHighlightedCategoryId(lastId)
+    highlightTimerRef.current = setTimeout(() => setHighlightedCategoryId(null), 2500)
+    showToast(`${newCats.length} sample categories added.`)
+  }
+
   const generateTenSamples = () => {
     const range = getPeriodDateRange(period)
     const startMs = new Date(range.start + 'T00:00:00').getTime()
@@ -1273,12 +1323,12 @@ export default function App() {
       const roll     = Math.random()
       const type: TransactionType = roll < 0.72 ? 'expense' : roll < 0.84 ? 'income' : roll < 0.93 ? 'transfer' : 'credit card payment'
       const merchant =
-        type === 'income'                ? INCOME_MERCHANTS[Math.floor(Math.random() * INCOME_MERCHANTS.length)]
-        : type === 'transfer'            ? TRANSFER_MERCHANTS[Math.floor(Math.random() * TRANSFER_MERCHANTS.length)]
-        : type === 'credit card payment' ? 'Credit Card Payment'
-        : EXPENSE_MERCHANTS[Math.floor(Math.random() * EXPENSE_MERCHANTS.length)]
-      const amount     = (Math.floor(Math.random() * 19) + 1) * 5
-      const catPool    = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
+        type === 'income'               ? INCOME_MERCHANTS[Math.floor(Math.random() * INCOME_MERCHANTS.length)]
+        : type === 'transfer'           ? TRANSFER_MERCHANTS[Math.floor(Math.random() * TRANSFER_MERCHANTS.length)]
+        : type === 'credit card payment'? 'Credit Card Payment'
+        : SAMPLE_MERCHANTS[Math.floor(Math.random() * SAMPLE_MERCHANTS.length)]
+      const amount   = (Math.floor(Math.random() * 19) + 1) * 5
+      const catPool  = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
       const categoryId = Math.random() < 0.7 && catPool.length ? catPool[Math.floor(Math.random() * catPool.length)].id : undefined
       const accountId  = accounts[0]?.id ?? ''
       const date       = new Date(startMs + Math.random() * (endMs - startMs)).toISOString().slice(0, 10)
@@ -1289,7 +1339,6 @@ export default function App() {
         : { id: crypto.randomUUID(), date, accountId, merchant, amount, type, categoryId, createdAt: new Date().toISOString() }
       )
     }
-    if (!batch.length) return
     const firstId = batch[0].id
     // Single undo entry for the whole batch
     setTxnWithHistory(prev => [...batch, ...prev])
@@ -1330,6 +1379,35 @@ export default function App() {
     setBudgetFormHint('')
     budgetNameRef.current?.focus()
   }
+
+  const saveInlineCatEdit = (catId: string) => {
+    const name = inlineCatEditForm.name.trim()
+    const amt  = Math.max(0, Number(inlineCatEditForm.amount) || 0)
+    const monthlyAmt = convertToMonthly(amt, period)
+    if (!name || monthlyAmt <= 0) return
+    pushBudgetHistory()
+    setCategories(prev => prev.map(c => c.id === catId
+      ? { ...c, name, amount: monthlyAmt, type: inlineCatEditForm.type }
+      : c
+    ))
+    setInlineCatEditId(null)
+  }
+
+  const cancelInlineCatEdit = () => setInlineCatEditId(null)
+
+  const saveInlineAccountEdit = (accountId: string) => {
+    const name = inlineAccountEditForm.name.trim()
+    if (!name) return
+    const rawBalance = parseFloat(inlineAccountEditForm.balance) || 0
+    const balance = inlineAccountEditForm.type === 'credit card' && rawBalance > 0 ? -rawBalance : rawBalance
+    setAccountsWithHistory(prev => prev.map(a => a.id === accountId
+      ? { ...a, name, type: inlineAccountEditForm.type, balance, institution: inlineAccountEditForm.institution.trim() }
+      : a
+    ))
+    setInlineAccountEditId(null)
+  }
+
+  const cancelInlineAccountEdit = () => setInlineAccountEditId(null)
 
   const addTargetContribution = (targetId: string, amount: number, date: string, note: string) => {
     if (amount <= 0) return
@@ -1782,10 +1860,10 @@ export default function App() {
                                 <button className="text-blue-300 hover:text-blue-200" onClick={() => startEditContribution(t.id, c)}>Edit</button>
                                 <button
                                   className="text-red-300 hover:text-red-200"
-                                  onClick={() => setTargetsWithHistory(prev => prev.map(x => x.id === t.id
+                                  onClick={() => { setTargetsWithHistory(prev => prev.map(x => x.id === t.id
                                     ? { ...x, currentSaved: Math.max(0, x.currentSaved - c.amount), contributions: x.contributions.filter(k => k.id !== c.id) }
                                     : x
-                                  ))}
+                                  )); showUndoableToast(`Deleted contribution of ${currency(c.amount)}.`, undoTarget) }}
                                 >Delete</button>
                               </div>
                             </div>
@@ -2344,6 +2422,7 @@ export default function App() {
                 <button onClick={redoBudget} disabled={!budgetRedo.length} className={`rounded-lg px-3 py-1.5 ${budgetRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 <button onClick={() => { if (!categories.length) return; pushBudgetHistory(); setCategories([]); showUndoableToast('Budget reset.', undoBudget) }} className="rounded-lg px-3 py-1.5 bg-slate-700 hover:bg-slate-600">Reset Budget</button>
                 <button onClick={generateSampleCategory} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample budget category">Generate Sample</button>
+                <button onClick={generateTenBudgetCategories} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Add up to 10 realistic sample budget categories">Generate 10 Samples</button>
               </div>
               {budgetFormHint && <p className="mt-2 text-sm text-amber-300">{budgetFormHint}</p>}
               <div className="mt-3 grid md:grid-cols-3 gap-2">
@@ -2359,7 +2438,7 @@ export default function App() {
                     <div className="flex gap-2">
                       <button className="text-blue-300" onClick={() => setCategories(b.categories)}>Load</button>
                       <button className="text-amber-300" onClick={() => { const nn = window.prompt('Rename budget', b.name); if (!nn) return; setSavedBudgets(prev => prev.map(x => x.name === b.name ? { ...x, name: nn } : x)) }}>Rename</button>
-                      <button className="text-red-300" onClick={() => setSavedBudgets(prev => prev.filter(x => x.name !== b.name))}>Delete</button>
+                      <button className="text-red-300" onClick={() => { setSavedBudgets(prev => prev.filter(x => x.name !== b.name)); showToast(`Deleted saved budget "${b.name}".`) }}>Delete</button>
                     </div>
                   </div>
                 ))}
@@ -2403,6 +2482,7 @@ export default function App() {
                 </thead>
                 <tbody>
                   {top.map(c => {
+                    const isEditingCat = inlineCatEditId === c.id
                     const planned     = convertFromMonthly(c.amount, period)
                     const eff         = effectiveCatActual(c.id)
                     const rawActual   = actuals[c.id]
@@ -2425,21 +2505,56 @@ export default function App() {
                         className={`border-b border-slate-800 transition-colors duration-300 ${
                           highlightedCategoryId === c.id
                             ? 'bg-blue-600/20'
-                            : isPressure
-                              ? 'bg-amber-500/15'
-                              : ''
+                            : isEditingCat
+                              ? 'bg-slate-700/40'
+                              : isPressure
+                                ? 'bg-amber-500/15'
+                                : ''
                         }`}
                       >
-                        <td className="py-1.5 pr-2">{c.name}</td>
-                        <td className="py-1.5 pr-2 text-slate-400 text-xs">
-                          {c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}
+                        <td className="py-1.5 pr-2">
+                          {isEditingCat ? (
+                            <input
+                              ref={inlineCatNameRef}
+                              className="w-full px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none"
+                              value={inlineCatEditForm.name}
+                              onChange={e => setInlineCatEditForm(v => ({ ...v, name: e.target.value }))}
+                              onFocus={e => e.target.select()}
+                              onBlur={() => saveInlineCatEdit(c.id)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) }
+                                if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
+                                if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineCatAmountRef.current?.focus() }
+                              }}
+                            />
+                          ) : c.name}
                         </td>
-                        {period === 'weekly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'weekly'))}</td>}
-                        {period === 'bi-weekly' && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td>}
-                        {period === 'monthly'   && <td className="py-1.5 pr-2">{currency(c.amount)}</td>}
-                        {period === 'yearly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'yearly'))}</td>}
-                        {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
-                        {period === 'yearly' && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
+                        <td className="py-1.5 pr-2 text-slate-400 text-xs">
+                          {isEditingCat ? (
+                            <select
+                              className="rounded bg-slate-800 border border-slate-500 text-xs px-1 py-0.5 focus:border-blue-500 focus:outline-none"
+                              value={inlineCatEditForm.type}
+                              onChange={e => setInlineCatEditForm(v => ({ ...v, type: e.target.value as CategoryType }))}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) }
+                                if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
+                              }}
+                            >
+                              <option value="fixed bill">Fixed</option>
+                              <option value="variable spending">Variable</option>
+                              <option value="savings">Savings</option>
+                              <option value="investing">Investing</option>
+                            </select>
+                          ) : (
+                            c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'
+                          )}
+                        </td>
+                        {period === 'weekly'    && <td className="py-1.5 pr-2">{isEditingCat ? <input ref={inlineCatAmountRef} type="number" min={0} step={5} className="w-20 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none" value={inlineCatEditForm.amount} onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))} onFocus={e => e.target.select()} onBlur={() => saveInlineCatEdit(c.id)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) } if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() } }} /> : currency(convertFromMonthly(c.amount, 'weekly'))}</td>}
+                        {period === 'bi-weekly' && <td className="py-1.5 pr-2">{isEditingCat ? <input ref={inlineCatAmountRef} type="number" min={0} step={5} className="w-20 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none" value={inlineCatEditForm.amount} onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))} onFocus={e => e.target.select()} onBlur={() => saveInlineCatEdit(c.id)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) } if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() } }} /> : currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td>}
+                        {period === 'monthly'   && <td className="py-1.5 pr-2">{isEditingCat ? <input ref={inlineCatAmountRef} type="number" min={0} step={5} className="w-24 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none" value={inlineCatEditForm.amount} onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))} onFocus={e => e.target.select()} onBlur={() => saveInlineCatEdit(c.id)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) } if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() } }} /> : currency(c.amount)}</td>}
+                        {period === 'yearly'    && <td className="py-1.5 pr-2">{isEditingCat ? <input ref={inlineCatAmountRef} type="number" min={0} step={5} className="w-24 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none" value={inlineCatEditForm.amount} onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))} onFocus={e => e.target.select()} onBlur={() => saveInlineCatEdit(c.id)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) } if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() } }} /> : currency(convertFromMonthly(c.amount, 'yearly'))}</td>}
+                        {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{isEditingCat ? null : currency(c.amount)}</td>}
+                        {period === 'yearly' && <td className="py-1.5 pr-2 text-slate-400">{isEditingCat ? null : currency(c.amount)}</td>}
                         {/* Actual cell: txn-driven breakdown or plain manual entry */}
                         <td className="py-1 pr-2">
                           {hasTxn ? (
@@ -2529,8 +2644,25 @@ export default function App() {
                                 : `Over by ${currency(variance)}`}
                         </td>
                         <td className="py-1.5 space-x-2 whitespace-nowrap">
-                          <button className="text-blue-300 hover:text-blue-200" onClick={() => { setForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type }); setEditId(c.id); budgetNameRef.current?.focus() }}>Edit</button>
-                          <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
+                          {isEditingCat ? (
+                            <>
+                              <button className="text-green-300 hover:text-green-200 text-xs" onClick={() => saveInlineCatEdit(c.id)}>Save</button>
+                              <button className="text-slate-400 hover:text-slate-200 text-xs" onClick={cancelInlineCatEdit}>Cancel</button>
+                            </>
+                          ) : (
+                            <>
+                              <button className="text-blue-300 hover:text-blue-200 text-xs" onClick={() => {
+                                setInlineCatEditId(c.id)
+                                setInlineCatEditForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type })
+                                setTimeout(() => { inlineCatAmountRef.current?.focus(); inlineCatAmountRef.current?.select() }, 0)
+                              }}>Edit</button>
+                              <button className="text-red-300 hover:text-red-200 text-xs" onClick={() => {
+                                pushBudgetHistory()
+                                setCategories(prev => prev.filter(x => x.id !== c.id))
+                                showUndoableToast(`Deleted "${c.name}".`, undoBudget)
+                              }}>Delete</button>
+                            </>
+                          )}
                         </td>
                       </tr>
                     )
@@ -2544,7 +2676,7 @@ export default function App() {
         {/* ── ACCOUNTS ── */}
         {tab === 'Accounts' && (
           <section className="space-y-4 transition-all duration-300">
-            <Card title={editAccountId ? 'Edit Account' : 'Add Account'} noHover>
+            <Card title="Add Account" noHover>
               <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
                 {/* Account Name */}
                 <div>
@@ -2635,20 +2767,15 @@ export default function App() {
               </div>
               <div className="flex gap-2 mt-3 flex-wrap">
                 <button onClick={createOrSaveAccount} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-1.5 text-sm transition-colors">
-                  {editAccountId ? 'Save Changes' : 'Add Account'}
+                  Add Account
                 </button>
-                {editAccountId
-                  ? <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Cancel</button>
-                  : <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
-                }
+                <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
                 <button onClick={undoAccount} disabled={!accountHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoAccount} disabled={!accountRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
-                {!editAccountId && accounts.length > 0 && (
+                {accounts.length > 0 && (
                   <button onClick={() => { if (!accounts.length) return; setAccountsWithHistory(() => []); showUndoableToast(`${accounts.length} account${accounts.length !== 1 ? 's' : ''} cleared.`, undoAccount) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
-                {!editAccountId && (
-                  <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
-                )}
+                <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
               </div>
               {accountHint && <p className="mt-2 text-sm text-amber-300">{accountHint}</p>}
             </Card>
@@ -2667,24 +2794,100 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {accounts.map(a => (
-                        <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedAccountId === a.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
-                          <td className="py-2 pr-4 font-medium">{a.name}</td>
-                          <td className="py-2 pr-4 text-slate-400">{ACCOUNT_TYPE_LABELS[a.type]}</td>
-                          <td className={`py-2 pr-4 text-right font-semibold ${a.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)}
-                          </td>
-                          <td className="py-2 pr-4 text-slate-400 text-xs">{a.institution || '—'}</td>
-                          <td className="py-2 whitespace-nowrap space-x-2">
-                          <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
-                              setEditAccountId(a.id)
-                              setAccountForm({ name: a.name, type: a.type, balance: a.balance === 0 ? '' : String(a.balance), institution: a.institution })
-                              setTimeout(() => { accountBalanceRef.current?.focus(); accountBalanceRef.current?.select() }, 0)
-                            }}>Edit</button>
-                            <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))}>Delete</button>
-                          </td>
-                        </tr>
-                      ))}
+                      {accounts.map(a => {
+                        const isEditingAcct = inlineAccountEditId === a.id
+                        return (
+                          <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedAccountId === a.id ? 'bg-blue-600/20' : isEditingAcct ? 'bg-slate-700/40' : 'hover:bg-slate-800/40'}`}>
+                            <td className="py-2 pr-4 font-medium">
+                              {isEditingAcct ? (
+                                <input
+                                  ref={inlineAccountNameRef}
+                                  className="w-full px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none"
+                                  value={inlineAccountEditForm.name}
+                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, name: e.target.value }))}
+                                  onFocus={e => e.target.select()}
+                                  onBlur={() => saveInlineAccountEdit(a.id)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
+                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineAccountBalanceRef.current?.focus() }
+                                  }}
+                                />
+                              ) : a.name}
+                            </td>
+                            <td className="py-2 pr-4 text-slate-400 text-sm">
+                              {isEditingAcct ? (
+                                <select
+                                  className="rounded bg-slate-800 border border-slate-500 text-xs px-1 py-0.5 focus:border-blue-500 focus:outline-none"
+                                  value={inlineAccountEditForm.type}
+                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, type: e.target.value as AccountType }))}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
+                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
+                                  }}
+                                >
+                                  {ACCOUNT_TYPES.map(t => <option key={t} value={t}>{ACCOUNT_TYPE_LABELS[t]}</option>)}
+                                </select>
+                              ) : ACCOUNT_TYPE_LABELS[a.type]}
+                            </td>
+                            <td className={`py-2 pr-4 text-right font-semibold ${isEditingAcct ? '' : a.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {isEditingAcct ? (
+                                <input
+                                  ref={inlineAccountBalanceRef}
+                                  type="text" inputMode="decimal"
+                                  className="w-24 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm text-right focus:border-blue-500 focus:outline-none"
+                                  value={inlineAccountEditForm.balance}
+                                  onChange={e => { const raw = e.target.value.replace(/[^0-9.\-]/g, ''); setInlineAccountEditForm(v => ({ ...v, balance: raw })) }}
+                                  onFocus={e => e.target.select()}
+                                  onBlur={() => saveInlineAccountEdit(a.id)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
+                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineAccountNameRef.current?.focus() }
+                                  }}
+                                />
+                              ) : (
+                                a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)
+                              )}
+                            </td>
+                            <td className="py-2 pr-4 text-slate-400 text-xs">
+                              {isEditingAcct ? (
+                                <input
+                                  className="w-full px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-xs focus:border-blue-500 focus:outline-none"
+                                  value={inlineAccountEditForm.institution}
+                                  placeholder="Institution"
+                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, institution: e.target.value }))}
+                                  onBlur={() => saveInlineAccountEdit(a.id)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
+                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
+                                  }}
+                                />
+                              ) : (a.institution || '—')}
+                            </td>
+                            <td className="py-2 whitespace-nowrap space-x-2">
+                              {isEditingAcct ? (
+                                <>
+                                  <button className="text-green-400 hover:text-green-300 text-xs" onClick={() => saveInlineAccountEdit(a.id)}>Save</button>
+                                  <button className="text-slate-400 hover:text-slate-200 text-xs" onClick={cancelInlineAccountEdit}>Cancel</button>
+                                </>
+                              ) : (
+                                <>
+                                  <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
+                                    setInlineAccountEditId(a.id)
+                                    setInlineAccountEditForm({ name: a.name, type: a.type, balance: a.balance === 0 ? '' : String(a.balance), institution: a.institution ?? '' })
+                                    setTimeout(() => { inlineAccountBalanceRef.current?.focus(); inlineAccountBalanceRef.current?.select() }, 0)
+                                  }}>Edit</button>
+                                  <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => {
+                                    setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))
+                                    showUndoableToast(`Deleted "${a.name}".`, undoAccount)
+                                  }}>Delete</button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                     <tfoot>
                       <tr className="border-t border-slate-700">
@@ -3195,7 +3398,7 @@ export default function App() {
                                 setTxnDupWarning(false)
                                 setTimeout(() => { inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select() }, 0)
                               }}>Edit</button>
-                              <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id))}>Delete</button>
+                              <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => { setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id)); showUndoableToast(`Deleted "${tx.merchant}".`, undoTxn) }}>Delete</button>
                             </td>
                           </tr>
                         )
@@ -3273,7 +3476,7 @@ export default function App() {
                                   setTxnDupWarning(false)
                                   setTimeout(() => { inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select() }, 0)
                                 }}>Edit</button>
-                                <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id))}>Delete</button>
+                                <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => { setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id)); showUndoableToast(`Deleted "${tx.merchant}".`, undoTxn) }}>Delete</button>
                               </td>
                             </tr>
                           )
@@ -3520,6 +3723,7 @@ export default function App() {
                               }}>Edit</button>
                              <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => {
                                 const deletedId = r.id
+                                const deletedName = r.name
                                 setRulesWithHistory(prev => prev.filter(x => x.id !== deletedId))
                                 // V8.6 — When a rule is deleted, clear the category AND the badge on any
                                 // transaction that the rule assigned and the user hasn't manually changed
@@ -3530,6 +3734,7 @@ export default function App() {
                                     ? { ...tx, categoryId: undefined, appliedByRule: undefined }
                                     : tx
                                 ))
+                                showUndoableToast(`Deleted rule "${deletedName}".`, undoRule)
                               }}>Delete</button>
                             </td>
                           </tr>
@@ -3572,7 +3777,7 @@ export default function App() {
                     <div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div>
                     <div className="flex gap-2">
                       <button className="text-blue-300" onClick={() => { setScenario(s.scenarios); setPeriod(s.period) }}>Load</button>
-                      <button className="text-red-300" onClick={() => setSavedScenarios(prev => prev.filter(x => x.name !== s.name))}>Delete</button>
+                      <button className="text-red-300" onClick={() => { setSavedScenarios(prev => prev.filter(x => x.name !== s.name)); showToast(`Deleted scenario set "${s.name}".`) }}>Delete</button>
                     </div>
                   </div>
                 ))}
@@ -3821,7 +4026,7 @@ export default function App() {
                     <div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div>
                     <div className="flex gap-2">
                       <button className="text-blue-300" onClick={() => setTargets(s.targets)}>Load</button>
-                      <button className="text-red-300" onClick={() => setSavedTargetSets(prev => prev.filter(x => x.name !== s.name))}>Delete</button>
+                      <button className="text-red-300" onClick={() => { setSavedTargetSets(prev => prev.filter(x => x.name !== s.name)); showToast(`Deleted goal set "${s.name}".`) }}>Delete</button>
                     </div>
                   </div>
                 ))}
