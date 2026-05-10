@@ -411,7 +411,7 @@ export default function App() {
 
   // V9.0 — CSV import state
   const [csvImportOpen, setCsvImportOpen]       = useState(false)
-  const [csvImportPreview, setCsvImportPreview] = useState<ImportPreviewResult | null>(null)
+  const [csvImportPreview, setCsvImportPreview] = useState<ImportPipelineResult | null>(null)
   const [csvImportLoading, setCsvImportLoading] = useState(false)
   const [csvImportError, setCsvImportError]     = useState('')
   const [csvExcluded, setCsvExcluded]           = useState<Set<string>>(new Set())
@@ -1301,7 +1301,7 @@ export default function App() {
     setCsvImportError('')
     try {
       const sessionId = crypto.randomUUID().slice(0, 8)
-      const preview = buildImportPreview({
+      const preview = runimportpipeline({
         csvText: text,
         defaultAccountId: accounts[0]?.id ?? '',
         existingTransactions: transactions,
@@ -1348,7 +1348,7 @@ export default function App() {
     if (!csvImportPreview) return
     const accepted = csvImportPreview.candidates.filter(c => c.status !== 'invalid' && !csvExcluded.has(c.key))
     if (accepted.length === 0) { closeCsvImport(); return }
-    const newTxns = commitImportCandidates(accepted)
+    const newTxns = buildImportedTransactions(accepted)
     setTxnWithHistory(prev => [...newTxns, ...prev])
     showToast(`Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''}.`)
     closeCsvImport()
@@ -3891,7 +3891,7 @@ export default function App() {
 // ── V9.0 CSV Import Modal ─────────────────────────────────────────────────────
 
 interface CsvImportModalProps {
-  preview: ImportPreviewResult | null
+  preview: ImportPipelineResult | null
   loading: boolean
   error: string
   excluded: Set<string>
@@ -4028,7 +4028,7 @@ function CsvImportModal({
                     </tr>
                   </thead>
                   <tbody>
-                    {preview.candidates.map((c: ImportCandidate) => {
+                    {preview.candidates.map((c: ImportRow) => {
                       const isExcluded = excluded.has(c.key)
                       const cat = categories.find(x => x.id === c.txn.categoryId)
                       const rowBg =
