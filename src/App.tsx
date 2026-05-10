@@ -198,6 +198,8 @@ export default function App() {
   const [targets, setTargets] = useState<Target[]>([])
   const [savedTargetSets, setSavedTargetSets] = useState<SavedTargetSet[]>([])
   const [targetSetName, setTargetSetName] = useState('')
+  const [editingTargetSetName, setEditingTargetSetName]       = useState<string | null>(null)
+  const [editingTargetSetRename, setEditingTargetSetRename]   = useState('')
   const [targetForm, setTargetForm] = useState(() => ({ name: '', goalAmount: '', currentSaved: '', startDate: new Date().toISOString().slice(0, 10), deadline: '' }))
   const [targetLogForm, setTargetLogForm] = useState<Record<string, { date: string; amount: string; note: string }>>({})
   const [dashboardQuickDate, setDashboardQuickDate] = useState(() => new Date().toISOString().slice(0, 10))
@@ -408,6 +410,17 @@ export default function App() {
   // V9.0.2 — Inline budget category edit (row stays in place; top form is create-only)
   const [inlineCatEditId, setInlineCatEditId]     = useState<string | null>(null)
   const [inlineCatEditForm, setInlineCatEditForm] = useState({ name: '', amount: '', type: 'fixed bill' as CategoryType })
+  const inlineCatActualRef  = useRef<HTMLInputElement>(null)
+
+  // V9.0.4 — Inline txn edit extra refs
+  const inlineTxnNotesRef    = useRef<HTMLInputElement>(null)
+  const inlineTxnAccountRef  = useRef<HTMLSelectElement>(null)
+
+  // V9.0.4 — Inline rule edit refs
+  const inlineRuleNameRef       = useRef<HTMLInputElement>(null)
+  const inlineRuleMatchFieldRef = useRef<HTMLSelectElement>(null)
+  const inlineRuleCategoryRef   = useRef<HTMLSelectElement>(null)
+  const inlineRuleTypeFilterRef = useRef<HTMLSelectElement>(null)
 
   // V9.0.2 — Rule opt-out: prevents auto-apply of a matched rule for current txn form entry
   const [txnRuleOptOutId, setTxnRuleOptOutId] = useState<string | null>(null)
@@ -902,19 +915,6 @@ export default function App() {
     setInlineAccountHint('')
   }
 
-  // Generic blur-save handler for inline account edit: delays so focus moving between
-  // fields in the same row doesn't trigger premature save.
-  const handleInlineAccountBlur = () => {
-    if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
-    inlineEditBlurTimerRef.current = setTimeout(() => {
-      // Only save if there's still an active inline account edit
-      if (inlineAccountEditId) saveInlineAccountEdit()
-    }, 150)
-  }
-  const handleInlineAccountFocus = () => {
-    if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
-  }
-
   // ── V9.0.2+V9.0.3 Inline budget category edit helpers ────────────────────────
 
   const saveInlineCatEdit = (catId: string) => {
@@ -933,16 +933,6 @@ export default function App() {
   const cancelInlineCatEdit = () => {
     if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
     setInlineCatEditId(null)
-  }
-
-  const handleInlineCatBlur = (catId: string) => {
-    if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
-    inlineEditBlurTimerRef.current = setTimeout(() => {
-      if (inlineCatEditId === catId) saveInlineCatEdit(catId)
-    }, 150)
-  }
-  const handleInlineCatFocus = () => {
-    if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
   }
 
   // ── V8 Transaction helpers ────────────────────────────────────────────────────
@@ -1222,8 +1212,35 @@ export default function App() {
     ))
     setInlineRuleEditId(null)
   }
-  const cancelInlineRuleEdit = () => setInlineRuleEditId(null)
- const applyAllRules = () => {
+  const cancelInlineRuleEdit = () => {
+    if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
+    setInlineRuleEditId(null)
+  }
+
+  // V9.0.4 — Blur-save helpers reusing the shared timer (only one inline edit is active at a time)
+  const scheduleRuleBlurSave = () => {
+    if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
+    inlineEditBlurTimerRef.current = setTimeout(saveInlineRuleEdit, 150)
+  }
+  const cancelRuleBlurSave = () => {
+    if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
+  }
+  const scheduleAccountBlurSave = () => {
+    if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
+    inlineEditBlurTimerRef.current = setTimeout(saveInlineAccountEdit, 150)
+  }
+  const cancelAccountBlurSave = () => {
+    if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
+  }
+  const scheduleCatBlurSave = () => {
+    if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
+    inlineEditBlurTimerRef.current = setTimeout(() => { if (inlineCatEditId) saveInlineCatEdit(inlineCatEditId) }, 150)
+  }
+  const cancelCatBlurSave = () => {
+    if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
+  }
+
+  const applyAllRules = () => {
     const activeRuleIds = new Set(rules.map(r => r.id))
     let count = 0
     setTxnWithHistory(prev => prev.map(tx => {
@@ -2551,7 +2568,7 @@ export default function App() {
                               setPressureFocusCategoryId(null)
                             }}
                           >
-                            Clear All
+                            Clear Actuals
                           </button>
                         )}
                       </span>
@@ -2590,6 +2607,7 @@ export default function App() {
                                 ? 'bg-amber-500/15'
                                 : ''
                         }`}
+                        onBlur={e => { if (inlineCatEditId === c.id && !e.currentTarget.contains(e.relatedTarget as Node)) scheduleCatBlurSave() }}
                       >
                         {/* Name cell */}
                         <td className="py-1.5 pr-2">
@@ -2599,19 +2617,17 @@ export default function App() {
                               className="w-full px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none"
                               value={inlineCatEditForm.name}
                               onChange={e => setInlineCatEditForm(v => ({ ...v, name: e.target.value }))}
-                              onFocus={e => { e.target.select(); handleInlineCatFocus() }}
-                              onBlur={() => handleInlineCatBlur(c.id)}
+                              onFocus={e => { e.target.select(); cancelCatBlurSave() }}
+                              onBlur={scheduleCatBlurSave}
                               onKeyDown={e => {
+                                if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineCatTypeRef.current?.focus(); return }
                                 if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) }
                                 if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
-                                if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) {
-                                  e.preventDefault(); inlineCatTypeRef.current?.focus()
-                                }
                               }}
                             />
                           ) : c.name}
                         </td>
-                        {/* Type cell */}
+                        {/* Type — Left→Name, Right→Planned; Up/Down cycles */}
                         <td className="py-1.5 pr-2 text-slate-400 text-xs">
                           {inlineCatEditId === c.id ? (
                             <select
@@ -2619,9 +2635,11 @@ export default function App() {
                               className="rounded bg-slate-800 border border-slate-500 text-xs px-1 py-0.5 focus:border-blue-500 focus:outline-none"
                               value={inlineCatEditForm.type}
                               onChange={e => setInlineCatEditForm(v => ({ ...v, type: e.target.value as CategoryType }))}
-                              onFocus={handleInlineCatFocus}
-                              onBlur={() => handleInlineCatBlur(c.id)}
+                              onFocus={cancelCatBlurSave}
+                              onBlur={scheduleCatBlurSave}
                               onKeyDown={e => {
+                                if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineCatNameRef.current?.focus(); inlineCatNameRef.current?.select(); return }
+                                if (e.key === 'ArrowRight') { e.preventDefault(); inlineCatAmountRef.current?.focus(); inlineCatAmountRef.current?.select(); return }
                                 if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) }
                                 if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
                                 if (e.key === 'ArrowLeft') { e.preventDefault(); inlineCatNameRef.current?.focus() }
@@ -2646,12 +2664,13 @@ export default function App() {
                                   className="w-20 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none"
                                   value={inlineCatEditForm.amount}
                                   onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))}
-                                  onFocus={e => { e.target.select(); handleInlineCatFocus() }}
-                                  onBlur={() => handleInlineCatBlur(c.id)}
+                                  onFocus={e => { e.target.select(); cancelCatBlurSave() }}
+                                  onBlur={scheduleCatBlurSave}
                                   onKeyDown={e => {
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) }
                                     if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
-                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineCatTypeRef.current?.focus() }
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineCatTypeRef.current?.focus(); return }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineCatActualRef.current?.focus(); inlineCatActualRef.current?.select(); return }
                                     if (e.key === 'ArrowUp') { e.preventDefault(); setInlineCatEditForm(v => ({ ...v, amount: String(Math.max(0, (Number(v.amount) || 0) + 5) ) })) }
                                     if (e.key === 'ArrowDown') { e.preventDefault(); setInlineCatEditForm(v => ({ ...v, amount: String(Math.max(0, (Number(v.amount) || 0) - 5) ) })) }
                                   }}
@@ -2669,12 +2688,13 @@ export default function App() {
                                   className="w-20 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none"
                                   value={inlineCatEditForm.amount}
                                   onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))}
-                                  onFocus={e => { e.target.select(); handleInlineCatFocus() }}
-                                  onBlur={() => handleInlineCatBlur(c.id)}
+                                  onFocus={e => { e.target.select(); cancelCatBlurSave() }}
+                                  onBlur={scheduleCatBlurSave}
                                   onKeyDown={e => {
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) }
                                     if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
-                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineCatTypeRef.current?.focus() }
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineCatTypeRef.current?.focus(); return }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineCatActualRef.current?.focus(); inlineCatActualRef.current?.select(); return }
                                     if (e.key === 'ArrowUp') { e.preventDefault(); setInlineCatEditForm(v => ({ ...v, amount: String(Math.max(0, (Number(v.amount) || 0) + 10) ) })) }
                                     if (e.key === 'ArrowDown') { e.preventDefault(); setInlineCatEditForm(v => ({ ...v, amount: String(Math.max(0, (Number(v.amount) || 0) - 10) ) })) }
                                   }}
@@ -2691,12 +2711,13 @@ export default function App() {
                                 className="w-24 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none"
                                 value={inlineCatEditForm.amount}
                                 onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))}
-                                onFocus={e => { e.target.select(); handleInlineCatFocus() }}
-                                onBlur={() => handleInlineCatBlur(c.id)}
+                                onFocus={e => { e.target.select(); cancelCatBlurSave() }}
+                                onBlur={scheduleCatBlurSave}
                                 onKeyDown={e => {
                                   if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) }
                                   if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
-                                  if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineCatTypeRef.current?.focus() }
+                                  if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineCatTypeRef.current?.focus(); return }
+                                  if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineCatActualRef.current?.focus(); inlineCatActualRef.current?.select(); return }
                                   if (e.key === 'ArrowUp') { e.preventDefault(); setInlineCatEditForm(v => ({ ...v, amount: String(Math.max(0, (Number(v.amount) || 0) + 25) ) })) }
                                   if (e.key === 'ArrowDown') { e.preventDefault(); setInlineCatEditForm(v => ({ ...v, amount: String(Math.max(0, (Number(v.amount) || 0) - 25) ) })) }
                                 }}
@@ -2712,12 +2733,13 @@ export default function App() {
                                   className="w-24 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none"
                                   value={inlineCatEditForm.amount}
                                   onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))}
-                                  onFocus={e => { e.target.select(); handleInlineCatFocus() }}
-                                  onBlur={() => handleInlineCatBlur(c.id)}
+                                  onFocus={e => { e.target.select(); cancelCatBlurSave() }}
+                                  onBlur={scheduleCatBlurSave}
                                   onKeyDown={e => {
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) }
                                     if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
-                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineCatTypeRef.current?.focus() }
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineCatTypeRef.current?.focus(); return }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineCatActualRef.current?.focus(); inlineCatActualRef.current?.select(); return }
                                     if (e.key === 'ArrowUp') { e.preventDefault(); setInlineCatEditForm(v => ({ ...v, amount: String(Math.max(0, (Number(v.amount) || 0) + 100) ) })) }
                                     if (e.key === 'ArrowDown') { e.preventDefault(); setInlineCatEditForm(v => ({ ...v, amount: String(Math.max(0, (Number(v.amount) || 0) - 100) ) })) }
                                   }}
@@ -2745,23 +2767,29 @@ export default function App() {
                               <div className="flex items-center gap-1.5">
                                 <span className="text-slate-600 shrink-0">+ Adj</span>
                                 <input
-                                  ref={el => { actualInputRefs.current[c.id] = el }}
+                                  ref={el => { actualInputRefs.current[c.id] = el; if (inlineCatEditId === c.id) inlineCatActualRef.current = el }}
                                   type="number" inputMode="decimal" min={0} step={25}
                                   className="w-16 px-1 py-0.5 rounded bg-slate-700 border border-slate-600 text-slate-100 text-xs focus:border-blue-500 focus:outline-none"
                                   placeholder="0"
                                   value={rawActual ?? ''}
-                                  onFocus={e => { if (e.target.value !== '') e.target.select() }}
+                                  onFocus={e => { if (inlineCatEditId === c.id) cancelCatBlurSave(); if (e.target.value !== '') e.target.select() }}
                                   onChange={e => {
                                     const cleaned = e.target.value.replace(/[^0-9.]/g, '')
                                     setActuals(prev => ({ ...prev, [c.id]: cleaned === '' || Number(cleaned) === 0 ? '' : cleaned }))
                                   }}
-                                  onBlur={() => { pushActualsHistory({ ...actuals }) }}
+                                  onBlur={() => { if (inlineCatEditId === c.id) scheduleCatBlurSave(); else pushActualsHistory({ ...actuals }) }}
                                   onKeyDown={e => {
                                     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                       e.preventDefault()
                                       const cur = Number(rawActual) || 0
                                       const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
                                       setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
+                                    }
+                                    if (inlineCatEditId === c.id) {
+                                      if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineCatAmountRef.current?.focus(); inlineCatAmountRef.current?.select(); return }
+                                      if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); saveInlineCatEdit(c.id); return }
+                                      if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) }
+                                      if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
                                     }
                                   }}
                                 />
@@ -2783,23 +2811,29 @@ export default function App() {
                           ) : (
                             <div className="flex items-center gap-1">
                               <input
-                                ref={el => { actualInputRefs.current[c.id] = el }}
+                                ref={el => { actualInputRefs.current[c.id] = el; if (inlineCatEditId === c.id) inlineCatActualRef.current = el }}
                                 type="number" inputMode="decimal" min={0} step={25}
                                 className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
                                 placeholder="—"
                                 value={rawActual ?? ''}
-                                onFocus={e => { if (e.target.value !== '') e.target.select() }}
+                                onFocus={e => { if (inlineCatEditId === c.id) cancelCatBlurSave(); if (e.target.value !== '') e.target.select() }}
                                 onChange={e => {
                                   const cleaned = e.target.value.replace(/[^0-9.]/g, '')
                                   setActuals(prev => ({ ...prev, [c.id]: cleaned === '' || Number(cleaned) === 0 ? '' : cleaned }))
                                 }}
-                                onBlur={() => { pushActualsHistory({ ...actuals }) }}
+                                onBlur={() => { if (inlineCatEditId === c.id) scheduleCatBlurSave(); else pushActualsHistory({ ...actuals }) }}
                                 onKeyDown={e => {
                                   if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                     e.preventDefault()
                                     const cur = Number(rawActual) || 0
                                     const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
                                     setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
+                                  }
+                                  if (inlineCatEditId === c.id) {
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineCatAmountRef.current?.focus(); inlineCatAmountRef.current?.select(); return }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); saveInlineCatEdit(c.id); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) }
+                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
                                   }
                                 }}
                               />
@@ -2825,8 +2859,8 @@ export default function App() {
                         <td className="py-1.5 space-x-2 whitespace-nowrap">
                           {inlineCatEditId === c.id ? (
                             <>
-                              <button className="text-green-300 hover:text-green-200 text-xs" onMouseDown={e => { e.preventDefault(); saveInlineCatEdit(c.id) }}>Save</button>
-                              <button className="text-slate-400 hover:text-slate-200 text-xs" onMouseDown={e => { e.preventDefault(); cancelInlineCatEdit() }}>Cancel</button>
+                              <button className="text-green-300 hover:text-green-200 text-xs" onMouseDown={cancelCatBlurSave} onClick={() => saveInlineCatEdit(c.id)}>Save</button>
+                              <button className="text-slate-400 hover:text-slate-200 text-xs" onMouseDown={cancelCatBlurSave} onClick={cancelInlineCatEdit}>Cancel</button>
                             </>
                           ) : (
                             <>
@@ -2970,8 +3004,12 @@ export default function App() {
                       {accounts.map(a => {
                         const isEditingAcct = inlineAccountEditId === a.id
                         return (
-                          <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedAccountId === a.id ? 'bg-blue-600/20' : isEditingAcct ? 'bg-slate-700/40' : 'hover:bg-slate-800/40'}`}>
-                            {/* Name */}
+                          <tr
+                            key={a.id}
+                            className={`border-b border-slate-800 transition-colors duration-300 ${highlightedAccountId === a.id ? 'bg-blue-600/20' : isEditingAcct ? 'bg-slate-700/40' : 'hover:bg-slate-800/40'}`}
+                            onBlur={e => { if (isEditingAcct && !e.currentTarget.contains(e.relatedTarget as Node)) scheduleAccountBlurSave() }}
+                          >
+                            {/* Name — Right at end→Type */}
                             <td className="py-2 pr-4 font-medium">
                               {isEditingAcct ? (
                                 <input
@@ -2979,29 +3017,29 @@ export default function App() {
                                   className="w-full px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none"
                                   value={inlineAccountEditForm.name}
                                   onChange={e => setInlineAccountEditForm(v => ({ ...v, name: e.target.value }))}
-                                  onFocus={e => { e.target.select(); handleInlineAccountFocus() }}
-                                  onBlur={handleInlineAccountBlur}
+                                  onFocus={e => { e.target.select(); cancelAccountBlurSave() }}
+                                  onBlur={scheduleAccountBlurSave}
                                   onKeyDown={e => {
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineAccountTypeRef.current?.focus(); return }
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit() }
                                     if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
-                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) {
-                                      e.preventDefault(); inlineAccountTypeRef.current?.focus()
-                                    }
                                   }}
                                 />
                               ) : a.name}
                             </td>
-                            {/* Type */}
-                            <td className="py-2 pr-4 text-slate-400">
+                            {/* Type — Left→Name, Right→Balance; Up/Down cycles */}
+                            <td className="py-2 pr-4 text-slate-400 text-sm">
                               {isEditingAcct ? (
                                 <select
                                   ref={inlineAccountTypeRef}
                                   className="rounded bg-slate-800 border border-slate-500 text-xs px-1 py-0.5 focus:border-blue-500 focus:outline-none"
                                   value={inlineAccountEditForm.type}
                                   onChange={e => setInlineAccountEditForm(v => ({ ...v, type: e.target.value as AccountType }))}
-                                  onFocus={handleInlineAccountFocus}
-                                  onBlur={handleInlineAccountBlur}
+                                  onFocus={cancelAccountBlurSave}
+                                  onBlur={scheduleAccountBlurSave}
                                   onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineAccountNameRef.current?.focus(); inlineAccountNameRef.current?.select(); return }
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineAccountBalanceRef.current?.focus(); inlineAccountBalanceRef.current?.select(); return }
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit() }
                                     if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
                                     if (e.key === 'ArrowLeft') { e.preventDefault(); inlineAccountNameRef.current?.focus() }
@@ -3020,14 +3058,14 @@ export default function App() {
                                   type="text" inputMode="decimal"
                                   className="w-24 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm text-right focus:border-blue-500 focus:outline-none"
                                   value={inlineAccountEditForm.balance}
-                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, balance: e.target.value.replace(/[^0-9.\-]/g, '') }))}
-                                  onFocus={e => { e.target.select(); handleInlineAccountFocus() }}
-                                  onBlur={handleInlineAccountBlur}
+                                  onChange={e => { const raw = e.target.value.replace(/[^0-9.\-]/g, ''); setInlineAccountEditForm(v => ({ ...v, balance: raw })) }}
+                                  onFocus={e => { e.target.select(); cancelAccountBlurSave() }}
+                                  onBlur={scheduleAccountBlurSave}
                                   onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineAccountTypeRef.current?.focus(); return }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineAccountInstRef.current?.focus(); inlineAccountInstRef.current?.select(); return }
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit() }
                                     if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
-                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineAccountTypeRef.current?.focus() }
-                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineAccountInstRef.current?.focus() }
                                     if (e.key === 'ArrowUp') { e.preventDefault(); setInlineAccountEditForm(v => ({ ...v, balance: String((parseFloat(v.balance) || 0) + 100) })) }
                                     if (e.key === 'ArrowDown') { e.preventDefault(); setInlineAccountEditForm(v => ({ ...v, balance: String((parseFloat(v.balance) || 0) - 100) })) }
                                   }}
@@ -3036,7 +3074,7 @@ export default function App() {
                                 a.balance < 0 ? `\u2212${currency(Math.abs(a.balance))}` : currency(a.balance)
                               )}
                             </td>
-                            {/* Institution */}
+                            {/* Institution — Left at start→Balance, Right at end→Save */}
                             <td className="py-2 pr-4 text-slate-400 text-xs">
                               {isEditingAcct ? (
                                 <input
@@ -3045,9 +3083,11 @@ export default function App() {
                                   value={inlineAccountEditForm.institution}
                                   placeholder="Institution (optional)"
                                   onChange={e => setInlineAccountEditForm(v => ({ ...v, institution: e.target.value }))}
-                                  onFocus={e => { e.target.select(); handleInlineAccountFocus() }}
-                                  onBlur={handleInlineAccountBlur}
+                                  onFocus={e => { cancelAccountBlurSave(); if (e.target.value) e.target.select() }}
+                                  onBlur={scheduleAccountBlurSave}
                                   onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineAccountBalanceRef.current?.focus(); inlineAccountBalanceRef.current?.select(); return }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); saveInlineAccountEdit(); return }
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit() }
                                     if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
                                     if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineAccountBalanceRef.current?.focus() }
@@ -3059,8 +3099,8 @@ export default function App() {
                             <td className="py-2 whitespace-nowrap space-x-2">
                               {isEditingAcct ? (
                                 <>
-                                  <button className="text-green-400 hover:text-green-300 text-xs" onMouseDown={e => { e.preventDefault(); saveInlineAccountEdit() }}>Save</button>
-                                  <button className="text-slate-400 hover:text-slate-200 text-xs" onMouseDown={e => { e.preventDefault(); cancelInlineAccountEdit() }}>Cancel</button>
+                                  <button className="text-green-400 hover:text-green-300 text-xs" onMouseDown={cancelAccountBlurSave} onClick={saveInlineAccountEdit}>Save</button>
+                                  <button className="text-slate-400 hover:text-slate-200 text-xs" onMouseDown={cancelAccountBlurSave} onClick={cancelInlineAccountEdit}>Cancel</button>
                                   {inlineAccountHint && <span className="text-amber-300 text-xs">{inlineAccountHint}</span>}
                                 </>
                               ) : (
@@ -3381,21 +3421,26 @@ export default function App() {
                                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() } if (e.key === 'Escape') cancelInlineTxnEdit() }}
                                 />
                               </td>
-                              {/* Account */}
+                              {/* Account — Right→Merchant; Up/Down cycles natively */}
                               <td className="py-1.5 pr-2">
                                 <select
+                                  ref={inlineTxnAccountRef}
                                   className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
                                   value={inlineTxnEditForm.accountId}
                                   onChange={e => setInlineTxnEditForm(v => ({ ...v, accountId: e.target.value }))}
                                   onFocus={cancelBlurSave}
                                   onBlur={scheduleBlurSave}
-                                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() } if (e.key === 'Escape') cancelInlineTxnEdit() }}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnMerchantRef.current?.focus(); inlineTxnMerchantRef.current?.select(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
+                                    if (e.key === 'Escape') cancelInlineTxnEdit()
+                                  }}
                                 >
                                   <option value="">Account…</option>
                                   {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                                 </select>
                               </td>
-                              {/* Merchant — ArrowRight moves to Type */}
+                              {/* Merchant — Left at start→Account, Right at end→Amount */}
                               <td className="py-1.5 pr-2">
                                 <input
                                   ref={inlineTxnMerchantRef}
@@ -3404,52 +3449,15 @@ export default function App() {
                                   onFocus={e => { e.target.select(); cancelBlurSave() }}
                                   onBlur={scheduleBlurSave}
                                   onChange={e => { setInlineTxnEditForm(v => ({ ...v, merchant: e.target.value })); setTxnDupWarning(false) }}
-                                 onKeyDown={e => {
-  if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
-  if (e.key === 'Escape') cancelInlineTxnEdit()
-}}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineTxnAccountRef.current?.focus(); return }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
+                                    if (e.key === 'Escape') cancelInlineTxnEdit()
+                                  }}
                                 />
                               </td>
-                              {/* Type — ArrowLeft → Merchant, ArrowRight → Category */}
-                              <td className="py-1.5 pr-2">
-                                <select
-                                  ref={inlineTxnTypeRef}
-                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
-                                  value={inlineTxnEditForm.type}
-                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, type: e.target.value as TransactionType }))}
-                                  onFocus={cancelBlurSave}
-                                  onBlur={scheduleBlurSave}
-                                  onKeyDown={e => {
-                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineTxnMerchantRef.current?.focus(); inlineTxnMerchantRef.current?.select(); return }
-                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnCategoryRef.current?.focus(); return }
-                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
-                                    if (e.key === 'Escape') cancelInlineTxnEdit()
-                                  }}
-                                >
-                                  {TXN_TYPES.map(t => <option key={t} value={t}>{TXN_TYPE_LABELS[t]}</option>)}
-                                </select>
-                              </td>
-                              {/* Category — ArrowLeft → Type, ArrowRight → Amount */}
-                              <td className="py-1.5 pr-2">
-                                <select
-                                  ref={inlineTxnCategoryRef}
-                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
-                                  value={inlineTxnEditForm.categoryId}
-                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, categoryId: e.target.value }))}
-                                  onFocus={cancelBlurSave}
-                                  onBlur={scheduleBlurSave}
-                                  onKeyDown={e => {
-                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineTxnTypeRef.current?.focus(); return }
-                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select(); return }
-                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
-                                    if (e.key === 'Escape') cancelInlineTxnEdit()
-                                  }}
-                                >
-                                  <option value="">— none —</option>
-                                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                </select>
-                              </td>
-                              {/* Amount — default focus target; ArrowLeft → Category */}
+                              {/* Amount — Left at start→Merchant, Right at end→Type, Up/Down ±5 */}
                               <td className="py-1.5 pr-2">
                                 <input
                                   ref={inlineTxnAmountRef}
@@ -3471,26 +3479,72 @@ export default function App() {
                                     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                       e.preventDefault()
                                       const cur = parseFloat(inlineTxnEditForm.amount) || 0
-                                      const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
+                                      const next = e.key === 'ArrowUp' ? cur + 5 : Math.max(0, cur - 5)
                                       setInlineTxnEditForm(v => ({ ...v, amount: next === 0 ? '' : String(next) }))
                                       setTxnDupWarning(false)
                                       return
                                     }
-                                    if (e.key === 'ArrowLeft') { e.preventDefault(); inlineTxnCategoryRef.current?.focus(); return }
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineTxnMerchantRef.current?.focus(); inlineTxnMerchantRef.current?.select(); return }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineTxnTypeRef.current?.focus(); return }
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
                                     if (e.key === 'Escape') cancelInlineTxnEdit()
                                   }}
                                 />
                               </td>
-                              {/* Notes */}
+                              {/* Type — Left→Amount, Right→Category; Up/Down cycles options natively */}
                               <td className="py-1.5 pr-2">
-                                <input
-                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
-                                  value={inlineTxnEditForm.notes}
+                                <select
+                                  ref={inlineTxnTypeRef}
+                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineTxnEditForm.type}
+                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, type: e.target.value as TransactionType }))}
                                   onFocus={cancelBlurSave}
                                   onBlur={scheduleBlurSave}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select(); return }
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnCategoryRef.current?.focus(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
+                                    if (e.key === 'Escape') cancelInlineTxnEdit()
+                                  }}
+                                >
+                                  {TXN_TYPES.map(t => <option key={t} value={t}>{TXN_TYPE_LABELS[t]}</option>)}
+                                </select>
+                              </td>
+                              {/* Category — Left→Type, Right→Notes; Up/Down cycles natively */}
+                              <td className="py-1.5 pr-2">
+                                <select
+                                  ref={inlineTxnCategoryRef}
+                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineTxnEditForm.categoryId}
+                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, categoryId: e.target.value }))}
+                                  onFocus={cancelBlurSave}
+                                  onBlur={scheduleBlurSave}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineTxnTypeRef.current?.focus(); return }
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnNotesRef.current?.focus(); inlineTxnNotesRef.current?.select(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
+                                    if (e.key === 'Escape') cancelInlineTxnEdit()
+                                  }}
+                                >
+                                  <option value="">— none —</option>
+                                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                </select>
+                              </td>
+                              {/* Notes — Left at start→Category, Right at end→Save */}
+                              <td className="py-1.5 pr-2">
+                                <input
+                                  ref={inlineTxnNotesRef}
+                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineTxnEditForm.notes}
+                                  onFocus={e => { cancelBlurSave(); if (e.target.value) e.target.select() }}
+                                  onBlur={scheduleBlurSave}
                                   onChange={e => setInlineTxnEditForm(v => ({ ...v, notes: e.target.value }))}
-                                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() } if (e.key === 'Escape') cancelInlineTxnEdit() }}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineTxnCategoryRef.current?.focus(); return }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); saveInlineTxnEdit(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
+                                    if (e.key === 'Escape') cancelInlineTxnEdit()
+                                  }}
                                 />
                               </td>
                               <td className="py-1.5 whitespace-nowrap space-x-2">
@@ -3732,48 +3786,106 @@ export default function App() {
                         const isInlineEdit = inlineRuleEditId === r.id
                         if (isInlineEdit) {
                           return (
-                            <tr key={r.id} className="border-b border-slate-700 bg-blue-950/20">
-                           <td className="py-1.5 pr-2">
-                                <input
-                                  ref={inlineRuleMatchRef}
-                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none font-mono"
-                                  value={inlineRuleEditForm.matchText}
-                                  onFocus={e => e.target.select()}
-                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, matchText: e.target.value }))}
-                                  onKeyDown={e => { if (e.key === 'Enter') saveInlineRuleEdit(); if (e.key === 'Escape') cancelInlineRuleEdit() }}
-                                />
-                              </td>
-                             <td className="py-1.5 pr-2">
-                                <input
-                                  ref={inlineRuleMatchRef}
-                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none font-mono"
-                                  value={inlineRuleEditForm.matchText}
-                                  onFocus={e => e.target.select()}
-                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, matchText: e.target.value }))}
-                                  onKeyDown={e => { if (e.key === 'Enter') saveInlineRuleEdit(); if (e.key === 'Escape') cancelInlineRuleEdit() }}
-                                />
-                              </td>
+                            <tr
+                              key={r.id}
+                              className="border-b border-slate-700 bg-blue-950/20"
+                              onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) scheduleRuleBlurSave() }}
+                            >
+                              {/* Rule Name — Right at end→Matches */}
                               <td className="py-1.5 pr-2">
-                                <select className="px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineRuleEditForm.matchField} onChange={e => setInlineRuleEditForm(v => ({ ...v, matchField: e.target.value as 'merchant' | 'notes' }))}>
+                                <input
+                                  ref={inlineRuleNameRef}
+                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineRuleEditForm.name}
+                                  onFocus={e => { e.target.select(); cancelRuleBlurSave() }}
+                                  onBlur={scheduleRuleBlurSave}
+                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, name: e.target.value }))}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineRuleMatchRef.current?.focus(); inlineRuleMatchRef.current?.select(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineRuleEdit() }
+                                    if (e.key === 'Escape') cancelInlineRuleEdit()
+                                  }}
+                                />
+                              </td>
+                              {/* Matches — Left at start→Name, Right at end→In Field */}
+                              <td className="py-1.5 pr-2">
+                                <input
+                                  ref={inlineRuleMatchRef}
+                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none font-mono"
+                                  value={inlineRuleEditForm.matchText}
+                                  onFocus={e => { e.target.select(); cancelRuleBlurSave() }}
+                                  onBlur={scheduleRuleBlurSave}
+                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, matchText: e.target.value }))}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineRuleNameRef.current?.focus(); inlineRuleNameRef.current?.select(); return }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineRuleMatchFieldRef.current?.focus(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineRuleEdit() }
+                                    if (e.key === 'Escape') cancelInlineRuleEdit()
+                                  }}
+                                />
+                              </td>
+                              {/* In Field — Left→Matches, Right→Category; Up/Down cycles */}
+                              <td className="py-1.5 pr-2">
+                                <select
+                                  ref={inlineRuleMatchFieldRef}
+                                  className="px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineRuleEditForm.matchField}
+                                  onFocus={cancelRuleBlurSave}
+                                  onBlur={scheduleRuleBlurSave}
+                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, matchField: e.target.value as 'merchant' | 'notes' }))}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineRuleMatchRef.current?.focus(); inlineRuleMatchRef.current?.select(); return }
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineRuleCategoryRef.current?.focus(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineRuleEdit() }
+                                    if (e.key === 'Escape') cancelInlineRuleEdit()
+                                  }}
+                                >
                                   <option value="merchant">Merchant</option>
                                   <option value="notes">Notes</option>
                                 </select>
                               </td>
+                              {/* Assign to Category — Left→In Field, Right→Type Filter; Up/Down cycles */}
                               <td className="py-1.5 pr-2">
-                                <select className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineRuleEditForm.categoryId} onChange={e => setInlineRuleEditForm(v => ({ ...v, categoryId: e.target.value }))}>
+                                <select
+                                  ref={inlineRuleCategoryRef}
+                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineRuleEditForm.categoryId}
+                                  onFocus={cancelRuleBlurSave}
+                                  onBlur={scheduleRuleBlurSave}
+                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, categoryId: e.target.value }))}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineRuleMatchFieldRef.current?.focus(); return }
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineRuleTypeFilterRef.current?.focus(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineRuleEdit() }
+                                    if (e.key === 'Escape') cancelInlineRuleEdit()
+                                  }}
+                                >
                                   <option value="">— none —</option>
                                   {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                 </select>
                               </td>
+                              {/* Type Filter — Left→Category, Right/Enter→Save; Up/Down cycles */}
                               <td className="py-1.5 pr-2">
-                                <select className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineRuleEditForm.type} onChange={e => setInlineRuleEditForm(v => ({ ...v, type: e.target.value as TransactionType | '' }))}>
+                                <select
+                                  ref={inlineRuleTypeFilterRef}
+                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineRuleEditForm.type}
+                                  onFocus={cancelRuleBlurSave}
+                                  onBlur={scheduleRuleBlurSave}
+                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, type: e.target.value as TransactionType | '' }))}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineRuleCategoryRef.current?.focus(); return }
+                                    if (e.key === 'ArrowRight' || e.key === 'Enter') { e.preventDefault(); saveInlineRuleEdit(); return }
+                                    if (e.key === 'Escape') cancelInlineRuleEdit()
+                                  }}
+                                >
                                   <option value="">— any —</option>
                                   {TXN_TYPES.map(t => <option key={t} value={t}>{TXN_TYPE_LABELS[t]}</option>)}
                                 </select>
                               </td>
                               <td className="py-1.5 whitespace-nowrap space-x-2">
-                                <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={saveInlineRuleEdit}>Save</button>
-                                <button className="text-slate-400 hover:text-slate-300 text-xs" onClick={cancelInlineRuleEdit}>Cancel</button>
+                                <button className="text-blue-400 hover:text-blue-300 text-xs" onMouseDown={cancelRuleBlurSave} onClick={saveInlineRuleEdit}>Save</button>
+                                <button className="text-slate-400 hover:text-slate-300 text-xs" onMouseDown={cancelRuleBlurSave} onClick={cancelInlineRuleEdit}>Cancel</button>
                               </td>
                             </tr>
                           )
@@ -3786,10 +3898,10 @@ export default function App() {
                             <td className="py-2 pr-3 text-xs">{cat ? <span className="text-slate-400">{cat.name}</span> : <span className="text-red-400">missing</span>}</td>
                             <td className="py-2 pr-3 text-slate-400 text-xs">{r.type ? TXN_TYPE_LABELS[r.type] : '—'}</td>
                             <td className="py-2 whitespace-nowrap space-x-2">
-                           <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
+                              <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
                                 setInlineRuleEditId(r.id)
                                 setInlineRuleEditForm({ name: r.name, matchText: r.matchText, matchField: r.matchField, categoryId: r.categoryId, type: r.type ?? '' })
-                                setTimeout(() => { inlineRuleMatchRef.current?.focus(); inlineRuleMatchRef.current?.select() }, 0)
+                                setTimeout(() => { inlineRuleNameRef.current?.focus(); inlineRuleNameRef.current?.select() }, 0)
                               }}>Edit</button>
                              <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => {
                                 const deletedId = r.id
@@ -4081,16 +4193,57 @@ export default function App() {
 
             <Card title="Savings Goal Sets" noHover>
               <div className="grid md:grid-cols-3 gap-2">
-                <input className="p-2 rounded bg-slate-800 border border-slate-600" value={targetSetName} onChange={(e) => setTargetSetName(e.target.value)} placeholder="Savings goal set name" />
-                <button className="rounded bg-blue-600" onClick={() => { const n = targetSetName.trim(); if (!n) return; setSavedTargetSets([{ name: n, targets, savedAt: new Date().toISOString() }, ...savedTargetSets.filter(s => s.name.toLowerCase() !== n.toLowerCase())]) }}>Save</button>
+                <input
+                  className="p-2 rounded bg-slate-800 border border-slate-600"
+                  value={targetSetName}
+                  onChange={(e) => setTargetSetName(e.target.value)}
+                  placeholder="Savings goal set name"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      const n = targetSetName.trim()
+                      if (!n) return
+                      setSavedTargetSets(prev => [{ name: n, targets, savedAt: new Date().toISOString() }, ...prev.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
+                      setTargetSetName('')
+                    }
+                  }}
+                />
+                <button className="rounded bg-blue-600" onClick={() => { const n = targetSetName.trim(); if (!n) return; setSavedTargetSets(prev => [{ name: n, targets, savedAt: new Date().toISOString() }, ...prev.filter(s => s.name.toLowerCase() !== n.toLowerCase())]); setTargetSetName('') }}>Save</button>
                 <div className="text-xs text-slate-400 self-center">Saved locally</div>
               </div>
               <div className="space-y-2 mt-2">
                 {savedTargetSets.map(s => (
-                  <div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between">
-                    <div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div>
-                    <div className="flex gap-2">
+                  <div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between items-center">
+                    {editingTargetSetName === s.name ? (
+                      <input
+                        className="flex-1 mr-2 p-1 rounded bg-slate-800 border border-blue-500 text-sm focus:outline-none"
+                        value={editingTargetSetRename}
+                        autoFocus
+                        onChange={e => setEditingTargetSetRename(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            const newName = editingTargetSetRename.trim()
+                            if (!newName) return
+                            setSavedTargetSets(prev => prev.map(x => x.name === s.name ? { ...x, name: newName } : x))
+                            setEditingTargetSetName(null)
+                          }
+                          if (e.key === 'Escape') setEditingTargetSetName(null)
+                        }}
+                        onBlur={() => {
+                          const newName = editingTargetSetRename.trim()
+                          if (newName && newName !== s.name) setSavedTargetSets(prev => prev.map(x => x.name === s.name ? { ...x, name: newName } : x))
+                          setEditingTargetSetName(null)
+                        }}
+                      />
+                    ) : (
+                      <div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div>
+                    )}
+                    <div className="flex gap-2 shrink-0">
                       <button className="text-blue-300" onClick={() => setTargets(s.targets)}>Load</button>
+                      {editingTargetSetName === s.name ? null : (
+                        <button className="text-slate-300 hover:text-slate-100 text-xs" onClick={() => { setEditingTargetSetName(s.name); setEditingTargetSetRename(s.name) }}>Edit</button>
+                      )}
                       <button className="text-red-300" onClick={() => setSavedTargetSets(prev => prev.filter(x => x.name !== s.name))}>Delete</button>
                     </div>
                   </div>
@@ -4174,11 +4327,11 @@ export default function App() {
       {/* Hidden file input for CSV selection */}
       <input ref={csvFileInputRef} type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={handleCsvFileSelect} />
 
-      {/* ── V9.0.1 Back-to-Top button ── */}
+      {/* ── V9.0.4 Back-to-Top button — top-left, visible after scroll ── */}
       {showScrollTop && (
         <button
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          className="fixed bottom-20 right-5 z-40 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-600 shadow-lg px-3 py-2 text-xs text-slate-300 transition-all duration-200 hover:-translate-y-0.5"
+          className="fixed top-20 left-3 z-40 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-600 shadow-lg px-3 py-2 text-xs text-slate-300 transition-all duration-200 hover:translate-y-0.5"
           title="Back to top"
           aria-label="Scroll to top"
         >
