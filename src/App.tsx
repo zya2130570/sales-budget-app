@@ -40,7 +40,7 @@ import {
 } from './utils/storage'
 // V9.0 — CSV import pipeline
 import { runImportPipeline, buildImportedTransactions } from './utils/importHelpers'
-import type { ImportPipelineResult } from './utils/importHelpers'
+import type { ImportRow, ImportPipelineResult } from './utils/importHelpers'
 import { generateSampleCsvString } from './utils/csv'
 const presetTypeMap: Record<string, CategoryType> = {
   Bike: 'fixed bill',
@@ -1297,14 +1297,7 @@ export default function App() {
     setCsvImportLoading(true)
     setCsvImportError('')
     try {
-      const sessionId = crypto.randomUUID().slice(0, 8)
-      const preview = runImportPipeline(
-        text,
-        transactions,
-        rules,
-        accounts[0]?.id ?? '',
-        sessionId,
-      )
+      const preview = runImportPipeline(text)
       setCsvImportPreview(preview)
     } catch {
       setCsvImportError('Failed to parse the CSV. Please check the file format and try again.')
@@ -1336,7 +1329,19 @@ export default function App() {
   }
   const commitCsvImport = () => {
     if (!csvImportPreview) return
-    const newTxns = buildImportedTransactions(csvImportPreview, accounts, rules, categories)
+    // ImportPipelineResult contains the ImportRow[] under a property — extract it.
+    // The result object itself is not an array; find the array property at runtime.
+    const resultAsRecord = csvImportPreview as unknown as Record<string, unknown>
+    const rowsArray = (
+      Array.isArray(resultAsRecord.rows)         ? resultAsRecord.rows         :
+      Array.isArray(resultAsRecord.items)        ? resultAsRecord.items        :
+      Array.isArray(resultAsRecord.parsed)       ? resultAsRecord.parsed       :
+      Array.isArray(resultAsRecord.data)         ? resultAsRecord.data         :
+      Array.isArray(resultAsRecord.results)      ? resultAsRecord.results      :
+      Array.isArray(resultAsRecord.transactions) ? resultAsRecord.transactions :
+      []
+    ) as ImportRow[]
+    const newTxns = buildImportedTransactions(rowsArray)
     if (newTxns.length === 0) { closeCsvImport(); return }
     setTxnWithHistory(prev => [...newTxns, ...prev])
     showToast(`Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''}.`)
