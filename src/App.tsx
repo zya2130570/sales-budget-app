@@ -351,14 +351,18 @@ export default function App() {
   const accountInstRef    = useRef<HTMLInputElement>(null)
 
   // V8 — Transaction form refs
-  const txnDateRef     = useRef<HTMLInputElement>(null)
-  const txnAccountRef  = useRef<HTMLSelectElement>(null)
-  const txnMerchantRef = useRef<HTMLInputElement>(null)
-  const txnAmountRef   = useRef<HTMLInputElement>(null)
-  const txnTypeRef     = useRef<HTMLSelectElement>(null)
-  const txnCategoryRef = useRef<HTMLSelectElement>(null)
-  const txnNotesRef    = useRef<HTMLInputElement>(null)
-
+ // V8 — Transaction form refs
+  const txnDateRef          = useRef<HTMLInputElement>(null)
+  const txnAccountRef       = useRef<HTMLSelectElement>(null)
+  const txnMerchantRef      = useRef<HTMLInputElement>(null)
+  const txnAmountRef        = useRef<HTMLInputElement>(null)
+  const txnTypeRef          = useRef<HTMLSelectElement>(null)
+  const txnCategoryRef      = useRef<HTMLSelectElement>(null)
+  const txnNotesRef         = useRef<HTMLInputElement>(null)
+  // V8.10 — guards Amount onBlur from re-writing state after Enter-submit
+  const txnSubmittingRef    = useRef(false)
+  // V8.10 — counts ArrowRight presses inside date input (3 segments: mm / dd / yyyy)
+  const txnDateArrowCountRef = useRef(0)
 // V8.3 — Rule form refs
   const ruleNameRef           = useRef<HTMLInputElement>(null)
   const ruleMatchTextRef      = useRef<HTMLInputElement>(null)
@@ -891,12 +895,12 @@ export default function App() {
       return next
     })
   }
- const clearTxnForm = () => {
+const clearTxnForm = () => {
     setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '' })
     setTxnHint('')
     setTxnDupWarning(false)
   }
-  // Soft reset after successful add — preserves accountId/type/date for fast sequential entry
+  // Soft reset after successful add — keeps accountId/type/date for fast sequential entry
   const resetTxnFormAfterAdd = () => {
     setTxnForm(prev => ({ ...prev, merchant: '', amount: '', categoryId: '', notes: '' }))
     setTxnHint('')
@@ -914,7 +918,8 @@ export default function App() {
 
     // Duplicate detection — same merchant + amount + date
     const isDup = transactions.some(x =>
-      x.merchant.toLowerCase() === merchant.toLowerCase() &&
+      x.merchant.toLowerCase() === merchant.toLowerCase() &
+      &
       x.amount === amount &&
       x.date === txnForm.date
     )
@@ -941,10 +946,12 @@ export default function App() {
       }
     }
 
-   setTxnWithHistory(prev => [
+ setTxnWithHistory(prev => [
       { id: crypto.randomUUID(), date: txnForm.date, accountId: txnForm.accountId, merchant, amount, type: txnForm.type, categoryId: autoCategoryId || undefined, appliedByRule: matchedRuleId, notes: txnForm.notes.trim() || undefined, createdAt: new Date().toISOString() },
       ...prev,
     ])
+    // Set blur guard BEFORE moving focus so Amount's onBlur skips its format-back
+    txnSubmittingRef.current = true
     resetTxnFormAfterAdd()
     txnMerchantRef.current?.focus()
   }
@@ -2711,8 +2718,24 @@ export default function App() {
                     className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
                     value={txnForm.date}
                     onChange={e => setTxnForm(v => ({ ...v, date: e.target.value }))}
-                    onKeyDown={e => {
-                      if (e.key === 'Enter') { e.preventDefault(); txnAccountRef.current?.focus() }
+                   onKeyDown={e => {
+                      if (e.key === 'ArrowRight') {
+                        // Count rightward presses; after 3rd (past year segment) move to Account
+                        txnDateArrowCountRef.current += 1
+                        if (txnDateArrowCountRef.current > 2) {
+                          e.preventDefault()
+                          txnDateArrowCountRef.current = 0
+                          txnAccountRef.current?.focus()
+                        }
+                      } else if (e.key === 'ArrowLeft') {
+                        txnDateArrowCountRef.current = 0
+                      } else if (e.key === 'Enter') {
+                        e.preventDefault()
+                        txnDateArrowCountRef.current = 0
+                        txnAccountRef.current?.focus()
+                      } else {
+                        txnDateArrowCountRef.current = 0
+                      }
                     }}
                   />
                 </div>
@@ -2727,9 +2750,13 @@ export default function App() {
                     onKeyDown={e => {
                       if (e.key === 'ArrowLeft')  { e.preventDefault(); txnDateRef.current?.focus() }
                       if (e.key === 'ArrowRight') { e.preventDefault(); txnMerchantRef.current?.focus(); txnMerchantRef.current?.select() }
+                      onKeyDown={e => {
+                      // ArrowLeft/Right navigate between fields; ArrowUp/Down cycle options natively
+                      if (e.key === 'ArrowLeft')  { e.preventDefault(); txnDateRef.current?.focus() }
+                      if (e.key === 'ArrowRight') { e.preventDefault(); txnMerchantRef.current?.focus(); txnMerchantRef.current?.select() }
                       if (e.key === 'Enter') {
                         e.preventDefault()
-                        if (e.shiftKey) { txnDateRef.current?.focus() }
+                        if (e.shiftKey) txnDateRef.current?.focus()
                         else { txnMerchantRef.current?.focus(); txnMerchantRef.current?.select() }
                       }
                     }}
@@ -2787,7 +2814,9 @@ export default function App() {
                       setTxnForm(v => ({ ...v, amount: parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : raw }))
                     }}
                     onFocus={e => e.target.select()}
-                    onBlur={e => {
+                  onBlur={e => {
+                      // Skip format-back when blur is caused by an Enter-submit — form was already reset
+                      if (txnSubmittingRef.current) { txnSubmittingRef.current = false; return }
                       const num = parseFloat(e.target.value)
                       if (!isNaN(num) && num > 0) setTxnForm(v => ({ ...v, amount: num.toFixed(2) }))
                       else if (e.target.value !== '') setTxnForm(v => ({ ...v, amount: '' }))
@@ -2802,20 +2831,25 @@ export default function App() {
                         const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
                         setTxnForm(v => ({ ...v, amount: next === 0 ? '' : String(next) }))
                       }
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        if (e.shiftKey) {
-                          txnMerchantRef.current?.focus(); txnMerchantRef.current?.select()
-                        } else if (!txnForm.accountId) {
-                          txnAccountRef.current?.focus(); setTimedTxnHint('Choose an account first.')
-                        } else if (!txnForm.merchant.trim()) {
-                          txnMerchantRef.current?.focus(); setTimedTxnHint('Enter a merchant or description.')
-                        } else if (parseFloat(txnForm.amount) <= 0) {
-                          txnAmountRef.current?.focus(); txnAmountRef.current?.select()
-                        } else {
-                          createOrSaveTxn()
-                        }
-                      }
+                     if (e.key === 'Enter') {
+  e.preventDefault()
+
+  if (e.shiftKey) {
+    txnMerchantRef.current?.focus()
+    txnMerchantRef.current?.select()
+  } else if (!txnForm.accountId) {
+    txnAccountRef.current?.focus()
+    setTimedTxnHint('Choose an account first.')
+  } else if (!txnForm.merchant.trim()) {
+    txnMerchantRef.current?.focus()
+    setTimedTxnHint('Enter a merchant or description.')
+  } else if (parseFloat(txnForm.amount) <= 0) {
+    txnAmountRef.current?.focus()
+    txnAmountRef.current?.select()
+  } else {
+    createOrSaveTxn()
+  }
+}
                     }}
                   />
                 </div>
