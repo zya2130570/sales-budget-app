@@ -818,7 +818,9 @@ export default function App() {
   const createOrSaveAccount = () => {
     const name = accountForm.name.trim()
     if (!name) { setTimedAccountHint('Enter an account name before adding.'); accountNameRef.current?.focus(); return }
-    const balance = parseFloat(accountForm.balance) || 0
+    const rawBalance = parseFloat(accountForm.balance) || 0
+    // Credit cards carry debt-style balances — always ≤ 0
+    const balance = accountForm.type === 'credit card' && rawBalance > 0 ? -rawBalance : rawBalance
     const institution = accountForm.institution.trim()
     if (editAccountId) {
       setAccountsWithHistory(prev => prev.map(a => a.id === editAccountId
@@ -863,9 +865,13 @@ export default function App() {
     })
   }
   const clearTxnForm = () => {
-    // V8.6.1 — Auto-select the account when exactly one account exists
-    const defaultAccountId = accounts.length === 1 ? accounts[0].id : ''
-    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: defaultAccountId, merchant: '', amount: '', type: 'expense', categoryId: '', notes: '' })
+    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '' })
+    setTxnHint('')
+    setTxnDupWarning(false)
+  }
+  // Soft reset after a successful add — keeps account, type, date so rapid entry is frictionless
+  const resetTxnFormAfterAdd = () => {
+    setTxnForm(prev => ({ ...prev, merchant: '', amount: '', categoryId: '', notes: '' }))
     setTxnHint('')
     setTxnDupWarning(false)
   }
@@ -907,11 +913,11 @@ export default function App() {
       }
     }
 
-    setTxnWithHistory(prev => [
-      { id: crypto.randomUUID(), date: txnForm.date, accountId: resolvedAccountId, merchant, amount, type: txnForm.type, categoryId: autoCategoryId || undefined, appliedByRule: matchedRuleId, notes: txnForm.notes.trim() || undefined, createdAt: new Date().toISOString() },
+   setTxnWithHistory(prev => [
+      { id: crypto.randomUUID(), date: txnForm.date, accountId: txnForm.accountId, merchant, amount, type: txnForm.type, categoryId: autoCategoryId || undefined, appliedByRule: matchedRuleId, notes: txnForm.notes.trim() || undefined, createdAt: new Date().toISOString() },
       ...prev,
     ])
-    clearTxnForm()
+    resetTxnFormAfterAdd()
     txnMerchantRef.current?.focus()
   }
   const saveInlineTxnEdit = () => {
@@ -1125,12 +1131,14 @@ export default function App() {
     timerRef.current = setTimeout(() => setter(null), ms)
   }
 
-  const generateSampleAccount = () => {
+ const generateSampleAccount = () => {
     const used = new Set(accounts.map(a => a.name))
     const pool = SAMPLE_ACCOUNT_TEMPLATES.filter(t => !used.has(t.name))
     const tpl = (pool.length ? pool : SAMPLE_ACCOUNT_TEMPLATES)[Math.floor(Math.random() * (pool.length || SAMPLE_ACCOUNT_TEMPLATES.length))]
     const jitter = Math.round((Math.random() - 0.5) * Math.abs(tpl.balance) * 0.3)
-    const balance = parseFloat((tpl.balance + jitter).toFixed(2))
+    const rawBalance = parseFloat((tpl.balance + jitter).toFixed(2))
+    // Credit card templates are already negative; ensure jitter can't flip sign
+    const balance = tpl.type === 'credit card' ? Math.min(0, rawBalance) : rawBalance
     const id = crypto.randomUUID()
     setAccountsWithHistory(prev => [
       { id, name: tpl.name, type: tpl.type, balance, institution: tpl.institution, createdAt: new Date().toISOString().slice(0, 10) },
@@ -2700,7 +2708,18 @@ export default function App() {
                     placeholder="e.g. Whole Foods"
                     value={txnForm.merchant}
                     onChange={e => setTxnForm(v => ({ ...v, merchant: e.target.value }))}
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) txnAccountRef.current?.focus(); else txnAmountRef.current?.focus() } }}
+              onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (e.shiftKey) {
+                          txnAccountRef.current?.focus()
+                        } else if (txnForm.accountId && txnForm.merchant.trim() && parseFloat(txnForm.amount) > 0) {
+                          createOrSaveTxn()
+                        } else {
+                          txnAmountRef.current?.focus()
+                        }
+                      }
+                    }}
                   />
                 </div>
                 {/* Amount */}
