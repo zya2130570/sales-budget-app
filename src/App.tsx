@@ -127,7 +127,6 @@ const EXPENSE_MERCHANTS  = ['Target', 'Walmart', "Fry's", 'Shell', 'Chevron', 'C
 const INCOME_MERCHANTS   = ['Payroll', 'Direct Deposit', 'Paycheck', 'Bonus', 'Refund', 'Venmo Cashout', 'Tax Refund']
 const TRANSFER_MERCHANTS = ['Chase Transfer', 'Savings Transfer', 'Internal Transfer', 'Brokerage Transfer']
 // Keep for backward-compat references (generateTenSamples uses it)
-const SAMPLE_MERCHANTS   = EXPENSE_MERCHANTS
 const SAMPLE_ACCOUNT_TEMPLATES: Array<{ name: string; type: AccountType; balance: number; institution: string }> = [
   { name: 'Chase Checking',       type: 'checking',    balance: 2500,   institution: 'Chase'            },
   { name: 'Ally Savings',         type: 'savings',     balance: 8500,   institution: 'Ally'             },
