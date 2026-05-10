@@ -2828,15 +2828,15 @@ export default function App() {
                                 </select>
                               </td>
                               <td className="py-1.5 pr-2">
-                                <input className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineTxnEditForm.merchant} onChange={e => { setInlineTxnEditForm(v => ({ ...v, merchant: e.target.value })); setTxnDupWarning(false); }} onKeyDown={e => { if (e.key === 'Enter') saveInlineTxnEdit(); if (e.key === 'Escape') cancelInlineTxnEdit() }} />
+                                <input ref={inlineTxnMerchantRef} className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineTxnEditForm.merchant} onChange={e => { setInlineTxnEditForm(v => ({ ...v, merchant: e.target.value })); setTxnDupWarning(false); }} onKeyDown={e => { if (e.key === 'Enter') saveInlineTxnEdit(); if (e.key === 'Escape') cancelInlineTxnEdit() }} />
                               </td>
                               <td className="py-1.5 pr-2">
-                                <select className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineTxnEditForm.type} onChange={e => setInlineTxnEditForm(v => ({ ...v, type: e.target.value as TransactionType }))}>
+                                <select ref={inlineTxnTypeRef} className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineTxnEditForm.type} onChange={e => setInlineTxnEditForm(v => ({ ...v, type: e.target.value as TransactionType }))}>
                                   {TXN_TYPES.map(t => <option key={t} value={t}>{TXN_TYPE_LABELS[t]}</option>)}
                                 </select>
                               </td>
                               <td className="py-1.5 pr-2">
-                                <select className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineTxnEditForm.categoryId} onChange={e => setInlineTxnEditForm(v => ({ ...v, categoryId: e.target.value }))}>
+                                <select ref={inlineTxnCategoryRef} className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineTxnEditForm.categoryId} onChange={e => setInlineTxnEditForm(v => ({ ...v, categoryId: e.target.value }))}>
                                   <option value="">— none —</option>
                                   {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                 </select>
