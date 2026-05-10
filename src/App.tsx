@@ -369,6 +369,7 @@ export default function App() {
   const ruleMatchTextRef      = useRef<HTMLInputElement>(null)
 
   // V8.6.1 — Inline txn edit field refs (programmatic focus on Edit click + ArrowLeft/Right nav)
+  const inlineTxnDateRef      = useRef<HTMLInputElement>(null)
   const inlineTxnAmountRef    = useRef<HTMLInputElement>(null)
   const inlineTxnMerchantRef  = useRef<HTMLInputElement>(null)
   const inlineTxnTypeRef      = useRef<HTMLSelectElement>(null)
@@ -2642,8 +2643,6 @@ export default function App() {
                                 if (e.key === 'ArrowRight') { e.preventDefault(); inlineCatAmountRef.current?.focus(); inlineCatAmountRef.current?.select(); return }
                                 if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) }
                                 if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
-                                if (e.key === 'ArrowLeft') { e.preventDefault(); inlineCatNameRef.current?.focus() }
-                                if (e.key === 'ArrowRight') { e.preventDefault(); inlineCatAmountRef.current?.focus(); inlineCatAmountRef.current?.select() }
                               }}
                             >
                               <option value="fixed bill">Fixed</option>
@@ -3042,8 +3041,6 @@ export default function App() {
                                     if (e.key === 'ArrowRight') { e.preventDefault(); inlineAccountBalanceRef.current?.focus(); inlineAccountBalanceRef.current?.select(); return }
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit() }
                                     if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
-                                    if (e.key === 'ArrowLeft') { e.preventDefault(); inlineAccountNameRef.current?.focus() }
-                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineAccountBalanceRef.current?.focus(); inlineAccountBalanceRef.current?.select() }
                                   }}
                                 >
                                   {ACCOUNT_TYPES.map(t => <option key={t} value={t}>{ACCOUNT_TYPE_LABELS[t]}</option>)}
@@ -3090,7 +3087,6 @@ export default function App() {
                                     if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); saveInlineAccountEdit(); return }
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit() }
                                     if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
-                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineAccountBalanceRef.current?.focus() }
                                   }}
                                 />
                               ) : (a.institution || '\u2014')}
@@ -3378,9 +3374,9 @@ export default function App() {
                         <th className="pb-1.5 pr-3 font-medium">Date</th>
                         <th className="pb-1.5 pr-3 font-medium">Account</th>
                         <th className="pb-1.5 pr-3 font-medium">Merchant</th>
+                        <th className="pb-1.5 pr-3 font-medium text-right">Amount</th>
                         <th className="pb-1.5 pr-3 font-medium">Type</th>
                         <th className="pb-1.5 pr-3 font-medium">Category</th>
-                        <th className="pb-1.5 pr-3 font-medium text-right">Amount</th>
                         <th className="pb-1.5 pr-3 font-medium">Notes</th>
                         <th className="pb-1.5" />
                       </tr>
@@ -3409,19 +3405,24 @@ export default function App() {
                           }
                           return (
                             <tr key={tx.id} className="border-b border-slate-700 bg-blue-950/20">
-                              {/* Date */}
+                              {/* Date — Right→Account */}
                               <td className="py-1.5 pr-2">
                                 <input
+                                  ref={inlineTxnDateRef}
                                   type="date"
                                   className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
                                   value={inlineTxnEditForm.date}
                                   onChange={e => { setInlineTxnEditForm(v => ({ ...v, date: e.target.value })); setTxnDupWarning(false) }}
                                   onFocus={cancelBlurSave}
                                   onBlur={scheduleBlurSave}
-                                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() } if (e.key === 'Escape') cancelInlineTxnEdit() }}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnAccountRef.current?.focus(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
+                                    if (e.key === 'Escape') cancelInlineTxnEdit()
+                                  }}
                                 />
                               </td>
-                              {/* Account — Right→Merchant; Up/Down cycles natively */}
+                              {/* Account — Left→Date, Right→Merchant */}
                               <td className="py-1.5 pr-2">
                                 <select
                                   ref={inlineTxnAccountRef}
@@ -3431,6 +3432,7 @@ export default function App() {
                                   onFocus={cancelBlurSave}
                                   onBlur={scheduleBlurSave}
                                   onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineTxnDateRef.current?.focus(); return }
                                     if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnMerchantRef.current?.focus(); inlineTxnMerchantRef.current?.select(); return }
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
                                     if (e.key === 'Escape') cancelInlineTxnEdit()
@@ -3568,6 +3570,9 @@ export default function App() {
                             <td className="py-2 pr-3 text-slate-300 text-xs whitespace-nowrap">{tx.date}</td>
                             <td className="py-2 pr-3 text-slate-400 text-xs">{acct?.name ?? '—'}</td>
                             <td className="py-2 pr-3 font-medium">{tx.merchant}</td>
+                            <td className={`py-2 pr-3 text-right font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-100'}`}>
+                              {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : ''}{currency(tx.amount)}
+                            </td>
                             <td className="py-2 pr-3">
                               <span className={`text-xs px-1.5 py-0.5 rounded ${txTypeColor}`}>{TXN_TYPE_LABELS[tx.type]}</span>
                             </td>
@@ -3579,9 +3584,6 @@ export default function App() {
                               {tx.importedAt && (
                                 <span className="ml-1.5 text-[9px] text-violet-400 bg-violet-900/40 border border-violet-700/40 px-1 py-0.5 rounded">CSV Import</span>
                               )}
-                            </td>
-                            <td className={`py-2 pr-3 text-right font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-100'}`}>
-                              {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : ''}{currency(tx.amount)}
                             </td>
                             <td className="py-2 pr-3 text-slate-500 text-xs max-w-[100px] truncate">{tx.notes ?? '—'}</td>
                             <td className="py-2 whitespace-nowrap space-x-2">
@@ -4240,7 +4242,13 @@ export default function App() {
                       <div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div>
                     )}
                     <div className="flex gap-2 shrink-0">
-                      <button className="text-blue-300" onClick={() => setTargets(s.targets)}>Load</button>
+                      <button className="text-blue-300" onClick={() => {
+                        const isSame = s.targets.length === targets.length && s.targets.every((t, i) => t.id === targets[i]?.id)
+                        if (!isSame) {
+                          setTargetsWithHistory(() => [...s.targets])
+                          showToast('Savings goal set loaded.')
+                        }
+                      }}>Load</button>
                       {editingTargetSetName === s.name ? null : (
                         <button className="text-slate-300 hover:text-slate-100 text-xs" onClick={() => { setEditingTargetSetName(s.name); setEditingTargetSetRename(s.name) }}>Edit</button>
                       )}
