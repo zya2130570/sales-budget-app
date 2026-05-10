@@ -122,7 +122,12 @@ function getPeriodDateRange(period: Period): { start: string; end: string } {
 }
 
 // ── V8.4.2 Sample generator data pools ───────────────────────────────────────
-const SAMPLE_MERCHANTS = ['Target', 'Walmart', "Fry's", 'Shell', 'Chevron', 'Costco', 'Amazon', 'Starbucks', 'Chipotle', 'Uber', 'Lyft', 'Apple', 'Best Buy', 'CVS', "McDonald's", 'Walgreens']
+// Typed merchant pools — ensures type always matches merchant context
+const EXPENSE_MERCHANTS  = ['Target', 'Walmart', "Fry's", 'Shell', 'Chevron', 'Costco', 'Amazon', 'Starbucks', 'Chipotle', 'Uber', 'Best Buy', 'CVS', "McDonald's", 'Walgreens', 'Apple', 'Lyft']
+const INCOME_MERCHANTS   = ['Payroll', 'Direct Deposit', 'Paycheck', 'Bonus', 'Refund', 'Venmo Cashout', 'Tax Refund']
+const TRANSFER_MERCHANTS = ['Chase Transfer', 'Savings Transfer', 'Internal Transfer', 'Brokerage Transfer']
+// Keep for backward-compat references (generateTenSamples uses it)
+const SAMPLE_MERCHANTS   = EXPENSE_MERCHANTS
 const SAMPLE_ACCOUNT_TEMPLATES: Array<{ name: string; type: AccountType; balance: number; institution: string }> = [
   { name: 'Chase Checking',       type: 'checking',    balance: 2500,   institution: 'Chase'            },
   { name: 'Ally Savings',         type: 'savings',     balance: 8500,   institution: 'Ally'             },
@@ -135,7 +140,7 @@ const SAMPLE_ACCOUNT_TEMPLATES: Array<{ name: string; type: AccountType; balance
   { name: 'Cash Wallet',          type: 'cash',        balance: 80,     institution: ''                 },
   { name: 'Vanguard Retirement',  type: 'retirement',  balance: 48000,  institution: 'Vanguard'         },
 ]
-const SAMPLE_GOAL_NAMES = ['Emergency Fund', 'Vacation', 'New Bike', 'Car Repair', 'Roth IRA Contribution', 'Laptop Upgrade', 'Moving Fund', 'Travel Fund']
+const SAMPLE_GOAL_NAMES = ['Emergency Fund', 'Vacation', 'New Car', 'Roth IRA', 'Moving Fund', 'Wedding', 'New Bike', 'Laptop', 'Tuition', 'House Down Payment', 'Car Repair', 'Travel Fund']
 const SAMPLE_RULE_TEMPLATES: Array<{ name: string; matchText: string }> = [
   { name: 'Target Shopping', matchText: 'Target, TGT'     },
   { name: 'Gas Stations',    matchText: 'Shell, Chevron'  },
@@ -372,8 +377,13 @@ export default function App() {
   const inlineTxnMerchantRef  = useRef<HTMLInputElement>(null)
   const inlineTxnTypeRef      = useRef<HTMLSelectElement>(null)
   const inlineTxnCategoryRef  = useRef<HTMLSelectElement>(null)
-  // V8.6.1 — Inline rule edit ref (focus Match Text on Edit click)
-  const inlineRuleMatchRef    = useRef<HTMLInputElement>(null)
+// V8.6.1 — Inline rule edit refs
+  const inlineRuleNameRef   = useRef<HTMLInputElement>(null)
+  const inlineRuleMatchRef  = useRef<HTMLInputElement>(null)
+  const inlineRuleFieldRef  = useRef<HTMLSelectElement>(null)
+  const inlineRuleCatRef    = useRef<HTMLSelectElement>(null)
+  const inlineRuleTypeRef   = useRef<HTMLSelectElement>(null)
+  const inlineRuleSaveRef   = useRef<HTMLButtonElement>(null)
   // V8.6.1 — Blur-save: timer lets focus move between inline fields without premature save
   const inlineEditBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -1182,10 +1192,15 @@ export default function App() {
   }
 
   const generateSampleTransaction = () => {
-    const merchant = SAMPLE_MERCHANTS[Math.floor(Math.random() * SAMPLE_MERCHANTS.length)]
-    const amount = (Math.floor(Math.random() * 19) + 1) * 5
+    // Pick type first, then choose a believable merchant for that type
     const roll = Math.random()
-    const type: TransactionType = roll < 0.75 ? 'expense' : roll < 0.85 ? 'income' : roll < 0.93 ? 'transfer' : 'credit card payment'
+    const type: TransactionType = roll < 0.72 ? 'expense' : roll < 0.84 ? 'income' : roll < 0.93 ? 'transfer' : 'credit card payment'
+    const merchant =
+      type === 'income'              ? INCOME_MERCHANTS[Math.floor(Math.random() * INCOME_MERCHANTS.length)]
+      : type === 'transfer'          ? TRANSFER_MERCHANTS[Math.floor(Math.random() * TRANSFER_MERCHANTS.length)]
+      : type === 'credit card payment' ? 'Credit Card Payment'
+      : EXPENSE_MERCHANTS[Math.floor(Math.random() * EXPENSE_MERCHANTS.length)]
+    const amount = (Math.floor(Math.random() * 19) + 1) * 5
     const catPool = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
     const categoryId = catPool.length ? catPool[Math.floor(Math.random() * catPool.length)].id : undefined
     const accountId = accounts[0]?.id ?? ''
@@ -1254,19 +1269,15 @@ export default function App() {
     const startMs = new Date(range.start + 'T00:00:00').getTime()
     const endMs   = Math.min(new Date(range.end + 'T23:59:59').getTime(), Date.now())
     // Build 10 varied transactions — mix of types, ~30% uncategorized, ~15% duplicate-like
-    const merchantPool = [...new Set(SAMPLE_MERCHANTS)] // dedup pool
-    const usedMerchants: string[] = []
-    const batch: Transaction[] = []
-    for (let i = 0; i < 10; i++) {
-      // Prefer merchants not yet used in this batch for variety
-      const freshPool = merchantPool.filter(m => !usedMerchants.includes(m))
-      const pool = freshPool.length >= 3 ? freshPool : merchantPool
-      const merchant = pool[Math.floor(Math.random() * pool.length)]
-      usedMerchants.push(merchant)
-      const amount   = (Math.floor(Math.random() * 19) + 1) * 5
-      const roll     = Math.random()
+   const roll     = Math.random()
       const type: TransactionType = roll < 0.72 ? 'expense' : roll < 0.84 ? 'income' : roll < 0.93 ? 'transfer' : 'credit card payment'
-      const catPool  = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
+      const merchant =
+        type === 'income'               ? INCOME_MERCHANTS[Math.floor(Math.random() * INCOME_MERCHANTS.length)]
+        : type === 'transfer'           ? TRANSFER_MERCHANTS[Math.floor(Math.random() * TRANSFER_MERCHANTS.length)]
+        : type === 'credit card payment'? 'Credit Card Payment'
+        : EXPENSE_MERCHANTS[Math.floor(Math.random() * EXPENSE_MERCHANTS.length)]
+      const amount   = (Math.floor(Math.random() * 19) + 1) * 5
+        const catPool  = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
       const categoryId = Math.random() < 0.7 && catPool.length ? catPool[Math.floor(Math.random() * catPool.length)].id : undefined
       const accountId  = accounts[0]?.id ?? ''
       const date       = new Date(startMs + Math.random() * (endMs - startMs)).toISOString().slice(0, 10)
@@ -3379,49 +3390,109 @@ export default function App() {
                         const cat = categories.find(c => c.id === r.categoryId)
                         const isInlineEdit = inlineRuleEditId === r.id
                         if (isInlineEdit) {
+                          const blurSave = () => {
+                            if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
+                            inlineEditBlurTimerRef.current = setTimeout(saveInlineRuleEdit, 150)
+                          }
+                          const blurCancel = () => {
+                            if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
+                          }
                           return (
                             <tr key={r.id} className="border-b border-slate-700 bg-blue-950/20">
-                           <td className="py-1.5 pr-2">
-                                <input
-                                  ref={inlineRuleMatchRef}
-                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none font-mono"
-                                  value={inlineRuleEditForm.matchText}
-                                  onFocus={e => e.target.select()}
-                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, matchText: e.target.value }))}
-                                  onKeyDown={e => { if (e.key === 'Enter') saveInlineRuleEdit(); if (e.key === 'Escape') cancelInlineRuleEdit() }}
-                                />
-                              </td>
-                             <td className="py-1.5 pr-2">
-                                <input
-                                  ref={inlineRuleMatchRef}
-                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none font-mono"
-                                  value={inlineRuleEditForm.matchText}
-                                  onFocus={e => e.target.select()}
-                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, matchText: e.target.value }))}
-                                  onKeyDown={e => { if (e.key === 'Enter') saveInlineRuleEdit(); if (e.key === 'Escape') cancelInlineRuleEdit() }}
-                                />
-                              </td>
+                              {/* Rule Name — normal text editing, no arrow nav override */}
                               <td className="py-1.5 pr-2">
-                                <select className="px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineRuleEditForm.matchField} onChange={e => setInlineRuleEditForm(v => ({ ...v, matchField: e.target.value as 'merchant' | 'notes' }))}>
+                                <input
+                                  ref={inlineRuleNameRef}
+                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineRuleEditForm.name}
+                                  onFocus={e => { e.target.select(); blurCancel() }}
+                                  onBlur={blurSave}
+                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, name: e.target.value }))}
+                                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); inlineRuleMatchRef.current?.focus() } if (e.key === 'Escape') cancelInlineRuleEdit() }}
+                                />
+                              </td>
+                              {/* Matches — preserve normal cursor movement; only Enter/Escape special */}
+                              <td className="py-1.5 pr-2">
+                                <input
+                                  ref={inlineRuleMatchRef}
+                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none font-mono"
+                                  value={inlineRuleEditForm.matchText}
+                                  onFocus={e => { e.target.select(); blurCancel() }}
+                                  onBlur={blurSave}
+                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, matchText: e.target.value }))}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); inlineRuleFieldRef.current?.focus() }
+                                    if (e.key === 'Escape') cancelInlineRuleEdit()
+                                  }}
+                                />
+                              </td>
+                              {/* In Field — ArrowLeft → Matches, ArrowRight → Category */}
+                              <td className="py-1.5 pr-2">
+                                <select
+                                  ref={inlineRuleFieldRef}
+                                  className="px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineRuleEditForm.matchField}
+                                  onFocus={blurCancel}
+                                  onBlur={blurSave}
+                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, matchField: e.target.value as 'merchant' | 'notes' }))}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineRuleMatchRef.current?.focus() }
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineRuleCatRef.current?.focus() }
+                                    if (e.key === 'Enter')      { e.preventDefault(); inlineRuleCatRef.current?.focus() }
+                                    if (e.key === 'Escape')     cancelInlineRuleEdit()
+                                  }}
+                                >
                                   <option value="merchant">Merchant</option>
                                   <option value="notes">Notes</option>
                                 </select>
                               </td>
+                              {/* Assign to Category — ArrowLeft → In Field, ArrowRight → Type */}
                               <td className="py-1.5 pr-2">
-                                <select className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineRuleEditForm.categoryId} onChange={e => setInlineRuleEditForm(v => ({ ...v, categoryId: e.target.value }))}>
+                                <select
+                                  ref={inlineRuleCatRef}
+                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineRuleEditForm.categoryId}
+                                  onFocus={blurCancel}
+                                  onBlur={blurSave}
+                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, categoryId: e.target.value }))}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineRuleFieldRef.current?.focus() }
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineRuleTypeRef.current?.focus() }
+                                    if (e.key === 'Enter')      { e.preventDefault(); inlineRuleTypeRef.current?.focus() }
+                                    if (e.key === 'Escape')     cancelInlineRuleEdit()
+                                  }}
+                                >
                                   <option value="">— none —</option>
                                   {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                 </select>
                               </td>
+                              {/* Type Filter — ArrowLeft → Category, ArrowRight/Enter → Save */}
                               <td className="py-1.5 pr-2">
-                                <select className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineRuleEditForm.type} onChange={e => setInlineRuleEditForm(v => ({ ...v, type: e.target.value as TransactionType | '' }))}>
+                                <select
+                                  ref={inlineRuleTypeRef}
+                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineRuleEditForm.type}
+                                  onFocus={blurCancel}
+                                  onBlur={blurSave}
+                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, type: e.target.value as TransactionType | '' }))}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineRuleCatRef.current?.focus() }
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); blurCancel(); inlineRuleSaveRef.current?.focus() }
+                                    if (e.key === 'Enter')      { e.preventDefault(); blurCancel(); saveInlineRuleEdit() }
+                                    if (e.key === 'Escape')     cancelInlineRuleEdit()
+                                  }}
+                                >
                                   <option value="">— any —</option>
                                   {TXN_TYPES.map(t => <option key={t} value={t}>{TXN_TYPE_LABELS[t]}</option>)}
                                 </select>
                               </td>
                               <td className="py-1.5 whitespace-nowrap space-x-2">
-                                <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={saveInlineRuleEdit}>Save</button>
-                                <button className="text-slate-400 hover:text-slate-300 text-xs" onClick={cancelInlineRuleEdit}>Cancel</button>
+                                <button
+                                  ref={inlineRuleSaveRef}
+                                  className="text-blue-400 hover:text-blue-300 text-xs"
+                                  onClick={() => { blurCancel(); saveInlineRuleEdit() }}
+                                >Save</button>
+                                <button className="text-slate-400 hover:text-slate-300 text-xs" onClick={() => { blurCancel(); cancelInlineRuleEdit() }}>Cancel</button>
                               </td>
                             </tr>
                           )
