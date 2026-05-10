@@ -38,10 +38,10 @@ import {
   saveTransactionRules,
   runMigrations,
 } from './utils/storage'
-import { parseCsv, detectColumns, downloadSampleCsv } from './utils/csv'
-import type { ColumnMapping } from './utils/csv'
-import { runImportPipeline, buildImportedTransactions } from './utils/importHelpers'
-import type { ImportRow, ImportPipelineResult } from './utils/importHelpers'
+// V9.0 — CSV import pipeline
+import { buildImportPreview, commitImportCandidates } from './utils/importCsv'
+import type { ImportCandidate, ImportPreviewResult } from './utils/importCsv'
+import { generateSampleCsvText } from './utils/csv'
 
 const presetTypeMap: Record<string, CategoryType> = {
   Bike: 'fixed bill',
@@ -126,11 +126,7 @@ function getPeriodDateRange(period: Period): { start: string; end: string } {
 }
 
 // ── V8.4.2 Sample generator data pools ───────────────────────────────────────
-// Typed merchant pools — ensures type always matches merchant context
-const EXPENSE_MERCHANTS  = ['Target', 'Walmart', "Fry's", 'Shell', 'Chevron', 'Costco', 'Amazon', 'Starbucks', 'Chipotle', 'Uber', 'Best Buy', 'CVS', "McDonald's", 'Walgreens', 'Apple', 'Lyft']
-const INCOME_MERCHANTS   = ['Payroll', 'Direct Deposit', 'Paycheck', 'Bonus', 'Refund', 'Venmo Cashout', 'Tax Refund']
-const TRANSFER_MERCHANTS = ['Chase Transfer', 'Savings Transfer', 'Internal Transfer', 'Brokerage Transfer']
-const SAMPLE_MERCHANTS   = EXPENSE_MERCHANTS
+const SAMPLE_MERCHANTS = ['Target', 'Walmart', "Fry's", 'Shell', 'Chevron', 'Costco', 'Amazon', 'Starbucks', 'Chipotle', 'Uber', 'Lyft', 'Apple', 'Best Buy', 'CVS', "McDonald's", 'Walgreens']
 const SAMPLE_ACCOUNT_TEMPLATES: Array<{ name: string; type: AccountType; balance: number; institution: string }> = [
   { name: 'Chase Checking',       type: 'checking',    balance: 2500,   institution: 'Chase'            },
   { name: 'Ally Savings',         type: 'savings',     balance: 8500,   institution: 'Ally'             },
@@ -143,7 +139,7 @@ const SAMPLE_ACCOUNT_TEMPLATES: Array<{ name: string; type: AccountType; balance
   { name: 'Cash Wallet',          type: 'cash',        balance: 80,     institution: ''                 },
   { name: 'Vanguard Retirement',  type: 'retirement',  balance: 48000,  institution: 'Vanguard'         },
 ]
-const SAMPLE_GOAL_NAMES = ['Emergency Fund', 'Vacation', 'New Car', 'Roth IRA', 'Moving Fund', 'Wedding', 'New Bike', 'Laptop', 'Tuition', 'House Down Payment', 'Car Repair', 'Travel Fund']
+const SAMPLE_GOAL_NAMES = ['Emergency Fund', 'Vacation', 'New Bike', 'Car Repair', 'Roth IRA Contribution', 'Laptop Upgrade', 'Moving Fund', 'Travel Fund']
 const SAMPLE_RULE_TEMPLATES: Array<{ name: string; matchText: string }> = [
   { name: 'Target Shopping', matchText: 'Target, TGT'     },
   { name: 'Gas Stations',    matchText: 'Shell, Chevron'  },
@@ -295,18 +291,6 @@ export default function App() {
   const [, setActualsHistory] = useState<Array<Record<string, string>>>([])
   const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
 
-  // V8.12.1: Inline budget category edit (row stays in place; top form is create-only)
-  const [inlineCatEditId, setInlineCatEditId] = useState<string | null>(null)
-  const [inlineCatEditForm, setInlineCatEditForm] = useState({ name: '', amount: '', type: 'fixed bill' as CategoryType })
-  const inlineCatNameRef = useRef<HTMLInputElement>(null)
-  const inlineCatAmountRef = useRef<HTMLInputElement>(null)
-
-  // V8.12.1: Inline account edit (row stays in place; top form is create-only)
-  const [inlineAccountEditId, setInlineAccountEditId] = useState<string | null>(null)
-  const [inlineAccountEditForm, setInlineAccountEditForm] = useState({ name: '', type: 'checking' as AccountType, balance: '', institution: '' })
-  const inlineAccountNameRef = useRef<HTMLInputElement>(null)
-  const inlineAccountBalanceRef = useRef<HTMLInputElement>(null)
-
   const showToast = (message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     setToast({ message, visible: true })
@@ -371,17 +355,13 @@ export default function App() {
   const accountInstRef    = useRef<HTMLInputElement>(null)
 
   // V8 — Transaction form refs
-  const txnDateRef          = useRef<HTMLInputElement>(null)
-  const txnAccountRef       = useRef<HTMLSelectElement>(null)
-  const txnMerchantRef      = useRef<HTMLInputElement>(null)
-  const txnAmountRef        = useRef<HTMLInputElement>(null)
-  const txnTypeRef          = useRef<HTMLSelectElement>(null)
-  const txnCategoryRef      = useRef<HTMLSelectElement>(null)
-  const txnNotesRef         = useRef<HTMLInputElement>(null)
-  // V8.10 — guards Amount onBlur from re-writing state after Enter-submit
-  const txnSubmittingRef    = useRef(false)
-  // V8.10 — counts ArrowRight presses inside date input (3 segments: mm / dd / yyyy)
-  const txnDateArrowCountRef = useRef(0)
+  const txnDateRef     = useRef<HTMLInputElement>(null)
+  const txnAccountRef  = useRef<HTMLSelectElement>(null)
+  const txnMerchantRef = useRef<HTMLInputElement>(null)
+  const txnAmountRef   = useRef<HTMLInputElement>(null)
+  const txnTypeRef     = useRef<HTMLSelectElement>(null)
+  const txnCategoryRef = useRef<HTMLSelectElement>(null)
+  const txnNotesRef    = useRef<HTMLInputElement>(null)
 
 // V8.3 — Rule form refs
   const ruleNameRef           = useRef<HTMLInputElement>(null)
@@ -392,13 +372,8 @@ export default function App() {
   const inlineTxnMerchantRef  = useRef<HTMLInputElement>(null)
   const inlineTxnTypeRef      = useRef<HTMLSelectElement>(null)
   const inlineTxnCategoryRef  = useRef<HTMLSelectElement>(null)
-// V8.6.1 — Inline rule edit refs
-  const inlineRuleNameRef   = useRef<HTMLInputElement>(null)
-  const inlineRuleMatchRef  = useRef<HTMLInputElement>(null)
-  const inlineRuleFieldRef  = useRef<HTMLSelectElement>(null)
-  const inlineRuleCatRef    = useRef<HTMLSelectElement>(null)
-  const inlineRuleTypeRef   = useRef<HTMLSelectElement>(null)
-  const inlineRuleSaveRef   = useRef<HTMLButtonElement>(null)
+  // V8.6.1 — Inline rule edit ref (focus Match Text on Edit click)
+  const inlineRuleMatchRef    = useRef<HTMLInputElement>(null)
   // V8.6.1 — Blur-save: timer lets focus move between inline fields without premature save
   const inlineEditBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -429,16 +404,25 @@ export default function App() {
   const [txnHistory, setTxnHistory]           = useState<Transaction[][]>([])
   const [txnRedo, setTxnRedo]                 = useState<Transaction[][]>([])
 
-// V8.5 — review / filter
+  // V8.5 — review / filter
   const [txnFilter, setTxnFilter]             = useState<typeof TXN_FILTER_OPTIONS[number]['value']>('all')
   const [txnDupWarning, setTxnDupWarning]     = useState(false)
-  // V8.7 — tracks how many uncategorized txns were visible when pill was last clicked
   const [accountHint, setAccountHint]         = useState('')
   const [txnHint, setTxnHint]                 = useState('')
 
-  // V8.6.3 — Uncategorized glow: suppressed once the user clicks the pill; re-arms on new items
-  const uncategorizedGlowSeenRef  = useRef(false)
-  const prevUncategorizedCountRef = useRef(0)
+  // V9.0 — CSV import state
+  const [csvImportOpen, setCsvImportOpen]       = useState(false)
+  const [csvImportPreview, setCsvImportPreview] = useState<ImportPreviewResult | null>(null)
+  const [csvImportLoading, setCsvImportLoading] = useState(false)
+  const [csvImportError, setCsvImportError]     = useState('')
+  const [csvExcluded, setCsvExcluded]           = useState<Set<string>>(new Set())
+  const csvFileInputRef                         = useRef<HTMLInputElement>(null)
+
+  // V9.0.1 — Predictive rule hint shown while merchant/notes/type changes in Log Transaction form
+  const [txnRulePreviewHint, setTxnRulePreviewHint] = useState('')
+
+  // V9.0.1 — Back to top
+  const [showScrollTop, setShowScrollTop] = useState(false)
 
   // V8.3.1 — Inline transaction editing (rows edit in place; top form is create-only)
   const [inlineTxnEditId, setInlineTxnEditId] = useState<string | null>(null)
@@ -464,17 +448,6 @@ export default function App() {
   const [ruleRedo, setRuleRedo]               = useState<TransactionRule[][]>([])
   const [overwriteCategories, setOverwriteCategories] = useState(false)
   const [applyRulesMsg, setApplyRulesMsg]     = useState('')
-
-  // ── V9.0 CSV Import state ──────────────────────────────────────────────────
-  const [csvModalOpen, setCsvModalOpen]                   = useState(false)
-  const [csvParsing, setCsvParsing]                       = useState(false)
-  const [csvHeaders, setCsvHeaders]                       = useState<string[]>([])
-  const [csvMapping, setCsvMapping]                       = useState<ColumnMapping>({ date: '', merchant: '', amount: '', account: '', notes: '' })
-  const [csvPipeline, setCsvPipeline]                     = useState<ImportPipelineResult | null>(null)
-  const [csvIncludeDuplicates, setCsvIncludeDuplicates]   = useState(false)
-  const [csvImportError, setCsvImportError]               = useState('')
-  const [csvFileName, setCsvFileName]                     = useState('')
-  const csvFileInputRef = useRef<HTMLInputElement>(null)
 
   const gp = Math.max(0, Number(gpInput) || 0)
   const adjustedSalary = BASE_SALARY + (baseBumpsAchieved * 5000)
@@ -523,14 +496,14 @@ export default function App() {
   useEffect(() => saveSavedTargetSets(savedTargetSets), [savedTargetSets])
   useEffect(() => saveAccounts(accounts), [accounts])
   useEffect(() => saveTransactions(transactions), [transactions])
- useEffect(() => saveTransactionRules(rules), [rules])
+  useEffect(() => saveTransactionRules(rules), [rules])
 
-  // V8.7 — auto-select the only account in the transaction form
+  // V9.0.1 — Back-to-top: show button once user scrolls down 400px
   useEffect(() => {
-    if (accounts.length === 1) {
-      setTxnForm(prev => ({ ...prev, accountId: accounts[0].id }))
-    }
-  }, [accounts.length, accounts[0]?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+    const onScroll = () => setShowScrollTop(window.scrollY > 400)
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
 
   // Deadline-passed detection: show a one-time prompt per target when today is past the deadline
   // and the target is still active (not completed, not fully funded).
@@ -682,21 +655,6 @@ export default function App() {
 
   // ── V7.3 Dashboard Status Engine ───────────────────────────────────────────
   const activeTargets = targets.filter(t => !t.completed && (t.goalAmount <= 0 || t.currentSaved < t.goalAmount))
-
-  // ── V8.6.3 Uncategorized expense count ──────────────────────────────────────
-  // Single source of truth: expense transactions with no budget category assigned.
-  // Income, Transfer, and Credit Card Payment are intentionally excluded.
-  const uncategorizedExpenseCount = transactions.filter(
-    tx => tx.type === 'expense' && !tx.categoryId
-  ).length
-  // Re-arm the glow whenever the count grows above the previous watermark
-  if (uncategorizedExpenseCount > prevUncategorizedCountRef.current) {
-    uncategorizedGlowSeenRef.current = false
-  }
-  prevUncategorizedCountRef.current = uncategorizedExpenseCount
-  // Glow is active when there are uncategorized expenses and the pill hasn't been clicked yet
-  const showUncategorizedGlow = uncategorizedExpenseCount > 0 && !uncategorizedGlowSeenRef.current
-
   const dashboardStatus: DashboardStatus = useMemo(() => {
     const base = computeDashboardStatus({
       totalMonthly: inc.totalMonthly,
@@ -931,18 +889,18 @@ export default function App() {
       return next
     })
   }
- const clearTxnForm = () => {
+  const clearTxnForm = () => {
     setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '' })
     setTxnHint('')
     setTxnDupWarning(false)
   }
-  // Soft reset after successful add — preserves accountId/type/date for fast sequential entry
+  // Soft reset after a successful add — keeps account, type, date so rapid entry is frictionless
   const resetTxnFormAfterAdd = () => {
     setTxnForm(prev => ({ ...prev, merchant: '', amount: '', categoryId: '', notes: '' }))
     setTxnHint('')
     setTxnDupWarning(false)
+    setTxnRulePreviewHint('')
   }
-  // Soft reset after a successful add — keeps account, type, date so rapid entry is frictionless
   const createOrSaveTxn = () => {
     const merchant = txnForm.merchant.trim()
     // V8.6.1 — If exactly one account exists, treat it as implicitly selected
@@ -985,8 +943,6 @@ export default function App() {
       { id: crypto.randomUUID(), date: txnForm.date, accountId: txnForm.accountId, merchant, amount, type: txnForm.type, categoryId: autoCategoryId || undefined, appliedByRule: matchedRuleId, notes: txnForm.notes.trim() || undefined, createdAt: new Date().toISOString() },
       ...prev,
     ])
-    // Set blur guard BEFORE moving focus so Amount's onBlur skips its format-back
-    txnSubmittingRef.current = true
     resetTxnFormAfterAdd()
     txnMerchantRef.current?.focus()
   }
@@ -1064,6 +1020,23 @@ export default function App() {
       const normAliasNoApos = normAlias.replace(/'/g, '')
       return normHaystack.includes(normAlias) || normHaystackNoApos.includes(normAliasNoApos)
     })
+  }
+
+  // V9.0.1 — Predictive rule preview: compute what rule would apply for current form state
+  // Returns a hint string or '' if no rule matches or user already picked a category.
+  const computeRulePreview = (merchant: string, notes: string, categoryId: string): string => {
+    if (categoryId) return '' // user already chose — don't suggest
+    if (!merchant.trim()) return ''
+    const mLower = normalizeAlias(merchant)
+    const nLower = normalizeAlias(notes)
+    for (const rule of rules) {
+      const haystack = rule.matchField === 'merchant' ? mLower : nLower
+      if (matchesAnyAlias(haystack, rule.matchText)) {
+        const cat = categories.find(c => c.id === rule.categoryId)
+        if (cat) return `Rule will apply: ${rule.name} → ${cat.name}`
+      }
+    }
+    return ''
   }
 
   const setRulesWithHistory = (updater: (prev: TransactionRule[]) => TransactionRule[]) => {
@@ -1188,94 +1161,6 @@ export default function App() {
     setTimeout(() => setApplyRulesMsg(''), 5000)
   }
 
-  // ── V9.0 CSV Import handlers ───────────────────────────────────────────────
-
-  const openCsvModal = () => {
-    setCsvModalOpen(true)
-    setCsvPipeline(null)
-    setCsvHeaders([])
-    setCsvMapping({ date: '', merchant: '', amount: '', account: '', notes: '' })
-    setCsvImportError('')
-    setCsvFileName('')
-    setCsvIncludeDuplicates(false)
-  }
-  const closeCsvModal = () => {
-    setCsvModalOpen(false)
-    setCsvPipeline(null)
-    setCsvImportError('')
-    if (csvFileInputRef.current) csvFileInputRef.current.value = ''
-  }
-
-  const handleCsvFile = async (file: File) => {
-    setCsvParsing(true)
-    setCsvImportError('')
-    setCsvPipeline(null)
-    setCsvFileName(file.name)
-    try {
-      const text = await file.text()
-      const result = parseCsv(text)
-      if (result.errorMessage) {
-        setCsvImportError(result.errorMessage)
-        setCsvParsing(false)
-        return
-      }
-      if (result.rows.length === 0) {
-        setCsvImportError('No valid data rows found in the CSV.')
-        setCsvParsing(false)
-        return
-      }
-      const mapping = detectColumns(result.headers)
-      setCsvHeaders(result.headers)
-      setCsvMapping(mapping)
-      // Run pipeline with auto-detected mapping
-      const pipeline = runImportPipeline({
-        rows: result.rows,
-        mapping,
-        existing: transactions,
-        rules,
-        defaultAccountId: accounts[0]?.id ?? '',
-      })
-      setCsvPipeline(pipeline)
-    } catch (err) {
-      setCsvImportError('Failed to read the file. Make sure it is a valid CSV.')
-      console.error(err)
-    } finally {
-      setCsvParsing(false)
-    }
-  }
-
-  const rerunPipeline = (mapping: ColumnMapping) => {
-    if (!csvPipeline) return
-    // Re-parse isn't possible without keeping raw rows — so we store them
-    // Mapping changes only affect the existing parsed rows via the stored headers
-    // For V9.0, mapping changes trigger a re-read from the file input
-    // This is intentional: simple, no stale-state issues
-    setCsvMapping(mapping)
-  }
-
-  /** Called when user confirms the import. Commits all 'ready' rows (+ dupes if opted in). */
-  const commitCsvImport = () => {
-    if (!csvPipeline) return
-    const batchId = crypto.randomUUID()
-    const txns = buildImportedTransactions(
-      csvPipeline.importRows,
-      accounts[0]?.id ?? '',
-      batchId,
-      csvIncludeDuplicates,
-    )
-    if (!txns.length) {
-      setCsvImportError('No transactions to import after filtering.')
-      return
-    }
-    // Highlight first imported row after closing modal
-    const firstId = txns[0].id
-    setTxnWithHistory(prev => [...txns, ...prev])
-    closeCsvModal()
-    showToast(`Imported ${txns.length} transaction${txns.length !== 1 ? 's' : ''}.`)
-    flashHighlight(firstId, setHighlightedTxnId, highlightTxnTimerRef)
-    if (tab !== 'Transactions') setTab('Transactions')
-  }
-
   // ── V8.4.2 Sample generators — instant-create with highlight ─────────────────
 
   const flashHighlight = (
@@ -1306,15 +1191,10 @@ export default function App() {
   }
 
   const generateSampleTransaction = () => {
-    // Pick type first, then choose a believable merchant for that type
-    const roll = Math.random()
-    const type: TransactionType = roll < 0.72 ? 'expense' : roll < 0.84 ? 'income' : roll < 0.93 ? 'transfer' : 'credit card payment'
-    const merchant =
-      type === 'income'              ? INCOME_MERCHANTS[Math.floor(Math.random() * INCOME_MERCHANTS.length)]
-      : type === 'transfer'          ? TRANSFER_MERCHANTS[Math.floor(Math.random() * TRANSFER_MERCHANTS.length)]
-      : type === 'credit card payment' ? 'Credit Card Payment'
-      : EXPENSE_MERCHANTS[Math.floor(Math.random() * EXPENSE_MERCHANTS.length)]
+    const merchant = SAMPLE_MERCHANTS[Math.floor(Math.random() * SAMPLE_MERCHANTS.length)]
     const amount = (Math.floor(Math.random() * 19) + 1) * 5
+    const roll = Math.random()
+    const type: TransactionType = roll < 0.75 ? 'expense' : roll < 0.85 ? 'income' : roll < 0.93 ? 'transfer' : 'credit card payment'
     const catPool = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
     const categoryId = catPool.length ? catPool[Math.floor(Math.random() * catPool.length)].id : undefined
     const accountId = accounts[0]?.id ?? ''
@@ -1378,76 +1258,110 @@ export default function App() {
     flashHighlight(id, setHighlightedTargetId, highlightTargetTimerRef)
   }
 
-  const generateTenBudgetCategories = () => {
-    const used = new Set(categories.map(c => c.name))
-    // Full pool of 10 varied, realistic categories
-    const pool: Array<{ name: string; type: CategoryType; monthly: number }> = [
-      { name: 'Rent',            type: 'fixed bill',        monthly: 1800 },
-      { name: 'Groceries',       type: 'variable spending', monthly: 400  },
-      { name: 'Gas',             type: 'variable spending', monthly: 120  },
-      { name: 'Dining',          type: 'variable spending', monthly: 200  },
-      { name: 'Internet',        type: 'fixed bill',        monthly: 60   },
-      { name: 'Phone',           type: 'fixed bill',        monthly: 80   },
-      { name: 'Insurance',       type: 'fixed bill',        monthly: 180  },
-      { name: 'Emergency Fund',  type: 'savings',           monthly: 200  },
-      { name: 'Roth IRA',        type: 'investing',         monthly: 300  },
-      { name: 'Entertainment',   type: 'variable spending', monthly: 80   },
-      { name: 'Travel',          type: 'savings',           monthly: 150  },
-      { name: 'Car Payment',     type: 'fixed bill',        monthly: 350  },
-      { name: 'Subscriptions',   type: 'fixed bill',        monthly: 50   },
-      { name: 'Shopping',        type: 'variable spending', monthly: 150  },
-      { name: 'Utilities',       type: 'fixed bill',        monthly: 120  },
-    ]
-    const available = pool.filter(c => !used.has(c.name))
-    const toAdd = available.slice(0, Math.min(10, available.length))
-    if (!toAdd.length) { showToast('All sample categories already exist.'); return }
-    pushBudgetHistory()
-    const newCats = toAdd.map(tpl => {
-      const jitter = Math.round((tpl.monthly * (Math.random() * 0.2 - 0.1)) / 5) * 5
-      const monthly = Math.max(5, tpl.monthly + jitter)
-      return { id: crypto.randomUUID(), name: tpl.name, amount: monthly, type: tpl.type }
-    })
-    const lastId = newCats[newCats.length - 1].id
-    setCategories(prev => [...prev, ...newCats])
-    // Briefly highlight the last added row so the user knows where to look
-    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
-    setHighlightedCategoryId(lastId)
-    highlightTimerRef.current = setTimeout(() => setHighlightedCategoryId(null), 2500)
-    showToast(`${newCats.length} sample categories added.`)
-  }
-
   const generateTenSamples = () => {
     const range = getPeriodDateRange(period)
     const startMs = new Date(range.start + 'T00:00:00').getTime()
     const endMs   = Math.min(new Date(range.end + 'T23:59:59').getTime(), Date.now())
-    // Build 10 varied transactions — mix of types, ~30% uncategorized, ~15% duplicate-like
     const batch: Transaction[] = []
     for (let i = 0; i < 10; i++) {
+      const merchant = SAMPLE_MERCHANTS[Math.floor(Math.random() * SAMPLE_MERCHANTS.length)]
+      const amount   = (Math.floor(Math.random() * 19) + 1) * 5
       const roll     = Math.random()
       const type: TransactionType = roll < 0.72 ? 'expense' : roll < 0.84 ? 'income' : roll < 0.93 ? 'transfer' : 'credit card payment'
-      const merchant =
-        type === 'income'               ? INCOME_MERCHANTS[Math.floor(Math.random() * INCOME_MERCHANTS.length)]
-        : type === 'transfer'           ? TRANSFER_MERCHANTS[Math.floor(Math.random() * TRANSFER_MERCHANTS.length)]
-        : type === 'credit card payment'? 'Credit Card Payment'
-        : SAMPLE_MERCHANTS[Math.floor(Math.random() * SAMPLE_MERCHANTS.length)]
-      const amount   = (Math.floor(Math.random() * 19) + 1) * 5
+      // ~30% intentionally uncategorized
       const catPool  = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
       const categoryId = Math.random() < 0.7 && catPool.length ? catPool[Math.floor(Math.random() * catPool.length)].id : undefined
       const accountId  = accounts[0]?.id ?? ''
       const date       = new Date(startMs + Math.random() * (endMs - startMs)).toISOString().slice(0, 10)
-      // ~15% chance to duplicate a previous entry in this batch (realistic scenario)
+      // ~15% duplicate a previous entry in this batch
       const dupSrc = batch.length >= 2 && Math.random() < 0.15 ? batch[Math.floor(Math.random() * batch.length)] : null
       batch.push(dupSrc
         ? { ...dupSrc, id: crypto.randomUUID(), createdAt: new Date().toISOString() }
         : { id: crypto.randomUUID(), date, accountId, merchant, amount, type, categoryId, createdAt: new Date().toISOString() }
       )
     }
-    const firstId = batch[0].id
-    // Single undo entry for the whole batch
     setTxnWithHistory(prev => [...batch, ...prev])
-    // Highlight the first generated row so the user knows where to look
-    flashHighlight(firstId, setHighlightedTxnId, highlightTxnTimerRef)
-    showToast(`${batch.length} sample transactions added.`)
+  }
+
+  // ── V9.0 CSV Import handlers ──────────────────────────────────────────────────
+
+  const openCsvImport = () => {
+    setCsvImportOpen(true)
+    setCsvImportPreview(null)
+    setCsvImportError('')
+    setCsvExcluded(new Set())
+  }
+  const closeCsvImport = () => {
+    setCsvImportOpen(false)
+    setCsvImportPreview(null)
+    setCsvImportError('')
+    setCsvExcluded(new Set())
+  }
+  const processCsvText = (text: string) => {
+    setCsvImportLoading(true)
+    setCsvImportError('')
+    try {
+      const sessionId = crypto.randomUUID().slice(0, 8)
+      const preview = buildImportPreview({
+        csvText: text,
+        defaultAccountId: accounts[0]?.id ?? '',
+        existingTransactions: transactions,
+        rules,
+        categories,
+        importSessionId: sessionId,
+      })
+      if (preview.candidates.length === 0 && preview.skippedRows.length === 0) {
+        setCsvImportError('No rows found. Make sure the CSV has a header row and at least one data row with date, merchant, and amount.')
+      } else {
+        const autoDups = new Set(preview.candidates.filter(c => c.status === 'duplicate').map(c => c.key))
+        setCsvExcluded(autoDups)
+        setCsvImportPreview(preview)
+      }
+    } catch {
+      setCsvImportError('Failed to parse the CSV. Please check the file format and try again.')
+    } finally {
+      setCsvImportLoading(false)
+    }
+  }
+  const handleCsvFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = ev => { const text = ev.target?.result; if (typeof text === 'string') processCsvText(text) }
+    reader.onerror = () => setCsvImportError('Could not read the file. Please try again.')
+    reader.readAsText(file)
+    e.target.value = ''
+  }
+  const handleCsvDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    const file = e.dataTransfer.files?.[0]
+    if (!file) return
+    if (!file.name.toLowerCase().endsWith('.csv') && file.type !== 'text/csv' && file.type !== 'text/plain') {
+      setCsvImportError('Please drop a .csv file.')
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = ev => { const text = ev.target?.result; if (typeof text === 'string') processCsvText(text) }
+    reader.onerror = () => setCsvImportError('Could not read the file.')
+    reader.readAsText(file)
+  }
+  const commitCsvImport = () => {
+    if (!csvImportPreview) return
+    const accepted = csvImportPreview.candidates.filter(c => c.status !== 'invalid' && !csvExcluded.has(c.key))
+    if (accepted.length === 0) { closeCsvImport(); return }
+    const newTxns = commitImportCandidates(accepted)
+    setTxnWithHistory(prev => [...newTxns, ...prev])
+    showToast(`Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''}.`)
+    closeCsvImport()
+    if (newTxns[0]) flashHighlight(newTxns[0].id, setHighlightedTxnId, highlightTxnTimerRef)
+  }
+  const downloadSampleCsv = () => {
+    const text = generateSampleCsvText()
+    const blob = new Blob([text], { type: 'text/csv' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url; a.download = 'flow-sample-transactions.csv'; a.click()
+    URL.revokeObjectURL(url)
   }
 
   const upsert = () => {
@@ -1482,35 +1396,6 @@ export default function App() {
     setBudgetFormHint('')
     budgetNameRef.current?.focus()
   }
-
-  const saveInlineCatEdit = (catId: string) => {
-    const name = inlineCatEditForm.name.trim()
-    const amt  = Math.max(0, Number(inlineCatEditForm.amount) || 0)
-    const monthlyAmt = convertToMonthly(amt, period)
-    if (!name || monthlyAmt <= 0) return
-    pushBudgetHistory()
-    setCategories(prev => prev.map(c => c.id === catId
-      ? { ...c, name, amount: monthlyAmt, type: inlineCatEditForm.type }
-      : c
-    ))
-    setInlineCatEditId(null)
-  }
-
-  const cancelInlineCatEdit = () => setInlineCatEditId(null)
-
-  const saveInlineAccountEdit = (accountId: string) => {
-    const name = inlineAccountEditForm.name.trim()
-    if (!name) return
-    const rawBalance = parseFloat(inlineAccountEditForm.balance) || 0
-    const balance = inlineAccountEditForm.type === 'credit card' && rawBalance > 0 ? -rawBalance : rawBalance
-    setAccountsWithHistory(prev => prev.map(a => a.id === accountId
-      ? { ...a, name, type: inlineAccountEditForm.type, balance, institution: inlineAccountEditForm.institution.trim() }
-      : a
-    ))
-    setInlineAccountEditId(null)
-  }
-
-  const cancelInlineAccountEdit = () => setInlineAccountEditId(null)
 
   const addTargetContribution = (targetId: string, amount: number, date: string, note: string) => {
     if (amount <= 0) return
@@ -1963,10 +1848,10 @@ export default function App() {
                                 <button className="text-blue-300 hover:text-blue-200" onClick={() => startEditContribution(t.id, c)}>Edit</button>
                                 <button
                                   className="text-red-300 hover:text-red-200"
-                                  onClick={() => { setTargetsWithHistory(prev => prev.map(x => x.id === t.id
+                                  onClick={() => setTargetsWithHistory(prev => prev.map(x => x.id === t.id
                                     ? { ...x, currentSaved: Math.max(0, x.currentSaved - c.amount), contributions: x.contributions.filter(k => k.id !== c.id) }
                                     : x
-                                  )); showUndoableToast(`Deleted contribution of ${currency(c.amount)}.`, undoTarget) }}
+                                  ))}
                                 >Delete</button>
                               </div>
                             </div>
@@ -2142,8 +2027,6 @@ export default function App() {
       </Card>
     )
   }
-
-  // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
@@ -2525,7 +2408,6 @@ export default function App() {
                 <button onClick={redoBudget} disabled={!budgetRedo.length} className={`rounded-lg px-3 py-1.5 ${budgetRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 <button onClick={() => { if (!categories.length) return; pushBudgetHistory(); setCategories([]); showUndoableToast('Budget reset.', undoBudget) }} className="rounded-lg px-3 py-1.5 bg-slate-700 hover:bg-slate-600">Reset Budget</button>
                 <button onClick={generateSampleCategory} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample budget category">Generate Sample</button>
-                <button onClick={generateTenBudgetCategories} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Add up to 10 realistic sample budget categories">Generate 10 Samples</button>
               </div>
               {budgetFormHint && <p className="mt-2 text-sm text-amber-300">{budgetFormHint}</p>}
               <div className="mt-3 grid md:grid-cols-3 gap-2">
@@ -2541,7 +2423,7 @@ export default function App() {
                     <div className="flex gap-2">
                       <button className="text-blue-300" onClick={() => setCategories(b.categories)}>Load</button>
                       <button className="text-amber-300" onClick={() => { const nn = window.prompt('Rename budget', b.name); if (!nn) return; setSavedBudgets(prev => prev.map(x => x.name === b.name ? { ...x, name: nn } : x)) }}>Rename</button>
-                      <button className="text-red-300" onClick={() => { setSavedBudgets(prev => prev.filter(x => x.name !== b.name)); showToast(`Deleted saved budget "${b.name}".`) }}>Delete</button>
+                      <button className="text-red-300" onClick={() => setSavedBudgets(prev => prev.filter(x => x.name !== b.name))}>Delete</button>
                     </div>
                   </div>
                 ))}
@@ -2585,7 +2467,6 @@ export default function App() {
                 </thead>
                 <tbody>
                   {top.map(c => {
-                    const isEditingCat = inlineCatEditId === c.id
                     const planned     = convertFromMonthly(c.amount, period)
                     const eff         = effectiveCatActual(c.id)
                     const rawActual   = actuals[c.id]
@@ -2608,56 +2489,21 @@ export default function App() {
                         className={`border-b border-slate-800 transition-colors duration-300 ${
                           highlightedCategoryId === c.id
                             ? 'bg-blue-600/20'
-                            : isEditingCat
-                              ? 'bg-slate-700/40'
-                              : isPressure
-                                ? 'bg-amber-500/15'
-                                : ''
+                            : isPressure
+                              ? 'bg-amber-500/15'
+                              : ''
                         }`}
                       >
-                        <td className="py-1.5 pr-2">
-                          {isEditingCat ? (
-                            <input
-                              ref={inlineCatNameRef}
-                              className="w-full px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none"
-                              value={inlineCatEditForm.name}
-                              onChange={e => setInlineCatEditForm(v => ({ ...v, name: e.target.value }))}
-                              onFocus={e => e.target.select()}
-                              onBlur={() => saveInlineCatEdit(c.id)}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) }
-                                if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
-                                if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineCatAmountRef.current?.focus() }
-                              }}
-                            />
-                          ) : c.name}
-                        </td>
+                        <td className="py-1.5 pr-2">{c.name}</td>
                         <td className="py-1.5 pr-2 text-slate-400 text-xs">
-                          {isEditingCat ? (
-                            <select
-                              className="rounded bg-slate-800 border border-slate-500 text-xs px-1 py-0.5 focus:border-blue-500 focus:outline-none"
-                              value={inlineCatEditForm.type}
-                              onChange={e => setInlineCatEditForm(v => ({ ...v, type: e.target.value as CategoryType }))}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) }
-                                if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
-                              }}
-                            >
-                              <option value="fixed bill">Fixed</option>
-                              <option value="variable spending">Variable</option>
-                              <option value="savings">Savings</option>
-                              <option value="investing">Investing</option>
-                            </select>
-                          ) : (
-                            c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'
-                          )}
+                          {c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}
                         </td>
-                        {period === 'weekly'    && <td className="py-1.5 pr-2">{isEditingCat ? <input ref={inlineCatAmountRef} type="number" min={0} step={5} className="w-20 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none" value={inlineCatEditForm.amount} onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))} onFocus={e => e.target.select()} onBlur={() => saveInlineCatEdit(c.id)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) } if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() } }} /> : currency(convertFromMonthly(c.amount, 'weekly'))}</td>}
-                        {period === 'bi-weekly' && <td className="py-1.5 pr-2">{isEditingCat ? <input ref={inlineCatAmountRef} type="number" min={0} step={5} className="w-20 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none" value={inlineCatEditForm.amount} onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))} onFocus={e => e.target.select()} onBlur={() => saveInlineCatEdit(c.id)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) } if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() } }} /> : currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td>}
-                        {period === 'monthly'   && <td className="py-1.5 pr-2">{isEditingCat ? <input ref={inlineCatAmountRef} type="number" min={0} step={5} className="w-24 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none" value={inlineCatEditForm.amount} onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))} onFocus={e => e.target.select()} onBlur={() => saveInlineCatEdit(c.id)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) } if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() } }} /> : currency(c.amount)}</td>}
-                        {period === 'yearly'    && <td className="py-1.5 pr-2">{isEditingCat ? <input ref={inlineCatAmountRef} type="number" min={0} step={5} className="w-24 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none" value={inlineCatEditForm.amount} onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))} onFocus={e => e.target.select()} onBlur={() => saveInlineCatEdit(c.id)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit(c.id) } if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() } }} /> : currency(convertFromMonthly(c.amount, 'yearly'))}</td>}
-                        {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{isEditingCat ? null : currency(c.amount)}</td>}
-                        {period === 'yearly' && <td className="py-1.5 pr-2 text-slate-400">{isEditingCat ? null : currency(c.amount)}</td>}
+                        {period === 'weekly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'weekly'))}</td>}
+                        {period === 'bi-weekly' && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td>}
+                        {period === 'monthly'   && <td className="py-1.5 pr-2">{currency(c.amount)}</td>}
+                        {period === 'yearly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'yearly'))}</td>}
+                        {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
+                        {period === 'yearly' && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
                         {/* Actual cell: txn-driven breakdown or plain manual entry */}
                         <td className="py-1 pr-2">
                           {hasTxn ? (
@@ -2747,25 +2593,8 @@ export default function App() {
                                 : `Over by ${currency(variance)}`}
                         </td>
                         <td className="py-1.5 space-x-2 whitespace-nowrap">
-                          {isEditingCat ? (
-                            <>
-                              <button className="text-green-300 hover:text-green-200 text-xs" onClick={() => saveInlineCatEdit(c.id)}>Save</button>
-                              <button className="text-slate-400 hover:text-slate-200 text-xs" onClick={cancelInlineCatEdit}>Cancel</button>
-                            </>
-                          ) : (
-                            <>
-                              <button className="text-blue-300 hover:text-blue-200 text-xs" onClick={() => {
-                                setInlineCatEditId(c.id)
-                                setInlineCatEditForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type })
-                                setTimeout(() => { inlineCatAmountRef.current?.focus(); inlineCatAmountRef.current?.select() }, 0)
-                              }}>Edit</button>
-                              <button className="text-red-300 hover:text-red-200 text-xs" onClick={() => {
-                                pushBudgetHistory()
-                                setCategories(prev => prev.filter(x => x.id !== c.id))
-                                showUndoableToast(`Deleted "${c.name}".`, undoBudget)
-                              }}>Delete</button>
-                            </>
-                          )}
+                          <button className="text-blue-300 hover:text-blue-200" onClick={() => { setForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type }); setEditId(c.id); budgetNameRef.current?.focus() }}>Edit</button>
+                          <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
                         </td>
                       </tr>
                     )
@@ -2779,7 +2608,7 @@ export default function App() {
         {/* ── ACCOUNTS ── */}
         {tab === 'Accounts' && (
           <section className="space-y-4 transition-all duration-300">
-            <Card title="Add Account" noHover>
+            <Card title={editAccountId ? 'Edit Account' : 'Add Account'} noHover>
               <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
                 {/* Account Name */}
                 <div>
@@ -2870,15 +2699,20 @@ export default function App() {
               </div>
               <div className="flex gap-2 mt-3 flex-wrap">
                 <button onClick={createOrSaveAccount} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-1.5 text-sm transition-colors">
-                  Add Account
+                  {editAccountId ? 'Save Changes' : 'Add Account'}
                 </button>
-                <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
+                {editAccountId
+                  ? <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Cancel</button>
+                  : <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
+                }
                 <button onClick={undoAccount} disabled={!accountHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoAccount} disabled={!accountRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
-                {accounts.length > 0 && (
-                  <button onClick={() => { if (!accounts.length) return; setAccountsWithHistory(() => []); showUndoableToast(`${accounts.length} account${accounts.length !== 1 ? 's' : ''} cleared.`, undoAccount) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                {!editAccountId && accounts.length > 0 && (
+                  <button onClick={() => { if (window.confirm(`Clear all ${accounts.length} account${accounts.length !== 1 ? 's' : ''}? This cannot be undone.`)) { setAccountsWithHistory(() => []); showUndoableToast('Accounts cleared.', undoAccount) } }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
-                <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
+                {!editAccountId && (
+                  <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
+                )}
               </div>
               {accountHint && <p className="mt-2 text-sm text-amber-300">{accountHint}</p>}
             </Card>
@@ -2897,100 +2731,24 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {accounts.map(a => {
-                        const isEditingAcct = inlineAccountEditId === a.id
-                        return (
-                          <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedAccountId === a.id ? 'bg-blue-600/20' : isEditingAcct ? 'bg-slate-700/40' : 'hover:bg-slate-800/40'}`}>
-                            <td className="py-2 pr-4 font-medium">
-                              {isEditingAcct ? (
-                                <input
-                                  ref={inlineAccountNameRef}
-                                  className="w-full px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm focus:border-blue-500 focus:outline-none"
-                                  value={inlineAccountEditForm.name}
-                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, name: e.target.value }))}
-                                  onFocus={e => e.target.select()}
-                                  onBlur={() => saveInlineAccountEdit(a.id)}
-                                  onKeyDown={e => {
-                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
-                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
-                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineAccountBalanceRef.current?.focus() }
-                                  }}
-                                />
-                              ) : a.name}
-                            </td>
-                            <td className="py-2 pr-4 text-slate-400 text-sm">
-                              {isEditingAcct ? (
-                                <select
-                                  className="rounded bg-slate-800 border border-slate-500 text-xs px-1 py-0.5 focus:border-blue-500 focus:outline-none"
-                                  value={inlineAccountEditForm.type}
-                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, type: e.target.value as AccountType }))}
-                                  onKeyDown={e => {
-                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
-                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
-                                  }}
-                                >
-                                  {ACCOUNT_TYPES.map(t => <option key={t} value={t}>{ACCOUNT_TYPE_LABELS[t]}</option>)}
-                                </select>
-                              ) : ACCOUNT_TYPE_LABELS[a.type]}
-                            </td>
-                            <td className={`py-2 pr-4 text-right font-semibold ${isEditingAcct ? '' : a.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                              {isEditingAcct ? (
-                                <input
-                                  ref={inlineAccountBalanceRef}
-                                  type="text" inputMode="decimal"
-                                  className="w-24 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-sm text-right focus:border-blue-500 focus:outline-none"
-                                  value={inlineAccountEditForm.balance}
-                                  onChange={e => { const raw = e.target.value.replace(/[^0-9.\-]/g, ''); setInlineAccountEditForm(v => ({ ...v, balance: raw })) }}
-                                  onFocus={e => e.target.select()}
-                                  onBlur={() => saveInlineAccountEdit(a.id)}
-                                  onKeyDown={e => {
-                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
-                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
-                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineAccountNameRef.current?.focus() }
-                                  }}
-                                />
-                              ) : (
-                                a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)
-                              )}
-                            </td>
-                            <td className="py-2 pr-4 text-slate-400 text-xs">
-                              {isEditingAcct ? (
-                                <input
-                                  className="w-full px-1.5 py-0.5 rounded bg-slate-800 border border-slate-500 text-xs focus:border-blue-500 focus:outline-none"
-                                  value={inlineAccountEditForm.institution}
-                                  placeholder="Institution"
-                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, institution: e.target.value }))}
-                                  onBlur={() => saveInlineAccountEdit(a.id)}
-                                  onKeyDown={e => {
-                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
-                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
-                                  }}
-                                />
-                              ) : (a.institution || '—')}
-                            </td>
-                            <td className="py-2 whitespace-nowrap space-x-2">
-                              {isEditingAcct ? (
-                                <>
-                                  <button className="text-green-400 hover:text-green-300 text-xs" onClick={() => saveInlineAccountEdit(a.id)}>Save</button>
-                                  <button className="text-slate-400 hover:text-slate-200 text-xs" onClick={cancelInlineAccountEdit}>Cancel</button>
-                                </>
-                              ) : (
-                                <>
-                                  <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
-                                    setInlineAccountEditId(a.id)
-                                    setInlineAccountEditForm({ name: a.name, type: a.type, balance: a.balance === 0 ? '' : String(a.balance), institution: a.institution ?? '' })
-                                    setTimeout(() => { inlineAccountBalanceRef.current?.focus(); inlineAccountBalanceRef.current?.select() }, 0)
-                                  }}>Edit</button>
-                                  <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => {
-                                    setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))
-                                    showUndoableToast(`Deleted "${a.name}".`, undoAccount)
-                                  }}>Delete</button>
-                                </>
-                              )}
-                            </td>
-                          </tr>
-                        )
-                      })}
+                      {accounts.map(a => (
+                        <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedAccountId === a.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
+                          <td className="py-2 pr-4 font-medium">{a.name}</td>
+                          <td className="py-2 pr-4 text-slate-400">{ACCOUNT_TYPE_LABELS[a.type]}</td>
+                          <td className={`py-2 pr-4 text-right font-semibold ${a.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)}
+                          </td>
+                          <td className="py-2 pr-4 text-slate-400 text-xs">{a.institution || '—'}</td>
+                          <td className="py-2 whitespace-nowrap space-x-2">
+                          <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
+                              setEditAccountId(a.id)
+                              setAccountForm({ name: a.name, type: a.type, balance: a.balance === 0 ? '' : String(a.balance), institution: a.institution })
+                              setTimeout(() => { accountBalanceRef.current?.focus(); accountBalanceRef.current?.select() }, 0)
+                            }}>Edit</button>
+                            <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))}>Delete</button>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                     <tfoot>
                       <tr className="border-t border-slate-700">
@@ -3005,10 +2763,7 @@ export default function App() {
                 </div>
               </Card>
             ) : (
-              <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 p-6 text-center">
-                <p className="text-slate-400 text-sm font-medium">No accounts yet</p>
-                <p className="text-slate-500 text-xs mt-1">Add a checking, savings, or investment account above to start tracking your net worth.</p>
-              </div>
+              <p className="text-center text-slate-500 text-sm py-8">No accounts yet. Add one above to get started.</p>
             )}
           </section>
         )}
@@ -3019,6 +2774,7 @@ export default function App() {
             {/* ── V8.5 Review queue summary ── */}
             {transactions.length > 0 && (() => {
               const range = getPeriodDateRange(period)
+              const uncatCount   = transactions.filter(tx => !tx.categoryId && tx.type === 'expense').length
               const periodSpend  = transactions
                 .filter(tx => tx.date >= range.start && tx.date <= range.end && (tx.type === 'expense' || tx.type === 'credit card payment'))
                 .reduce((s, tx) => s + tx.amount, 0)
@@ -3026,10 +2782,10 @@ export default function App() {
               return (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {[
-                    { label: 'Uncategorized',     value: uncategorizedExpenseCount,          alert: uncategorizedExpenseCount > 0 },
-                    { label: 'Period Spend',       value: currency(periodSpend),              alert: false                          },
-                    { label: 'Rules Applied',      value: rulesApplied,                       alert: false                          },
-                    { label: 'Total Transactions', value: transactions.length,                alert: false                          },
+                    { label: 'Uncategorized',     value: uncatCount,                      alert: uncatCount > 0 },
+                    { label: 'Period Spend',       value: currency(periodSpend),           alert: false          },
+                    { label: 'Rules Applied',      value: rulesApplied,                    alert: false          },
+                    { label: 'Total Transactions', value: transactions.length,             alert: false          },
                   ].map(({ label, value, alert }) => (
                     <div key={label} className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
                       <div className="text-xs text-slate-400 mb-1">{label}</div>
@@ -3040,8 +2796,8 @@ export default function App() {
               )
             })()}
             <Card title="Log Transaction" noHover>
-             <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
-                {/* Date — native left/right used by date picker; Enter navigates forward */}
+              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
+                {/* Date */}
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Date</label>
                   <input
@@ -3050,25 +2806,7 @@ export default function App() {
                     className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
                     value={txnForm.date}
                     onChange={e => setTxnForm(v => ({ ...v, date: e.target.value }))}
-                    onKeyDown={e => {
-                      if (e.key === 'ArrowRight') {
-                        // Count rightward presses; after 3rd (past year segment) move to Account
-                        txnDateArrowCountRef.current += 1
-                        if (txnDateArrowCountRef.current > 2) {
-                          e.preventDefault()
-                          txnDateArrowCountRef.current = 0
-                          txnAccountRef.current?.focus()
-                        }
-                      } else if (e.key === 'ArrowLeft') {
-                        txnDateArrowCountRef.current = 0
-                      } else if (e.key === 'Enter') {
-                        e.preventDefault()
-                        txnDateArrowCountRef.current = 0
-                        txnAccountRef.current?.focus()
-                      } else {
-                        txnDateArrowCountRef.current = 0
-                      }
-                    }}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); txnAccountRef.current?.focus() } }}
                   />
                 </div>
                 {/* Account */}
@@ -3077,23 +2815,15 @@ export default function App() {
                   <select
                     ref={txnAccountRef}
                     className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
-                    value={txnForm.accountId}
+                    value={txnForm.accountId || (accounts.length === 1 ? accounts[0].id : '')}
                     onChange={e => setTxnForm(v => ({ ...v, accountId: e.target.value }))}
-                    onKeyDown={e => {
-                      if (e.key === 'ArrowLeft')  { e.preventDefault(); txnDateRef.current?.focus() }
-                      if (e.key === 'ArrowRight') { e.preventDefault(); txnMerchantRef.current?.focus(); txnMerchantRef.current?.select() }
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        if (e.shiftKey) { txnDateRef.current?.focus() }
-                        else { txnMerchantRef.current?.focus(); txnMerchantRef.current?.select() }
-                      }
-                    }}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) txnDateRef.current?.focus(); else txnMerchantRef.current?.focus() } }}
                   >
-                    <option value="">Select account…</option>
+                    {accounts.length !== 1 && <option value="">Select account…</option>}
                     {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                   </select>
                 </div>
-                {/* Merchant — boundary-aware arrows so normal cursor movement still works */}
+                {/* Merchant */}
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Merchant / Description</label>
                   <input
@@ -3101,26 +2831,20 @@ export default function App() {
                     className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
                     placeholder="e.g. Whole Foods"
                     value={txnForm.merchant}
-                    onChange={e => setTxnForm(v => ({ ...v, merchant: e.target.value }))}
+                    onChange={e => {
+                      const merchant = e.target.value
+                      setTxnForm(v => ({ ...v, merchant }))
+                      setTxnRulePreviewHint(computeRulePreview(merchant, txnForm.notes, txnForm.categoryId))
+                    }}
                     onKeyDown={e => {
-                      if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) {
-                        e.preventDefault(); txnAccountRef.current?.focus()
-                      }
-                      if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) {
-                        e.preventDefault(); txnAmountRef.current?.focus(); txnAmountRef.current?.select()
-                      }
                       if (e.key === 'Enter') {
                         e.preventDefault()
                         if (e.shiftKey) {
                           txnAccountRef.current?.focus()
-                        } else if (!txnForm.accountId) {
-                          txnAccountRef.current?.focus(); setTimedTxnHint('Choose an account first.')
-                        } else if (!txnForm.merchant.trim()) {
-                          // stay — still typing
-                        } else if (parseFloat(txnForm.amount) > 0) {
+                        } else if ((txnForm.accountId || accounts.length === 1) && txnForm.merchant.trim() && parseFloat(txnForm.amount) > 0) {
                           createOrSaveTxn()
                         } else {
-                          txnAmountRef.current?.focus(); txnAmountRef.current?.select()
+                          txnAmountRef.current?.focus()
                         }
                       }
                     }}
@@ -3143,16 +2867,12 @@ export default function App() {
                     }}
                     onFocus={e => e.target.select()}
                     onBlur={e => {
-                      // Skip format-back when blur is caused by an Enter-submit — form was already reset
-                      if (txnSubmittingRef.current) { txnSubmittingRef.current = false; return }
                       const num = parseFloat(e.target.value)
                       if (!isNaN(num) && num > 0) setTxnForm(v => ({ ...v, amount: num.toFixed(2) }))
                       else if (e.target.value !== '') setTxnForm(v => ({ ...v, amount: '' }))
                     }}
                     onKeyDown={e => {
                       if (['e', 'E', '+', '-'].includes(e.key)) { e.preventDefault(); return }
-                      if (e.key === 'ArrowLeft')  { e.preventDefault(); txnMerchantRef.current?.focus(); txnMerchantRef.current?.select(); return }
-                      if (e.key === 'ArrowRight') { e.preventDefault(); txnTypeRef.current?.focus(); return }
                       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                         e.preventDefault()
                         const cur = parseFloat(txnForm.amount) || 0
@@ -3162,21 +2882,18 @@ export default function App() {
                       if (e.key === 'Enter') {
                         e.preventDefault()
                         if (e.shiftKey) {
-                          txnMerchantRef.current?.focus(); txnMerchantRef.current?.select()
-                        } else if (!txnForm.accountId) {
-                          txnAccountRef.current?.focus(); setTimedTxnHint('Choose an account first.')
-                        } else if (!txnForm.merchant.trim()) {
-                          txnMerchantRef.current?.focus(); setTimedTxnHint('Enter a merchant or description.')
-                        } else if (parseFloat(txnForm.amount) <= 0) {
-                          txnAmountRef.current?.focus(); txnAmountRef.current?.select()
-                        } else {
+                          txnMerchantRef.current?.focus()
+                       } else if ((txnForm.accountId || accounts.length === 1) && txnForm.merchant.trim() && parseFloat(txnForm.amount) > 0) {
+                          // All required fields filled — log the transaction directly
                           createOrSaveTxn()
+                        } else {
+                          txnTypeRef.current?.focus()
                         }
                       }
                     }}
                   />
                 </div>
-                {/* Type — left/right navigate between fields; up/down cycle options natively */}
+                {/* Type */}
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Type</label>
                   <select
@@ -3184,15 +2901,7 @@ export default function App() {
                     className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
                     value={txnForm.type}
                     onChange={e => setTxnForm(v => ({ ...v, type: e.target.value as TransactionType }))}
-                    onKeyDown={e => {
-                      if (e.key === 'ArrowLeft')  { e.preventDefault(); txnAmountRef.current?.focus(); txnAmountRef.current?.select() }
-                      if (e.key === 'ArrowRight') { e.preventDefault(); txnCategoryRef.current?.focus() }
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        if (e.shiftKey) { txnAmountRef.current?.focus(); txnAmountRef.current?.select() }
-                        else txnCategoryRef.current?.focus()
-                      }
-                    }}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) txnAmountRef.current?.focus(); else txnCategoryRef.current?.focus() } }}
                   >
                     {TXN_TYPES.map(t => <option key={t} value={t}>{TXN_TYPE_LABELS[t]}</option>)}
                   </select>
@@ -3205,16 +2914,12 @@ export default function App() {
                     ref={txnCategoryRef}
                     className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
                     value={txnForm.categoryId}
-                    onChange={e => setTxnForm(v => ({ ...v, categoryId: e.target.value }))}
-                    onKeyDown={e => {
-                      if (e.key === 'ArrowLeft')  { e.preventDefault(); txnTypeRef.current?.focus() }
-                      if (e.key === 'ArrowRight') { e.preventDefault(); txnNotesRef.current?.focus() }
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        if (e.shiftKey) txnTypeRef.current?.focus()
-                        else txnNotesRef.current?.focus()
-                      }
+                    onChange={e => {
+                      setTxnForm(v => ({ ...v, categoryId: e.target.value }))
+                      // User explicitly choosing a category suppresses the rule preview
+                      setTxnRulePreviewHint('')
                     }}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) txnTypeRef.current?.focus(); else txnNotesRef.current?.focus() } }}
                   >
                     <option value="">— none —</option>
                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -3228,26 +2933,12 @@ export default function App() {
                     className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
                     placeholder="optional"
                     value={txnForm.notes}
-                    onChange={e => setTxnForm(v => ({ ...v, notes: e.target.value }))}
-                    onKeyDown={e => {
-                      if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) {
-                        e.preventDefault(); txnCategoryRef.current?.focus()
-                      }
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        if (e.shiftKey) {
-                          txnCategoryRef.current?.focus()
-                        } else if (!txnForm.accountId) {
-                          txnAccountRef.current?.focus(); setTimedTxnHint('Choose an account first.')
-                        } else if (!txnForm.merchant.trim()) {
-                          txnMerchantRef.current?.focus(); setTimedTxnHint('Enter a merchant or description.')
-                        } else if (parseFloat(txnForm.amount) <= 0) {
-                          txnAmountRef.current?.focus(); setTimedTxnHint('Enter a transaction amount.')
-                        } else {
-                          createOrSaveTxn()
-                        }
-                      }
+                    onChange={e => {
+                      const notes = e.target.value
+                      setTxnForm(v => ({ ...v, notes }))
+                      setTxnRulePreviewHint(computeRulePreview(txnForm.merchant, notes, txnForm.categoryId))
                     }}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) txnCategoryRef.current?.focus(); else createOrSaveTxn() } }}
                   />
                 </div>
               </div>
@@ -3259,71 +2950,59 @@ export default function App() {
                 <button onClick={undoTxn} disabled={!txnHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoTxn} disabled={!txnRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 {transactions.length > 0 && (
-                  <button onClick={() => { if (!transactions.length) return; setTxnWithHistory(() => []); showUndoableToast(`${transactions.length} transaction${transactions.length !== 1 ? 's' : ''} cleared.`, undoTxn) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                  <button onClick={() => { if (window.confirm(`Clear all ${transactions.length} transaction${transactions.length !== 1 ? 's' : ''}?`)) { setTxnWithHistory(() => []); showUndoableToast('Transactions cleared.', undoTxn) } }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
                 <button onClick={generateSampleTransaction} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a random sample transaction">Generate Sample</button>
                 <button onClick={generateTenSamples} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Add 10 varied samples — mixed categories, some uncategorized, some duplicate-like">Generate 10 Samples</button>
-                {/* V9.0 — CSV Import */}
-                <button
-                  onClick={openCsvModal}
-                  className="rounded-lg px-3 py-1.5 text-xs bg-blue-900/60 hover:bg-blue-800/70 text-blue-300 border border-blue-700/40 transition-colors font-medium"
-                  title="Import transactions from a CSV file"
-                >
-                  ↑ Import CSV
-                </button>
+                <button onClick={openCsvImport} className="rounded-lg px-3 py-1.5 text-xs bg-indigo-800/70 hover:bg-indigo-700/80 text-indigo-200 border border-indigo-700/50 transition-colors" title="Import transactions from a CSV file">Import CSV</button>
               </div>
               {txnHint && <p className="mt-2 text-sm text-amber-300">{txnHint}</p>}
+              {!txnHint && txnRulePreviewHint && (
+                <p className="mt-2 text-xs text-indigo-300/80 flex items-center gap-1.5">
+                  <span className="text-indigo-400">⚡</span>{txnRulePreviewHint}
+                </p>
+              )}
             </Card>
 
             {transactions.length > 0 ? (
               <Card title={`Transactions (${transactions.length})`}>
                 {/* Filter pills */}
                 <div className="flex gap-1.5 flex-wrap mb-3">
-                  {TXN_FILTER_OPTIONS.map(opt => {
-                    const isUncategorized = opt.value === 'uncategorized'
-                    const isActive = txnFilter === opt.value
-                    const glowRing = isUncategorized && showUncategorizedGlow && !isActive
-                    return (
-                      <button
-                        key={opt.value}
-                        onClick={() => {
-                          setTxnFilter(opt.value)
-                          if (isUncategorized) uncategorizedGlowSeenRef.current = true
-                        }}
-                        className={[
-                          'rounded-full px-3 py-0.5 text-xs transition-colors',
-                          isActive
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-slate-700 hover:bg-slate-600 text-slate-300',
-                          glowRing ? 'ring-1 ring-amber-400/70 shadow-[0_0_6px_rgba(251,191,36,0.22)]' : '',
-                        ].filter(Boolean).join(' ')}
-                      >
-                        {opt.label}
-                        {isUncategorized && uncategorizedExpenseCount > 0
-                          ? ` (${uncategorizedExpenseCount})`
-                          : ''}
-                      </button>
-                    )
-                  })}
+                  {TXN_FILTER_OPTIONS.map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setTxnFilter(opt.value)}
+                      className={`rounded-full px-3 py-0.5 text-xs transition-colors ${
+                        txnFilter === opt.value
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
+                      }${opt.value === 'uncategorized' && transactions.filter(tx => !tx.categoryId && tx.type === 'expense').length > 0 && txnFilter !== 'uncategorized' ? ' ring-1 ring-amber-500/60' : ''}`}
+                    >
+                      {opt.label}
+                      {opt.value === 'uncategorized' && transactions.filter(tx => !tx.categoryId && tx.type === 'expense').length > 0
+                        ? ` (${transactions.filter(tx => !tx.categoryId && tx.type === 'expense').length})`
+                        : ''}
+                    </button>
+                  ))}
                 </div>
-               <div className="overflow-x-auto -mx-1 px-1">
-                  <table className="w-full text-sm min-w-[640px]">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-slate-400 border-b border-slate-700">
-                        <th className="pb-1.5 pr-3 font-medium whitespace-nowrap">Date</th>
+                        <th className="pb-1.5 pr-3 font-medium">Date</th>
                         <th className="pb-1.5 pr-3 font-medium">Account</th>
                         <th className="pb-1.5 pr-3 font-medium">Merchant</th>
                         <th className="pb-1.5 pr-3 font-medium">Type</th>
                         <th className="pb-1.5 pr-3 font-medium">Category</th>
-                        <th className="pb-1.5 pr-3 font-medium text-right whitespace-nowrap">Amount</th>
-                        <th className="pb-1.5 pr-3 font-medium hidden sm:table-cell">Notes</th>
-                        <th className="pb-1.5 sticky right-0 bg-slate-800" />
+                        <th className="pb-1.5 pr-3 font-medium text-right">Amount</th>
+                        <th className="pb-1.5 pr-3 font-medium">Notes</th>
+                        <th className="pb-1.5" />
                       </tr>
                     </thead>
                     <tbody>
                       {[...transactions]
                         .filter(tx => {
-                          if (txnFilter === 'uncategorized') return tx.type === 'expense' && !tx.categoryId
+                          if (txnFilter === 'uncategorized') return !tx.categoryId
                           if (txnFilter === 'all') return true
                           return tx.type === txnFilter
                         })
@@ -3497,14 +3176,14 @@ export default function App() {
                               {tx.appliedByRule && (
                                 <span className="ml-1.5 text-[9px] text-indigo-400 bg-indigo-900/40 border border-indigo-700/40 px-1 py-0.5 rounded">Rule Applied</span>
                               )}
-                              {(tx as Transaction & { importSource?: string }).importSource === 'csv' && (
-                                <span className="ml-1.5 text-[9px] text-teal-400 bg-teal-900/40 border border-teal-700/40 px-1 py-0.5 rounded">CSV</span>
+                              {tx.importedAt && (
+                                <span className="ml-1.5 text-[9px] text-violet-400 bg-violet-900/40 border border-violet-700/40 px-1 py-0.5 rounded">CSV Import</span>
                               )}
                             </td>
                             <td className={`py-2 pr-3 text-right font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-100'}`}>
                               {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : ''}{currency(tx.amount)}
                             </td>
-                            <td className="py-2 pr-3 text-slate-500 text-xs max-w-[100px] truncate hidden sm:table-cell">{tx.notes ?? '—'}</td>
+                            <td className="py-2 pr-3 text-slate-500 text-xs max-w-[100px] truncate">{tx.notes ?? '—'}</td>
                             <td className="py-2 whitespace-nowrap space-x-2">
                               <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
                                 setInlineTxnEditId(tx.id)
@@ -3512,7 +3191,7 @@ export default function App() {
                                 setTxnDupWarning(false)
                                 setTimeout(() => { inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select() }, 0)
                               }}>Edit</button>
-                              <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => { setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id)); showUndoableToast(`Deleted "${tx.merchant}".`, undoTxn) }}>Delete</button>
+                              <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id))}>Delete</button>
                             </td>
                           </tr>
                         )
@@ -3522,17 +3201,15 @@ export default function App() {
                 </div>
               </Card>
             ) : (
-              <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 p-6 text-center">
-                <p className="text-slate-400 text-sm font-medium">No transactions yet</p>
-                {accounts.length === 0
-                  ? <p className="text-slate-500 text-xs mt-1">Add an account first, then log your first transaction above.</p>
-                  : <p className="text-slate-500 text-xs mt-1">Log your first transaction above. Use Generate Sample to try it out.</p>}
-              </div>
+              <p className="text-center text-slate-500 text-sm py-8">
+                No transactions yet.
+                {accounts.length === 0 && <span className="block mt-1 text-slate-600 text-xs">Add an account first to start logging transactions.</span>}
+              </p>
             )}
 
             {/* ── V8.5.1 Uncategorized Expenses ── only expense transactions need budget categories */}
-            {uncategorizedExpenseCount > 0 && (
-              <Card title={`Uncategorized Expenses (${uncategorizedExpenseCount})`}>
+            {transactions.some(tx => !tx.categoryId && tx.type === 'expense') && (
+              <Card title={`Uncategorized Expenses (${transactions.filter(tx => !tx.categoryId && tx.type === 'expense').length})`}>
                 <p className="text-xs text-slate-400 mb-3">
                   Only expenses need budget categories. Transfers, income, and credit card payments do not count toward Budget Actuals.
                 </p>
@@ -3590,7 +3267,7 @@ export default function App() {
                                   setTxnDupWarning(false)
                                   setTimeout(() => { inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select() }, 0)
                                 }}>Edit</button>
-                                <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => { setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id)); showUndoableToast(`Deleted "${tx.merchant}".`, undoTxn) }}>Delete</button>
+                                <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id))}>Delete</button>
                               </td>
                             </tr>
                           )
@@ -3673,7 +3350,7 @@ export default function App() {
                 <button onClick={undoRule} disabled={!ruleHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoRule} disabled={!ruleRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 {rules.length > 0 && (
-                  <button onClick={() => { if (!rules.length) return; setRulesWithHistory(() => []); showUndoableToast(`${rules.length} rule${rules.length !== 1 ? 's' : ''} cleared.`, undoRule) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                  <button onClick={() => { if (window.confirm(`Clear all ${rules.length} rule${rules.length !== 1 ? 's' : ''}?`)) { setRulesWithHistory(() => []); showUndoableToast('Transaction rules cleared.', undoRule) } }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
                 <button onClick={generateSampleRule} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample rule">Generate Sample</button>
               </div>
@@ -3694,13 +3371,12 @@ export default function App() {
                 <div className="mt-4 overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                     <tr className="text-left text-slate-400 border-b border-slate-700">
+                      <tr className="text-left text-slate-400 border-b border-slate-700">
                         <th className="pb-1.5 pr-3 font-medium">Rule Name</th>
                         <th className="pb-1.5 pr-3 font-medium">Matches</th>
                         <th className="pb-1.5 pr-3 font-medium">In Field</th>
                         <th className="pb-1.5 pr-3 font-medium">Assign to Category</th>
                         <th className="pb-1.5 pr-3 font-medium">Type Filter</th>
-                        <th className="pb-1.5 pr-3 font-medium">Usage</th>
                         <th className="pb-1.5" />
                       </tr>
                     </thead>
@@ -3709,114 +3385,53 @@ export default function App() {
                         const cat = categories.find(c => c.id === r.categoryId)
                         const isInlineEdit = inlineRuleEditId === r.id
                         if (isInlineEdit) {
-                          const blurSave = () => {
-                            if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
-                            inlineEditBlurTimerRef.current = setTimeout(saveInlineRuleEdit, 150)
-                          }
-                          const blurCancel = () => {
-                            if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
-                          }
                           return (
                             <tr key={r.id} className="border-b border-slate-700 bg-blue-950/20">
-                              {/* Rule Name — normal text editing, no arrow nav override */}
-                              <td className="py-1.5 pr-2">
-                                <input
-                                  ref={inlineRuleNameRef}
-                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
-                                  value={inlineRuleEditForm.name}
-                                  onFocus={e => { e.target.select(); blurCancel() }}
-                                  onBlur={blurSave}
-                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, name: e.target.value }))}
-                                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); inlineRuleMatchRef.current?.focus() } if (e.key === 'Escape') cancelInlineRuleEdit() }}
-                                />
-                              </td>
-                              {/* Matches — preserve normal cursor movement; only Enter/Escape special */}
-                              <td className="py-1.5 pr-2">
+                           <td className="py-1.5 pr-2">
                                 <input
                                   ref={inlineRuleMatchRef}
                                   className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none font-mono"
                                   value={inlineRuleEditForm.matchText}
-                                  onFocus={e => { e.target.select(); blurCancel() }}
-                                  onBlur={blurSave}
+                                  onFocus={e => e.target.select()}
                                   onChange={e => setInlineRuleEditForm(v => ({ ...v, matchText: e.target.value }))}
-                                  onKeyDown={e => {
-                                    if (e.key === 'Enter') { e.preventDefault(); inlineRuleFieldRef.current?.focus() }
-                                    if (e.key === 'Escape') cancelInlineRuleEdit()
-                                  }}
+                                  onKeyDown={e => { if (e.key === 'Enter') saveInlineRuleEdit(); if (e.key === 'Escape') cancelInlineRuleEdit() }}
                                 />
                               </td>
-                              {/* In Field — ArrowLeft → Matches, ArrowRight → Category */}
+                             <td className="py-1.5 pr-2">
+                                <input
+                                  ref={inlineRuleMatchRef}
+                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none font-mono"
+                                  value={inlineRuleEditForm.matchText}
+                                  onFocus={e => e.target.select()}
+                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, matchText: e.target.value }))}
+                                  onKeyDown={e => { if (e.key === 'Enter') saveInlineRuleEdit(); if (e.key === 'Escape') cancelInlineRuleEdit() }}
+                                />
+                              </td>
                               <td className="py-1.5 pr-2">
-                                <select
-                                  ref={inlineRuleFieldRef}
-                                  className="px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
-                                  value={inlineRuleEditForm.matchField}
-                                  onFocus={blurCancel}
-                                  onBlur={blurSave}
-                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, matchField: e.target.value as 'merchant' | 'notes' }))}
-                                  onKeyDown={e => {
-                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineRuleMatchRef.current?.focus() }
-                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineRuleCatRef.current?.focus() }
-                                    if (e.key === 'Enter')      { e.preventDefault(); inlineRuleCatRef.current?.focus() }
-                                    if (e.key === 'Escape')     cancelInlineRuleEdit()
-                                  }}
-                                >
+                                <select className="px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineRuleEditForm.matchField} onChange={e => setInlineRuleEditForm(v => ({ ...v, matchField: e.target.value as 'merchant' | 'notes' }))}>
                                   <option value="merchant">Merchant</option>
                                   <option value="notes">Notes</option>
                                 </select>
                               </td>
-                              {/* Assign to Category — ArrowLeft → In Field, ArrowRight → Type */}
                               <td className="py-1.5 pr-2">
-                                <select
-                                  ref={inlineRuleCatRef}
-                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
-                                  value={inlineRuleEditForm.categoryId}
-                                  onFocus={blurCancel}
-                                  onBlur={blurSave}
-                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, categoryId: e.target.value }))}
-                                  onKeyDown={e => {
-                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineRuleFieldRef.current?.focus() }
-                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineRuleTypeRef.current?.focus() }
-                                    if (e.key === 'Enter')      { e.preventDefault(); inlineRuleTypeRef.current?.focus() }
-                                    if (e.key === 'Escape')     cancelInlineRuleEdit()
-                                  }}
-                                >
+                                <select className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineRuleEditForm.categoryId} onChange={e => setInlineRuleEditForm(v => ({ ...v, categoryId: e.target.value }))}>
                                   <option value="">— none —</option>
                                   {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                 </select>
                               </td>
-                              {/* Type Filter — ArrowLeft → Category, ArrowRight/Enter → Save */}
                               <td className="py-1.5 pr-2">
-                                <select
-                                  ref={inlineRuleTypeRef}
-                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
-                                  value={inlineRuleEditForm.type}
-                                  onFocus={blurCancel}
-                                  onBlur={blurSave}
-                                  onChange={e => setInlineRuleEditForm(v => ({ ...v, type: e.target.value as TransactionType | '' }))}
-                                  onKeyDown={e => {
-                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineRuleCatRef.current?.focus() }
-                                    if (e.key === 'ArrowRight') { e.preventDefault(); blurCancel(); inlineRuleSaveRef.current?.focus() }
-                                    if (e.key === 'Enter')      { e.preventDefault(); blurCancel(); saveInlineRuleEdit() }
-                                    if (e.key === 'Escape')     cancelInlineRuleEdit()
-                                  }}
-                                >
+                                <select className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none" value={inlineRuleEditForm.type} onChange={e => setInlineRuleEditForm(v => ({ ...v, type: e.target.value as TransactionType | '' }))}>
                                   <option value="">— any —</option>
                                   {TXN_TYPES.map(t => <option key={t} value={t}>{TXN_TYPE_LABELS[t]}</option>)}
                                 </select>
                               </td>
                               <td className="py-1.5 whitespace-nowrap space-x-2">
-                                <button
-                                  ref={inlineRuleSaveRef}
-                                  className="text-blue-400 hover:text-blue-300 text-xs"
-                                  onClick={() => { blurCancel(); saveInlineRuleEdit() }}
-                                >Save</button>
-                                <button className="text-slate-400 hover:text-slate-300 text-xs" onClick={() => { blurCancel(); cancelInlineRuleEdit() }}>Cancel</button>
+                                <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={saveInlineRuleEdit}>Save</button>
+                                <button className="text-slate-400 hover:text-slate-300 text-xs" onClick={cancelInlineRuleEdit}>Cancel</button>
                               </td>
                             </tr>
                           )
                         }
-                      const usageCount = transactions.filter(tx => tx.appliedByRule === r.id).length
                         return (
                           <tr key={r.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedRuleId === r.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
                             <td className="py-2 pr-3 font-medium">{r.name}</td>
@@ -3824,11 +3439,6 @@ export default function App() {
                             <td className="py-2 pr-3 text-slate-400 text-xs capitalize">{r.matchField}</td>
                             <td className="py-2 pr-3 text-xs">{cat ? <span className="text-slate-400">{cat.name}</span> : <span className="text-red-400">missing</span>}</td>
                             <td className="py-2 pr-3 text-slate-400 text-xs">{r.type ? TXN_TYPE_LABELS[r.type] : '—'}</td>
-                            <td className="py-2 pr-3 text-xs">
-                              {usageCount > 0 && (
-                                <span className="text-indigo-400 bg-indigo-900/30 border border-indigo-700/40 px-1.5 py-0.5 rounded text-[10px]">Used {usageCount}</span>
-                              )}
-                            </td>
                             <td className="py-2 whitespace-nowrap space-x-2">
                            <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
                                 setInlineRuleEditId(r.id)
@@ -3837,7 +3447,6 @@ export default function App() {
                               }}>Edit</button>
                              <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => {
                                 const deletedId = r.id
-                                const deletedName = r.name
                                 setRulesWithHistory(prev => prev.filter(x => x.id !== deletedId))
                                 // V8.6 — When a rule is deleted, clear the category AND the badge on any
                                 // transaction that the rule assigned and the user hasn't manually changed
@@ -3848,7 +3457,6 @@ export default function App() {
                                     ? { ...tx, categoryId: undefined, appliedByRule: undefined }
                                     : tx
                                 ))
-                                showUndoableToast(`Deleted rule "${deletedName}".`, undoRule)
                               }}>Delete</button>
                             </td>
                           </tr>
@@ -3858,10 +3466,7 @@ export default function App() {
                   </table>
                 </div>
               ) : (
-                <div className="mt-3 rounded-lg border border-slate-700/50 bg-slate-800/40 px-4 py-3 text-center">
-                  <p className="text-slate-400 text-sm font-medium">No rules yet</p>
-                  <p className="text-slate-500 text-xs mt-0.5">Add a rule above to auto-categorize new transactions by merchant name or notes.</p>
-                </div>
+                <p className="mt-3 text-sm text-slate-500">No rules yet. Add a rule above to auto-categorize new transactions.</p>
               )}
             </Card>
           </section>
@@ -3891,7 +3496,7 @@ export default function App() {
                     <div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div>
                     <div className="flex gap-2">
                       <button className="text-blue-300" onClick={() => { setScenario(s.scenarios); setPeriod(s.period) }}>Load</button>
-                      <button className="text-red-300" onClick={() => { setSavedScenarios(prev => prev.filter(x => x.name !== s.name)); showToast(`Deleted scenario set "${s.name}".`) }}>Delete</button>
+                      <button className="text-red-300" onClick={() => setSavedScenarios(prev => prev.filter(x => x.name !== s.name))}>Delete</button>
                     </div>
                   </div>
                 ))}
@@ -4121,7 +3726,7 @@ export default function App() {
                 Redo
               </button>
               <button
-                onClick={() => { if (!targets.length) return; setTargetsWithHistory(() => []); showUndoableToast(`${targets.length} savings goal${targets.length !== 1 ? 's' : ''} cleared.`, undoTarget) }}
+                onClick={() => { if (!targets.length) return; setTargetsWithHistory(() => []) }}
                 className="rounded-lg px-3 py-1.5 text-sm bg-red-900 hover:bg-red-800 text-red-200"
               >
                 Clear Savings Goals
@@ -4140,7 +3745,7 @@ export default function App() {
                     <div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div>
                     <div className="flex gap-2">
                       <button className="text-blue-300" onClick={() => setTargets(s.targets)}>Load</button>
-                      <button className="text-red-300" onClick={() => { setSavedTargetSets(prev => prev.filter(x => x.name !== s.name)); showToast(`Deleted goal set "${s.name}".`) }}>Delete</button>
+                      <button className="text-red-300" onClick={() => setSavedTargetSets(prev => prev.filter(x => x.name !== s.name))}>Delete</button>
                     </div>
                   </div>
                 ))}
@@ -4155,10 +3760,7 @@ export default function App() {
                   {activeTargets.map(t => renderTargetCard(t))}
                 </div>
               ) : (
-                <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 p-5 text-center">
-                  <p className="text-slate-400 text-sm font-medium">No active savings goals</p>
-                  <p className="text-slate-500 text-xs mt-1">Create a goal above — set a name, target amount, and deadline to start tracking your progress.</p>
-                </div>
+                <p className="text-slate-500 text-sm">No active savings goals.</p>
               )}
             </section>
 
@@ -4207,27 +3809,53 @@ export default function App() {
       </div>
 
       {/* ── V9.0 CSV Import Modal ── */}
-      {csvModalOpen && (
+      {csvImportOpen && (
         <CsvImportModal
-          headers={csvHeaders}
-          mapping={csvMapping}
-          pipeline={csvPipeline}
-          parsing={csvParsing}
+          preview={csvImportPreview}
+          loading={csvImportLoading}
           error={csvImportError}
-          fileName={csvFileName}
-          includeDuplicates={csvIncludeDuplicates}
+          excluded={csvExcluded}
+          categories={categories}
           accounts={accounts}
-          fileInputRef={csvFileInputRef}
-          onFileSelect={handleCsvFile}
-          onMappingChange={rerunPipeline}
-          onIncludeDuplicatesChange={setCsvIncludeDuplicates}
+          onFileSelect={handleCsvFileSelect}
+          onDrop={handleCsvDrop}
+          onToggleCandidate={(key) => setCsvExcluded(prev => {
+            const next = new Set(prev)
+            if (next.has(key)) next.delete(key); else next.add(key)
+            return next
+          })}
+          onToggleAllDuplicates={(select) => setCsvExcluded(prev => {
+            const next = new Set(prev)
+            if (!csvImportPreview) return next
+            csvImportPreview.candidates.filter(c => c.status === 'duplicate').forEach(c => {
+              if (select) next.add(c.key); else next.delete(c.key)
+            })
+            return next
+          })}
           onCommit={commitCsvImport}
-          onCancel={closeCsvModal}
+          onCancel={closeCsvImport}
+          onResetPreview={() => { setCsvImportPreview(null); setCsvImportError('') }}
           onDownloadSample={downloadSampleCsv}
+          onUseSampleData={() => processCsvText(generateSampleCsvText())}
+          fileInputRef={csvFileInputRef}
         />
       )}
+      {/* Hidden file input for CSV selection */}
+      <input ref={csvFileInputRef} type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={handleCsvFileSelect} />
 
-      {/* Toast notification — top-left, amber/warning style, Undo when applicable, click anywhere to dismiss */}
+      {/* ── V9.0.1 Back-to-Top button ── */}
+      {showScrollTop && (
+        <button
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          className="fixed bottom-20 right-5 z-40 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-600 shadow-lg px-3 py-2 text-xs text-slate-300 transition-all duration-200 hover:-translate-y-0.5"
+          title="Back to top"
+          aria-label="Scroll to top"
+        >
+          ↑ Top
+        </button>
+      )}
+
+      {/* Toast notification — top-left, warning style, Undo when applicable */}
       {toast && (
         <div
           className="fixed top-5 left-5 z-50 flex items-center gap-3 rounded-xl border border-amber-600/60 bg-amber-950/90 px-4 py-3 shadow-2xl text-sm text-amber-100 transition-all duration-300 cursor-pointer max-w-sm"
@@ -4235,7 +3863,7 @@ export default function App() {
           onClick={() => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); setToast(null) }}
         >
           <span className="flex-1">{toast.message}</span>
-          {toast.onUndo && (
+          {toast.onUndo ? (
             <button
               className="ml-1 rounded bg-amber-700 hover:bg-amber-600 px-2 py-0.5 text-xs font-semibold transition-colors shrink-0"
               onClick={e => {
@@ -4247,9 +3875,221 @@ export default function App() {
             >
               Undo
             </button>
+          ) : (
+            <button
+              className="ml-1 rounded bg-amber-800 hover:bg-amber-700 px-2 py-0.5 text-xs transition-colors shrink-0"
+              onClick={e => { e.stopPropagation(); if (toastTimerRef.current) clearTimeout(toastTimerRef.current); setToast(null) }}
+            >
+              OK
+            </button>
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// ── V9.0 CSV Import Modal ─────────────────────────────────────────────────────
+
+interface CsvImportModalProps {
+  preview: ImportPreviewResult | null
+  loading: boolean
+  error: string
+  excluded: Set<string>
+  categories: Category[]
+  accounts: Account[]
+  onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void
+  onDrop: (e: React.DragEvent<HTMLDivElement>) => void
+  onToggleCandidate: (key: string) => void
+  onToggleAllDuplicates: (select: boolean) => void
+  onCommit: () => void
+  onCancel: () => void
+  onDownloadSample: () => void
+  onUseSampleData: () => void
+  fileInputRef: React.RefObject<HTMLInputElement>
+  onResetPreview: () => void
+}
+
+function CsvImportModal({
+  preview, loading, error, excluded, categories, accounts,
+  onFileSelect, onDrop, onToggleCandidate, onToggleAllDuplicates,
+  onCommit, onCancel, onDownloadSample, onUseSampleData, fileInputRef, onResetPreview,
+}: CsvImportModalProps) {
+  const [dragOver, setDragOver] = useState(false)
+
+  const accepted = preview?.candidates.filter(c => c.status !== 'invalid' && !excluded.has(c.key)) ?? []
+  const dupCount  = preview?.candidates.filter(c => c.status === 'duplicate').length ?? 0
+  const okCount   = preview?.candidates.filter(c => c.status === 'ok').length ?? 0
+  const allDupsExcluded = preview?.candidates.filter(c => c.status === 'duplicate').every(c => excluded.has(c.key)) ?? false
+
+  // Account context note: let user know which account imports will go to
+  const defaultAccount = accounts[0]
+  const accountNote = accounts.length === 0
+    ? 'No accounts set up yet — add an account first so imports can be assigned correctly.'
+    : accounts.length === 1
+      ? `Transactions will be assigned to: ${defaultAccount.name}. Account-specific import handling will be expanded in a future transfer/credit-card engine.`
+      : `Imports are assigned to the first account (${defaultAccount.name}) by default. Account-specific import handling will be expanded in a future transfer/credit-card engine.`
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-8 px-4 pb-8 bg-black/70 overflow-y-auto">
+      <div className="w-full max-w-3xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-slate-700">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-100">Import CSV</h2>
+            <p className="text-xs text-slate-400 mt-0.5">Import transactions from a bank or financial export.</p>
+          </div>
+          <button onClick={onCancel} className="text-slate-400 hover:text-slate-200 text-xl leading-none px-2">×</button>
+        </div>
+
+        <div className="p-5 space-y-4 flex-1 overflow-y-auto">
+          {/* Account context note */}
+          <div className="rounded-lg border border-slate-700/60 bg-slate-800/60 px-3 py-2.5 text-xs text-slate-400">
+            <span className="text-slate-300 font-medium">Account: </span>{accountNote}
+          </div>
+
+          {/* Drop zone */}
+          {!preview && (
+            <div
+              className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${dragOver ? 'border-blue-500 bg-blue-900/20' : 'border-slate-600 hover:border-slate-500 bg-slate-800/50'}`}
+              onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={e => { setDragOver(false); onDrop(e) }}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <div className="text-4xl mb-3">📄</div>
+              <p className="text-slate-200 font-medium mb-1">Drop a CSV file here</p>
+              <p className="text-slate-400 text-sm mb-4">or click to browse</p>
+              <p className="text-slate-500 text-xs">Supported headers: date, merchant/description, amount, type, notes</p>
+              <input type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={onFileSelect} ref={fileInputRef} />
+            </div>
+          )}
+
+          {loading && <div className="text-center py-8 text-slate-400">Parsing CSV…</div>}
+
+          {error && (
+            <div className="rounded-lg border border-red-700/50 bg-red-900/20 px-4 py-3 text-sm text-red-300">{error}</div>
+          )}
+
+          {!preview && !loading && (
+            <div className="flex gap-3 flex-wrap text-xs">
+              <button onClick={onDownloadSample} className="text-blue-400 hover:text-blue-300 underline underline-offset-2">Download sample CSV</button>
+              <span className="text-slate-600">·</span>
+              <button onClick={onUseSampleData} className="text-blue-400 hover:text-blue-300 underline underline-offset-2">Preview sample data without a file</button>
+            </div>
+          )}
+
+          {preview && !loading && (
+            <>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
+                  <div className="text-xs text-slate-400 mb-0.5">Ready to import</div>
+                  <div className="text-xl font-bold text-green-400">{accepted.length}</div>
+                </div>
+                <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
+                  <div className="text-xs text-slate-400 mb-0.5">Duplicates detected</div>
+                  <div className={`text-xl font-bold ${dupCount > 0 ? 'text-amber-300' : 'text-slate-400'}`}>{dupCount}</div>
+                </div>
+                <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
+                  <div className="text-xs text-slate-400 mb-0.5">Skipped (invalid)</div>
+                  <div className="text-xl font-bold text-slate-400">{preview.skippedRows.length}</div>
+                </div>
+              </div>
+
+              <div className="text-xs text-slate-500 flex flex-wrap gap-3">
+                <span>Detected columns:</span>
+                {(['date', 'merchant', 'amount', 'notes'] as const).map(k => (
+                  <span key={k}>
+                    <span className="text-slate-400">{k}:</span>{' '}
+                    <span className={preview.mapping[k] ? 'text-slate-300' : 'text-red-400'}>{preview.mapping[k] ?? 'not found'}</span>
+                  </span>
+                ))}
+              </div>
+
+              {dupCount > 0 && (
+                <div className="flex items-center gap-3 rounded-lg border border-amber-700/40 bg-amber-900/10 px-3 py-2.5">
+                  <span className="text-amber-300 text-sm flex-1">{dupCount} duplicate{dupCount !== 1 ? 's' : ''} detected — excluded by default.</span>
+                  <button className="text-xs text-amber-400 hover:text-amber-300 underline underline-offset-2" onClick={() => onToggleAllDuplicates(allDupsExcluded)}>
+                    {allDupsExcluded ? 'Include all duplicates' : 'Exclude all duplicates'}
+                  </button>
+                </div>
+              )}
+
+              <div className="overflow-x-auto rounded-lg border border-slate-700">
+                <table className="w-full text-xs min-w-[540px]">
+                  <thead>
+                    <tr className="text-left text-slate-400 border-b border-slate-700 bg-slate-800/80">
+                      <th className="px-2 py-2">✓</th>
+                      <th className="px-2 py-2">Date</th>
+                      <th className="px-2 py-2">Merchant</th>
+                      <th className="px-2 py-2 text-right">Amount</th>
+                      <th className="px-2 py-2">Type</th>
+                      <th className="px-2 py-2">Category</th>
+                      <th className="px-2 py-2">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preview.candidates.map((c: ImportCandidate) => {
+                      const isExcluded = excluded.has(c.key)
+                      const cat = categories.find(x => x.id === c.txn.categoryId)
+                      const rowBg =
+                        c.status === 'duplicate' && isExcluded  ? 'bg-slate-800/30 opacity-50' :
+                        c.status === 'duplicate' && !isExcluded ? 'bg-amber-900/10' :
+                        isExcluded ? 'bg-slate-800/30 opacity-50' : 'hover:bg-slate-800/40'
+                      return (
+                        <tr key={c.key} className={`border-b border-slate-800 transition-colors ${rowBg}`}>
+                          <td className="px-2 py-1.5">
+                            <input type="checkbox" checked={!isExcluded} disabled={c.status === 'invalid'} onChange={() => onToggleCandidate(c.key)} className="rounded accent-blue-500" />
+                          </td>
+                          <td className="px-2 py-1.5 text-slate-300 whitespace-nowrap">{c.txn.date}</td>
+                          <td className="px-2 py-1.5 font-medium text-slate-200 max-w-[130px] truncate">{c.txn.merchant}</td>
+                          <td className="px-2 py-1.5 text-right font-semibold text-slate-100">{currency(c.txn.amount)}</td>
+                          <td className="px-2 py-1.5 text-slate-400 capitalize">{c.txn.type}</td>
+                          <td className="px-2 py-1.5 text-slate-400">
+                            {cat ? <span>{cat.name}{c.txn.appliedByRule && <span className="ml-1 text-[9px] text-indigo-400"> Rule</span>}</span> : '—'}
+                          </td>
+                          <td className="px-2 py-1.5">
+                            {c.status === 'ok'        && <span className="text-green-400">Ready</span>}
+                            {c.status === 'duplicate' && <span className="text-amber-300" title={c.statusReason}>Duplicate</span>}
+                            {c.status === 'invalid'   && <span className="text-red-400">Invalid</span>}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {(preview.mapping.date === null || preview.mapping.merchant === null || preview.mapping.amount === null) && (
+                <p className="text-xs text-amber-300">
+                  Some required columns could not be auto-detected. Make sure your CSV has headers named <span className="font-mono">date</span>, <span className="font-mono">merchant</span> (or <span className="font-mono">description</span>), and <span className="font-mono">amount</span>.{' '}
+                  <button onClick={onDownloadSample} className="underline text-blue-400 hover:text-blue-300">Download a sample CSV</button> to see the expected format.
+                </p>
+              )}
+
+              {okCount === 0 && dupCount === 0 && (
+                <p className="text-center text-slate-400 text-sm py-2">No importable rows found. Check your CSV format.</p>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-3 p-5 border-t border-slate-700 flex-wrap">
+          <div className="flex gap-2">
+            <button onClick={onCancel} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-2 text-sm transition-colors">Cancel</button>
+            {preview && (
+              <button onClick={onResetPreview} className="rounded-lg bg-slate-800 hover:bg-slate-700 px-4 py-2 text-sm text-slate-400 transition-colors border border-slate-700">
+                ← Choose different file
+              </button>
+            )}
+          </div>
+          {preview && accepted.length > 0 && (
+            <button onClick={onCommit} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-5 py-2 text-sm font-medium transition-colors">
+              Import {accepted.length} transaction{accepted.length !== 1 ? 's' : ''}
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   )
 }
@@ -4382,267 +4222,6 @@ function ActionCard({ title, description, onClick, tone = 'neutral' }: { title: 
       </div>
       <p className="text-xs text-slate-400 leading-relaxed">{description}</p>
     </button>
-  )
-}
-
-// ── V9.0 CSV Import Modal ─────────────────────────────────────────────────────
-
-type CsvImportModalProps = {
-  headers: string[]
-  mapping: ColumnMapping
-  pipeline: ImportPipelineResult | null
-  parsing: boolean
-  error: string
-  fileName: string
-  includeDuplicates: boolean
-  accounts: Account[]
-  fileInputRef: React.RefObject<HTMLInputElement | null>
-  onFileSelect: (file: File) => void
-  onMappingChange: (mapping: ColumnMapping) => void
-  onIncludeDuplicatesChange: (v: boolean) => void
-  onCommit: () => void
-  onCancel: () => void
-  onDownloadSample: () => void
-}
-
-function CsvImportModal({
-  headers, mapping, pipeline, parsing, error, fileName,
-  includeDuplicates, accounts, fileInputRef,
-  onFileSelect, onMappingChange, onIncludeDuplicatesChange,
-  onCommit, onCancel, onDownloadSample,
-}: CsvImportModalProps) {
-  const rows: ImportRow[] = pipeline?.importRows ?? []
-  const readyCount     = pipeline?.readyCount     ?? 0
-  const duplicateCount = pipeline?.duplicateCount ?? 0
-  const invalidCount   = pipeline?.invalidCount   ?? 0
-  const commitCount    = readyCount + (includeDuplicates ? duplicateCount : 0)
-
-  const hasMissingMapping = !mapping.date || !mapping.merchant || !mapping.amount
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
-      onClick={e => { if (e.target === e.currentTarget) onCancel() }}
-    >
-      <div className="w-full max-w-4xl max-h-[90vh] flex flex-col rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700 shrink-0">
-          <div>
-            <h2 className="text-lg font-semibold">Import CSV</h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Import transactions from a bank export, Mint, or any CSV file.
-            </p>
-          </div>
-          <div className="flex gap-2 items-center">
-            <button
-              onClick={onDownloadSample}
-              className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors"
-              title="Download a sample CSV to test the import flow"
-            >
-              ↓ Sample CSV
-            </button>
-            <button onClick={onCancel} className="text-slate-400 hover:text-slate-200 text-xl px-2">×</button>
-          </div>
-        </div>
-
-        {/* Scrollable body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 min-h-0">
-
-          {/* Step 1: File picker + drag/drop */}
-          <div
-            className="rounded-xl border-2 border-dashed border-slate-600 hover:border-blue-500/60 bg-slate-800/50 p-6 text-center transition-colors cursor-pointer"
-            onClick={() => fileInputRef.current?.click()}
-            onDragOver={e => e.preventDefault()}
-            onDrop={e => {
-              e.preventDefault()
-              const file = e.dataTransfer.files[0]
-              if (file) onFileSelect(file)
-            }}
-          >
-            <p className="text-slate-300 text-sm font-medium">
-              {fileName ? `📄 ${fileName}` : 'Drag & drop a CSV file, or click to browse'}
-            </p>
-            <p className="text-slate-500 text-xs mt-1">
-              Supports bank exports, Mint CSV, or any file with date, merchant, and amount columns.
-            </p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv,text/csv"
-              className="hidden"
-              onChange={e => {
-                const file = e.target.files?.[0]
-                if (file) onFileSelect(file)
-              }}
-            />
-          </div>
-
-          {/* Parsing indicator */}
-          {parsing && (
-            <p className="text-sm text-blue-400 text-center">Parsing CSV…</p>
-          )}
-
-          {/* Error */}
-          {error && (
-            <div className="rounded-lg border border-red-700/50 bg-red-900/30 px-4 py-3 text-sm text-red-300">
-              {error}
-            </div>
-          )}
-
-          {/* Step 2: Column mapping — only shown when headers are loaded */}
-          {headers.length > 0 && (
-            <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4 space-y-3">
-              <h3 className="text-sm font-semibold text-slate-200">Column Mapping</h3>
-              <p className="text-xs text-slate-400">Columns were auto-detected. Adjust if needed.</p>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                {(['date', 'merchant', 'amount', 'account', 'notes'] as (keyof ColumnMapping)[]).map(field => (
-                  <div key={field}>
-                    <label className="block text-xs text-slate-400 mb-1 capitalize">
-                      {field}{(field === 'date' || field === 'merchant' || field === 'amount') ? ' *' : ''}
-                    </label>
-                    <select
-                      className="w-full px-2 py-1.5 text-xs rounded bg-slate-700 border border-slate-600 focus:border-blue-500 focus:outline-none"
-                      value={mapping[field]}
-                      onChange={e => onMappingChange({ ...mapping, [field]: e.target.value })}
-                    >
-                      <option value="">— not mapped —</option>
-                      {headers.map(h => <option key={h} value={h}>{h}</option>)}
-                    </select>
-                  </div>
-                ))}
-              </div>
-              {hasMissingMapping && (
-                <p className="text-xs text-amber-300">
-                  Map the <strong>date</strong>, <strong>merchant</strong>, and <strong>amount</strong> columns to continue.
-                </p>
-              )}
-              {accounts.length === 0 && (
-                <p className="text-xs text-amber-300">
-                  No accounts found. Imported transactions won't have an account assigned — add one in the Accounts tab first.
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Step 3: Preview table */}
-          {pipeline && rows.length > 0 && !hasMissingMapping && (
-            <div className="rounded-xl border border-slate-700 bg-slate-800/50 p-4 space-y-3">
-              {/* Summary row */}
-              <div className="flex flex-wrap gap-3 items-center">
-                <h3 className="text-sm font-semibold text-slate-200">Preview</h3>
-                <span className="text-xs text-green-300 bg-green-900/40 border border-green-700/40 px-2 py-0.5 rounded">{readyCount} ready</span>
-                {duplicateCount > 0 && (
-                  <span className="text-xs text-amber-300 bg-amber-900/40 border border-amber-700/40 px-2 py-0.5 rounded">{duplicateCount} duplicate{duplicateCount !== 1 ? 's' : ''}</span>
-                )}
-                {invalidCount > 0 && (
-                  <span className="text-xs text-red-300 bg-red-900/40 border border-red-700/40 px-2 py-0.5 rounded">{invalidCount} skipped</span>
-                )}
-              </div>
-
-              {/* Duplicate opt-in */}
-              {duplicateCount > 0 && (
-                <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={includeDuplicates}
-                    onChange={e => onIncludeDuplicatesChange(e.target.checked)}
-                    className="accent-blue-500"
-                  />
-                  Also import {duplicateCount} possible duplicate{duplicateCount !== 1 ? 's' : ''}
-                </label>
-              )}
-
-              {/* Table */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="text-left text-slate-400 border-b border-slate-700">
-                      <th className="pb-1.5 pr-3">Status</th>
-                      <th className="pb-1.5 pr-3">Date</th>
-                      <th className="pb-1.5 pr-3">Merchant</th>
-                      <th className="pb-1.5 pr-3 text-right">Amount</th>
-                      <th className="pb-1.5 pr-3">Type</th>
-                      <th className="pb-1.5 pr-3">Category</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.slice(0, 100).map(row => (
-                      <tr
-                        key={row.index}
-                        className={`border-b border-slate-800 ${
-                          row.status === 'invalid' ? 'opacity-50' :
-                          row.status === 'duplicate' ? 'opacity-60' : ''
-                        }`}
-                      >
-                        <td className="py-1.5 pr-3">
-                          {row.status === 'ready'     && <span className="text-green-400">✓</span>}
-                          {row.status === 'duplicate' && <span className="text-amber-400" title="Possible duplicate">⚠ Dup</span>}
-                          {row.status === 'invalid'   && <span className="text-red-400" title={row.invalidReason}>✕ Skip</span>}
-                        </td>
-                        <td className="py-1.5 pr-3 text-slate-300 whitespace-nowrap">{row.date ?? row.raw[mapping.date] ?? '—'}</td>
-                        <td className="py-1.5 pr-3 font-medium max-w-[160px] truncate">{row.merchant ?? '—'}</td>
-                        <td className="py-1.5 pr-3 text-right text-slate-100">{row.amount !== undefined ? currency(row.amount) : '—'}</td>
-                        <td className="py-1.5 pr-3 text-slate-400 capitalize">{row.type ?? '—'}</td>
-                        <td className="py-1.5 pr-3 text-slate-400">
-                          {row.autoCategoryId
-                            ? <span className="text-indigo-300">Auto ✓</span>
-                            : <span className="text-slate-500">—</span>}
-                        </td>
-                      </tr>
-                    ))}
-                    {rows.length > 100 && (
-                      <tr>
-                        <td colSpan={6} className="py-2 text-center text-slate-500 text-xs">
-                          …and {rows.length - 100} more rows (all will be imported)
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {invalidCount > 0 && (
-                <p className="text-xs text-slate-500">
-                  Skipped rows have missing or unreadable date/merchant/amount values and will not be imported.
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Empty state after parse */}
-          {pipeline && rows.length === 0 && !error && (
-            <p className="text-sm text-slate-400 text-center py-4">
-              No importable rows found. Check the column mapping above.
-            </p>
-          )}
-        </div>
-
-        {/* Footer */}
-        <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-slate-700 shrink-0">
-          <button onClick={onCancel} className="rounded-lg px-4 py-2 text-sm bg-slate-700 hover:bg-slate-600 transition-colors">
-            Cancel
-          </button>
-          <div className="flex items-center gap-3">
-            {pipeline && commitCount > 0 && !hasMissingMapping && (
-              <span className="text-xs text-slate-400">
-                Will import <span className="text-slate-200 font-semibold">{commitCount}</span> transaction{commitCount !== 1 ? 's' : ''}
-              </span>
-            )}
-            <button
-              onClick={onCommit}
-              disabled={!pipeline || commitCount === 0 || hasMissingMapping}
-              className={`rounded-lg px-5 py-2 text-sm font-semibold transition-colors ${
-                !pipeline || commitCount === 0 || hasMissingMapping
-                  ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                  : 'bg-blue-600 hover:bg-blue-500 text-white'
-              }`}
-            >
-              {pipeline && commitCount > 0 ? `Import ${commitCount} Transaction${commitCount !== 1 ? 's' : ''}` : 'Import'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
   )
 }
 
