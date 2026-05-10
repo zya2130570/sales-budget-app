@@ -406,6 +406,10 @@ export default function App() {
   const [accountHint, setAccountHint]         = useState('')
   const [txnHint, setTxnHint]                 = useState('')
 
+  // V8.6.3 — Uncategorized glow: suppressed once the user clicks the pill; re-arms on new items
+  const uncategorizedGlowSeenRef  = useRef(false)
+  const prevUncategorizedCountRef = useRef(0)
+
   // V8.3.1 — Inline transaction editing (rows edit in place; top form is create-only)
   const [inlineTxnEditId, setInlineTxnEditId] = useState<string | null>(null)
   const [inlineTxnEditForm, setInlineTxnEditForm] = useState({
@@ -630,6 +634,21 @@ export default function App() {
 
   // ── V7.3 Dashboard Status Engine ───────────────────────────────────────────
   const activeTargets = targets.filter(t => !t.completed && (t.goalAmount <= 0 || t.currentSaved < t.goalAmount))
+
+  // ── V8.6.3 Uncategorized expense count ──────────────────────────────────────
+  // Single source of truth: expense transactions with no budget category assigned.
+  // Income, Transfer, and Credit Card Payment are intentionally excluded.
+  const uncategorizedExpenseCount = transactions.filter(
+    tx => tx.type === 'expense' && !tx.categoryId
+  ).length
+  // Re-arm the glow whenever the count grows above the previous watermark
+  if (uncategorizedExpenseCount > prevUncategorizedCountRef.current) {
+    uncategorizedGlowSeenRef.current = false
+  }
+  prevUncategorizedCountRef.current = uncategorizedExpenseCount
+  // Glow is active when there are uncategorized expenses and the pill hasn't been clicked yet
+  const showUncategorizedGlow = uncategorizedExpenseCount > 0 && !uncategorizedGlowSeenRef.current
+
   const dashboardStatus: DashboardStatus = useMemo(() => {
     const base = computeDashboardStatus({
       totalMonthly: inc.totalMonthly,
@@ -2650,7 +2669,6 @@ export default function App() {
             {/* ── V8.5 Review queue summary ── */}
             {transactions.length > 0 && (() => {
               const range = getPeriodDateRange(period)
-              const uncatCount   = transactions.filter(tx => !tx.categoryId && tx.type === 'expense').length
               const periodSpend  = transactions
                 .filter(tx => tx.date >= range.start && tx.date <= range.end && (tx.type === 'expense' || tx.type === 'credit card payment'))
                 .reduce((s, tx) => s + tx.amount, 0)
@@ -2658,10 +2676,10 @@ export default function App() {
               return (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {[
-                    { label: 'Uncategorized',     value: uncatCount,                      alert: uncatCount > 0 },
-                    { label: 'Period Spend',       value: currency(periodSpend),           alert: false          },
-                    { label: 'Rules Applied',      value: rulesApplied,                    alert: false          },
-                    { label: 'Total Transactions', value: transactions.length,             alert: false          },
+                    { label: 'Uncategorized',     value: uncategorizedExpenseCount,          alert: uncategorizedExpenseCount > 0 },
+                    { label: 'Period Spend',       value: currency(periodSpend),              alert: false                          },
+                    { label: 'Rules Applied',      value: rulesApplied,                       alert: false                          },
+                    { label: 'Total Transactions', value: transactions.length,                alert: false                          },
                   ].map(({ label, value, alert }) => (
                     <div key={label} className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
                       <div className="text-xs text-slate-400 mb-1">{label}</div>
@@ -2826,22 +2844,32 @@ export default function App() {
               <Card title={`Transactions (${transactions.length})`}>
                 {/* Filter pills */}
                 <div className="flex gap-1.5 flex-wrap mb-3">
-                  {TXN_FILTER_OPTIONS.map(opt => (
-                    <button
-                      key={opt.value}
-                      onClick={() => setTxnFilter(opt.value)}
-                      className={`rounded-full px-3 py-0.5 text-xs transition-colors ${
-                        txnFilter === opt.value
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-slate-700 hover:bg-slate-600 text-slate-300'
-                      }${opt.value === 'uncategorized' && transactions.filter(tx => !tx.categoryId && tx.type === 'expense').length > 0 && txnFilter !== 'uncategorized' ? ' ring-1 ring-amber-500/60' : ''}`}
-                    >
-                      {opt.label}
-                      {opt.value === 'uncategorized' && transactions.filter(tx => !tx.categoryId && tx.type === 'expense').length > 0
-                        ? ` (${transactions.filter(tx => !tx.categoryId && tx.type === 'expense').length})`
-                        : ''}
-                    </button>
-                  ))}
+                  {TXN_FILTER_OPTIONS.map(opt => {
+                    const isUncategorized = opt.value === 'uncategorized'
+                    const isActive = txnFilter === opt.value
+                    const glowRing = isUncategorized && showUncategorizedGlow && !isActive
+                    return (
+                      <button
+                        key={opt.value}
+                        onClick={() => {
+                          setTxnFilter(opt.value)
+                          if (isUncategorized) uncategorizedGlowSeenRef.current = true
+                        }}
+                        className={[
+                          'rounded-full px-3 py-0.5 text-xs transition-colors',
+                          isActive
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-700 hover:bg-slate-600 text-slate-300',
+                          glowRing ? 'ring-1 ring-amber-400/70 shadow-[0_0_6px_rgba(251,191,36,0.22)]' : '',
+                        ].filter(Boolean).join(' ')}
+                      >
+                        {opt.label}
+                        {isUncategorized && uncategorizedExpenseCount > 0
+                          ? ` (${uncategorizedExpenseCount})`
+                          : ''}
+                      </button>
+                    )
+                  })}
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -2860,7 +2888,7 @@ export default function App() {
                     <tbody>
                       {[...transactions]
                         .filter(tx => {
-                          if (txnFilter === 'uncategorized') return !tx.categoryId
+                          if (txnFilter === 'uncategorized') return tx.type === 'expense' && !tx.categoryId
                           if (txnFilter === 'all') return true
                           return tx.type === txnFilter
                         })
@@ -3063,8 +3091,8 @@ export default function App() {
             )}
 
             {/* ── V8.5.1 Uncategorized Expenses ── only expense transactions need budget categories */}
-            {transactions.some(tx => !tx.categoryId && tx.type === 'expense') && (
-              <Card title={`Uncategorized Expenses (${transactions.filter(tx => !tx.categoryId && tx.type === 'expense').length})`}>
+            {uncategorizedExpenseCount > 0 && (
+              <Card title={`Uncategorized Expenses (${uncategorizedExpenseCount})`}>
                 <p className="text-xs text-slate-400 mb-3">
                   Only expenses need budget categories. Transfers, income, and credit card payments do not count toward Budget Actuals.
                 </p>
