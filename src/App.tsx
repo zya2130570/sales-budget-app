@@ -4266,8 +4266,7 @@ export default function App() {
                 ))}
               </div>
             </Card>
-              </div>
-            </Card>
+             
 
             {/* Active Targets */}
             <section className="space-y-3">
@@ -4320,7 +4319,7 @@ export default function App() {
                 )
               )}
             </section>
-          </section>
+        
         )}
 
       </div>
