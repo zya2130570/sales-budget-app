@@ -3378,9 +3378,9 @@ export default function App() {
                         <th className="pb-1.5 pr-3 font-medium">Date</th>
                         <th className="pb-1.5 pr-3 font-medium">Account</th>
                         <th className="pb-1.5 pr-3 font-medium">Merchant</th>
+                        <th className="pb-1.5 pr-3 font-medium text-right">Amount</th>
                         <th className="pb-1.5 pr-3 font-medium">Type</th>
                         <th className="pb-1.5 pr-3 font-medium">Category</th>
-                        <th className="pb-1.5 pr-3 font-medium text-right">Amount</th>
                         <th className="pb-1.5 pr-3 font-medium">Notes</th>
                         <th className="pb-1.5" />
                       </tr>
@@ -3431,6 +3431,7 @@ export default function App() {
                                   onFocus={cancelBlurSave}
                                   onBlur={scheduleBlurSave}
                                   onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); const dateInput = e.currentTarget.closest('tr')?.querySelector('input[type="date"]') as HTMLInputElement | null; dateInput?.focus(); return }
                                     if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnMerchantRef.current?.focus(); inlineTxnMerchantRef.current?.select(); return }
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
                                     if (e.key === 'Escape') cancelInlineTxnEdit()
@@ -3568,6 +3569,9 @@ export default function App() {
                             <td className="py-2 pr-3 text-slate-300 text-xs whitespace-nowrap">{tx.date}</td>
                             <td className="py-2 pr-3 text-slate-400 text-xs">{acct?.name ?? '—'}</td>
                             <td className="py-2 pr-3 font-medium">{tx.merchant}</td>
+                            <td className={`py-2 pr-3 text-right font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-100'}`}>
+                              {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : ''}{currency(tx.amount)}
+                            </td>
                             <td className="py-2 pr-3">
                               <span className={`text-xs px-1.5 py-0.5 rounded ${txTypeColor}`}>{TXN_TYPE_LABELS[tx.type]}</span>
                             </td>
@@ -3579,9 +3583,6 @@ export default function App() {
                               {tx.importedAt && (
                                 <span className="ml-1.5 text-[9px] text-violet-400 bg-violet-900/40 border border-violet-700/40 px-1 py-0.5 rounded">CSV Import</span>
                               )}
-                            </td>
-                            <td className={`py-2 pr-3 text-right font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-100'}`}>
-                              {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : ''}{currency(tx.amount)}
                             </td>
                             <td className="py-2 pr-3 text-slate-500 text-xs max-w-[100px] truncate">{tx.notes ?? '—'}</td>
                             <td className="py-2 whitespace-nowrap space-x-2">
@@ -4205,10 +4206,17 @@ export default function App() {
                       if (!n) return
                       setSavedTargetSets(prev => [{ name: n, targets, savedAt: new Date().toISOString() }, ...prev.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
                       setTargetSetName('')
+                      showToast(`Saved goal set "${n}".`)
                     }
                   }}
                 />
-                <button className="rounded bg-blue-600" onClick={() => { const n = targetSetName.trim(); if (!n) return; setSavedTargetSets(prev => [{ name: n, targets, savedAt: new Date().toISOString() }, ...prev.filter(s => s.name.toLowerCase() !== n.toLowerCase())]); setTargetSetName('') }}>Save</button>
+                <button className="rounded bg-blue-600" onClick={() => {
+                  const n = targetSetName.trim()
+                  if (!n) return
+                  setSavedTargetSets(prev => [{ name: n, targets, savedAt: new Date().toISOString() }, ...prev.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
+                  setTargetSetName('')
+                  showToast(`Saved goal set "${n}".`)
+                }}>Save</button>
                 <div className="text-xs text-slate-400 self-center">Saved locally</div>
               </div>
               <div className="space-y-2 mt-2">
@@ -4227,12 +4235,16 @@ export default function App() {
                             if (!newName) return
                             setSavedTargetSets(prev => prev.map(x => x.name === s.name ? { ...x, name: newName } : x))
                             setEditingTargetSetName(null)
+                            showToast(`Renamed to "${newName}".`)
                           }
                           if (e.key === 'Escape') setEditingTargetSetName(null)
                         }}
                         onBlur={() => {
                           const newName = editingTargetSetRename.trim()
-                          if (newName && newName !== s.name) setSavedTargetSets(prev => prev.map(x => x.name === s.name ? { ...x, name: newName } : x))
+                          if (newName && newName !== s.name) {
+                            setSavedTargetSets(prev => prev.map(x => x.name === s.name ? { ...x, name: newName } : x))
+                            showToast(`Renamed to "${newName}".`)
+                          }
                           setEditingTargetSetName(null)
                         }}
                       />
@@ -4240,7 +4252,11 @@ export default function App() {
                       <div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div>
                     )}
                     <div className="flex gap-2 shrink-0">
-                      <button className="text-blue-300" onClick={() => setTargets(s.targets)}>Load</button>
+                      <button className="text-blue-300" onClick={() => {
+                        const isDifferent = JSON.stringify(s.targets) !== JSON.stringify(targets)
+                        setTargetsWithHistory(() => s.targets)
+                        if (isDifferent) showToast('Savings goal set loaded.')
+                      }}>Load</button>
                       {editingTargetSetName === s.name ? null : (
                         <button className="text-slate-300 hover:text-slate-100 text-xs" onClick={() => { setEditingTargetSetName(s.name); setEditingTargetSetRename(s.name) }}>Edit</button>
                       )}
@@ -4248,6 +4264,8 @@ export default function App() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </Card>
               </div>
             </Card>
 
