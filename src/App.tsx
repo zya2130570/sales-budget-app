@@ -197,6 +197,9 @@ export default function App() {
   const [savedScenarios, setSavedScenarios] = useState<SavedScenarioSet[]>([])
   const [targets, setTargets] = useState<Target[]>([])
   const [savedTargetSets, setSavedTargetSets] = useState<SavedTargetSet[]>([])
+  // V9.0.5 — undo/redo for savedTargetSets (save / rename actions)
+  const [savedTargetSetsHistory, setSavedTargetSetsHistory] = useState<SavedTargetSet[][]>([])
+  const [savedTargetSetsRedo, setSavedTargetSetsRedo] = useState<SavedTargetSet[][]>([])
   const [targetSetName, setTargetSetName] = useState('')
   const [editingTargetSetName, setEditingTargetSetName]       = useState<string | null>(null)
   const [editingTargetSetRename, setEditingTargetSetRename]   = useState('')
@@ -933,6 +936,33 @@ export default function App() {
   const cancelInlineCatEdit = () => {
     if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
     setInlineCatEditId(null)
+  }
+
+  // ── V9.0.5 Saved target sets undo/redo ────────────────────────────────────────
+  const setSavedTargetSetsWithHistory = (updater: (prev: SavedTargetSet[]) => SavedTargetSet[]) => {
+    setSavedTargetSets(prev => {
+      setSavedTargetSetsHistory(h => [...h.slice(-19), prev])
+      setSavedTargetSetsRedo([])
+      return updater(prev)
+    })
+  }
+  const undoTargetSets = () => {
+    setSavedTargetSetsHistory(h => {
+      if (!h.length) return h
+      const next = [...h]; const prior = next.pop()!
+      setSavedTargetSetsRedo(r => [...r.slice(-19), savedTargetSets])
+      setSavedTargetSets(prior)
+      return next
+    })
+  }
+  const redoTargetSets = () => {
+    setSavedTargetSetsRedo(r => {
+      if (!r.length) return r
+      const next = [...r]; const snap = next.pop()!
+      setSavedTargetSetsHistory(h => [...h.slice(-19), savedTargetSets])
+      setSavedTargetSets(snap)
+      return next
+    })
   }
 
   // ── V8 Transaction helpers ────────────────────────────────────────────────────
@@ -4204,66 +4234,92 @@ export default function App() {
                       e.preventDefault()
                       const n = targetSetName.trim()
                       if (!n) return
-                      setSavedTargetSets(prev => [{ name: n, targets, savedAt: new Date().toISOString() }, ...prev.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
+                      setSavedTargetSetsWithHistory(prev => [{ name: n, targets, savedAt: new Date().toISOString() }, ...prev.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
                       setTargetSetName('')
-                      showToast(`Saved goal set "${n}".`)
+                      showToast('Savings goal set saved.')
                     }
                   }}
                 />
                 <button className="rounded bg-blue-600" onClick={() => {
                   const n = targetSetName.trim()
                   if (!n) return
-                  setSavedTargetSets(prev => [{ name: n, targets, savedAt: new Date().toISOString() }, ...prev.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
+                  setSavedTargetSetsWithHistory(prev => [{ name: n, targets, savedAt: new Date().toISOString() }, ...prev.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
                   setTargetSetName('')
-                  showToast(`Saved goal set "${n}".`)
+                  showToast('Savings goal set saved.')
                 }}>Save</button>
                 <div className="text-xs text-slate-400 self-center">Saved locally</div>
               </div>
+              {/* Undo/redo row for set saves */}
+              {(savedTargetSetsHistory.length > 0 || savedTargetSetsRedo.length > 0) && (
+                <div className="flex gap-2 mt-2">
+                  <button onClick={undoTargetSets} disabled={!savedTargetSetsHistory.length} className={`rounded px-2 py-1 text-xs ${savedTargetSetsHistory.length ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>Undo</button>
+                  <button onClick={redoTargetSets} disabled={!savedTargetSetsRedo.length} className={`rounded px-2 py-1 text-xs ${savedTargetSetsRedo.length ? 'bg-slate-700 hover:bg-slate-600 text-slate-300' : 'bg-slate-800 text-slate-600 cursor-not-allowed'}`}>Redo</button>
+                </div>
+              )}
               <div className="space-y-2 mt-2">
-                {savedTargetSets.map(s => (
-                  <div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between items-center">
-                    {editingTargetSetName === s.name ? (
-                      <input
-                        className="flex-1 mr-2 p-1 rounded bg-slate-800 border border-blue-500 text-sm focus:outline-none"
-                        value={editingTargetSetRename}
-                        autoFocus
-                        onChange={e => setEditingTargetSetRename(e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter') {
-                            e.preventDefault()
+                {savedTargetSets.map(s => {
+                  const isRenaming = editingTargetSetName === s.name
+                  return (
+                    <div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between items-center gap-2">
+                      {isRenaming ? (
+                        <input
+                          className="flex-1 p-1 rounded bg-slate-800 border border-blue-500 text-sm focus:outline-none min-w-0"
+                          value={editingTargetSetRename}
+                          autoFocus
+                          onChange={e => setEditingTargetSetRename(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              const newName = editingTargetSetRename.trim()
+                              if (!newName) return
+                              setSavedTargetSetsWithHistory(prev => prev.map(x => x.name === s.name ? { ...x, name: newName } : x))
+                              setEditingTargetSetName(null)
+                              showToast(`Renamed to "${newName}".`)
+                            }
+                            if (e.key === 'Escape') setEditingTargetSetName(null)
+                          }}
+                          onBlur={() => {
                             const newName = editingTargetSetRename.trim()
-                            if (!newName) return
-                            setSavedTargetSets(prev => prev.map(x => x.name === s.name ? { ...x, name: newName } : x))
+                            if (newName && newName !== s.name) {
+                              setSavedTargetSetsWithHistory(prev => prev.map(x => x.name === s.name ? { ...x, name: newName } : x))
+                              showToast(`Renamed to "${newName}".`)
+                            }
                             setEditingTargetSetName(null)
-                            showToast(`Renamed to "${newName}".`)
-                          }
-                          if (e.key === 'Escape') setEditingTargetSetName(null)
-                        }}
-                        onBlur={() => {
-                          const newName = editingTargetSetRename.trim()
-                          if (newName && newName !== s.name) {
-                            setSavedTargetSets(prev => prev.map(x => x.name === s.name ? { ...x, name: newName } : x))
-                            showToast(`Renamed to "${newName}".`)
-                          }
-                          setEditingTargetSetName(null)
-                        }}
-                      />
-                    ) : (
-                      <div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div>
-                    )}
-                    <div className="flex gap-2 shrink-0">
-                      <button className="text-blue-300" onClick={() => {
-                        const isDifferent = JSON.stringify(s.targets) !== JSON.stringify(targets)
-                        setTargetsWithHistory(() => s.targets)
-                        if (isDifferent) showToast('Savings goal set loaded.')
-                      }}>Load</button>
-                      {editingTargetSetName === s.name ? null : (
-                        <button className="text-slate-300 hover:text-slate-100 text-xs" onClick={() => { setEditingTargetSetName(s.name); setEditingTargetSetRename(s.name) }}>Edit</button>
+                          }}
+                        />
+                      ) : (
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{s.name}</div>
+                          <div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div>
+                        </div>
                       )}
-                      <button className="text-red-300" onClick={() => setSavedTargetSets(prev => prev.filter(x => x.name !== s.name))}>Delete</button>
+                      <div className="flex gap-2 shrink-0">
+                        {isRenaming ? (
+                          <>
+                            <button className="text-green-400 hover:text-green-300 text-xs" onClick={() => {
+                              const newName = editingTargetSetRename.trim()
+                              if (!newName) return
+                              setSavedTargetSetsWithHistory(prev => prev.map(x => x.name === s.name ? { ...x, name: newName } : x))
+                              setEditingTargetSetName(null)
+                              showToast(`Renamed to "${newName}".`)
+                            }}>Save</button>
+                            <button className="text-slate-400 hover:text-slate-200 text-xs" onClick={() => setEditingTargetSetName(null)}>Cancel</button>
+                          </>
+                        ) : (
+                          <>
+                            <button className="text-blue-300 hover:text-blue-200 text-xs" onClick={() => {
+                              const isDifferent = JSON.stringify(s.targets) !== JSON.stringify(targets)
+                              setTargetsWithHistory(() => s.targets)
+                              if (isDifferent) showToast('Savings goal set loaded.')
+                            }}>Load</button>
+                            <button className="text-slate-300 hover:text-slate-100 text-xs" onClick={() => { setEditingTargetSetName(s.name); setEditingTargetSetRename(s.name) }}>Edit</button>
+                            <button className="text-red-300 hover:text-red-200 text-xs" onClick={() => setSavedTargetSetsWithHistory(prev => prev.filter(x => x.name !== s.name))}>Delete</button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </Card>
              
