@@ -396,7 +396,6 @@ export default function App() {
   // V8 — Accounts
   const [accounts, setAccounts]               = useState<Account[]>([])
   const [accountForm, setAccountForm]         = useState({ name: '', type: 'checking' as AccountType, balance: '', institution: '' })
-  const [editAccountId, setEditAccountId]     = useState<string | null>(null)
   const [accountHistory, setAccountHistory]   = useState<Account[][]>([])
   const [accountRedo, setAccountRedo]         = useState<Account[][]>([])
 
@@ -450,8 +449,17 @@ export default function App() {
   const [overwriteCategories, setOverwriteCategories] = useState(false)
   const [applyRulesMsg, setApplyRulesMsg]     = useState('')
 
-  // V9.1 — Budget category inline edit
-  const [inlineCatEditId, setInlineCatEditId]   = useState<string | null>(null)
+  // V9.1.1 — Income tab: separate period control + collapsible tax details
+  const [incomePeriod, setIncomePeriod] = useState<Period>('monthly')
+  const [taxDetailsOpen, setTaxDetailsOpen] = useState(false)
+
+  // V9.1.1 — Accounts inline edit state (separate from top create form)
+  const [inlineAccountEditId, setInlineAccountEditId] = useState<string | null>(null)
+  const [inlineAccountEditForm, setInlineAccountEditForm] = useState({ name: '', type: 'checking' as AccountType, balance: '', institution: '' })
+  const inlineAccountNameRef    = useRef<HTMLInputElement>(null)
+  const inlineAccountTypeRef    = useRef<HTMLSelectElement>(null)
+  const inlineAccountBalanceRef = useRef<HTMLInputElement>(null)
+  const inlineAccountInstRef    = useRef<HTMLInputElement>(null)
   const [inlineCatEditForm, setInlineCatEditForm] = useState<{
     name: string; type: CategoryType; amount: string; actual: string; actualAtStart: string
   }>({ name: '', type: 'fixed bill', amount: '', actual: '', actualAtStart: '' })
@@ -899,6 +907,21 @@ export default function App() {
     setEditAccountId(null)
     setAccountHint('')
   }
+
+  // V9.1.1 — Inline account edit helpers (row edits in place; top form stays create-only)
+  const saveInlineAccountEdit = () => {
+    if (!inlineAccountEditId) return
+    const name = inlineAccountEditForm.name.trim()
+    if (!name) return
+    const rawBalance = parseFloat(inlineAccountEditForm.balance) || 0
+    const balance = inlineAccountEditForm.type === 'credit card' && rawBalance > 0 ? -rawBalance : rawBalance
+    setAccountsWithHistory(prev => prev.map(a => a.id === inlineAccountEditId
+      ? { ...a, name, type: inlineAccountEditForm.type, balance, institution: inlineAccountEditForm.institution.trim() }
+      : a
+    ))
+    setInlineAccountEditId(null)
+  }
+  const cancelInlineAccountEdit = () => setInlineAccountEditId(null)
   const createOrSaveAccount = () => {
     const name = accountForm.name.trim()
     if (!name) { setTimedAccountHint('Enter an account name before adding.'); accountNameRef.current?.focus(); return }
@@ -906,17 +929,10 @@ export default function App() {
     // Credit cards carry debt-style balances — always ≤ 0
     const balance = accountForm.type === 'credit card' && rawBalance > 0 ? -rawBalance : rawBalance
     const institution = accountForm.institution.trim()
-    if (editAccountId) {
-      setAccountsWithHistory(prev => prev.map(a => a.id === editAccountId
-        ? { ...a, name, type: accountForm.type, balance, institution }
-        : a
-      ))
-    } else {
-      setAccountsWithHistory(prev => [
-        { id: crypto.randomUUID(), name, type: accountForm.type, balance, institution, createdAt: new Date().toISOString().slice(0, 10) },
-        ...prev,
-      ])
-    }
+    setAccountsWithHistory(prev => [
+      { id: crypto.randomUUID(), name, type: accountForm.type, balance, institution, createdAt: new Date().toISOString().slice(0, 10) },
+      ...prev,
+    ])
     clearAccountForm()
     accountNameRef.current?.focus()
   }
@@ -2180,79 +2196,91 @@ export default function App() {
                 </p>
               )}
             </Card>
-            {/* V9.1 — Arizona take-home estimate */}
+
+            {/* V9.1.1 — Period-tabbed income summary */}
+            <Card title="Income Summary">
+              <div className="flex gap-2 mb-4 flex-wrap">
+                {periods.map(p => (
+                  <Pill key={p} active={incomePeriod === p} onClick={() => setIncomePeriod(p)}>{labelPeriod(p)}</Pill>
+                ))}
+              </div>
+              {(() => {
+                const baseNet   = incomePeriod === 'weekly' ? inc.baseWeekly   : incomePeriod === 'bi-weekly' ? inc.baseBiWeekly  : incomePeriod === 'yearly' ? inc.baseMonthly * 12 : inc.baseMonthly
+                const commNet   = incomePeriod === 'weekly' ? inc.cWeekly      : incomePeriod === 'bi-weekly' ? inc.cBiWeekly     : incomePeriod === 'yearly' ? inc.cMonthly * 12    : inc.cMonthly
+                const totalNet  = incomePeriod === 'weekly' ? inc.totalWeekly  : incomePeriod === 'bi-weekly' ? inc.totalBiWeekly : incomePeriod === 'yearly' ? inc.totalMonthly * 12 : inc.totalMonthly
+                const hrlyNet   = inc.totalWeekly / HOURS_PER_WEEK
+                const pLabel    = labelPeriod(incomePeriod)
+                return (
+                  <div className="grid md:grid-cols-3 gap-3">
+                    <Metric title={`${pLabel} Base Income`} value={currency(baseNet)} />
+                    <Metric title={`${pLabel} Commission`} value={currency(commNet)} />
+                    <Metric title={`${pLabel} Total Take-Home`} value={currency(totalNet)} featured />
+                    <div className="rounded-xl border border-slate-700 bg-slate-800 p-3">
+                      <div className="text-xs text-slate-400 mb-1">Effective hourly net rate</div>
+                      <div className="text-xl font-bold text-slate-100">{currency(hrlyNet)}<span className="text-sm font-normal text-slate-400 ml-1">/ hr</span></div>
+                    </div>
+                    <div className="rounded-xl border border-slate-700 bg-slate-800 p-3">
+                      <div className="text-xs text-slate-400 mb-1">Commission as % of total</div>
+                      <div className={`text-xl font-bold ${dep > 55 ? 'text-red-300' : dep > 35 ? 'text-yellow-300' : 'text-green-400'}`}>{dep.toFixed(1)}%</div>
+                    </div>
+                    <div className="rounded-xl border border-slate-700 bg-slate-800 p-3">
+                      <div className="text-xs text-slate-400 mb-1">Annual Gross Salary</div>
+                      <div className="text-xl font-bold text-slate-100">{currency(grossSalary)}</div>
+                    </div>
+                  </div>
+                )
+              })()}
+            </Card>
+
+            {/* V9.1.1 — Simplified take-home estimate card */}
             {(() => {
               const bd = estimateTaxBreakdown(adjustedSalary)
+              const fedEffRate = bd.grossAnnual > 0 ? (bd.fedTax / bd.grossAnnual) * 100 : 0
               return (
                 <Card title="Estimated Take-Home (Arizona, Single Filer)">
-                  <p className="text-xs text-slate-400 mb-3">
-                    Take-home pay is estimated automatically using simplified 2025 federal, Arizona state, and FICA assumptions. This is an estimate — not certified tax advice.
+                  <p className="text-xs text-slate-400 mb-4">
+                    Estimated using simplified federal brackets, Arizona's 2.5% flat state tax, and FICA. Actual paycheck withholding may differ.
                   </p>
-                  <div className="grid md:grid-cols-2 gap-3 mb-3">
+                  <div className="grid md:grid-cols-2 gap-3 mb-4">
                     <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
                       <div className="text-xs text-slate-400 mb-1">Estimated Annual Gross</div>
                       <div className="text-lg font-bold text-slate-200">{currency(bd.grossAnnual)}</div>
                     </div>
                     <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-1">Est. Effective Take-Home Rate</div>
-                      <div className="text-lg font-bold text-green-400">{(bd.takeHomeRate * 100).toFixed(1)}%</div>
-                    </div>
-                    <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-1">Est. Annual Take-Home</div>
+                      <div className="text-xs text-slate-400 mb-1">Estimated Annual Take-Home</div>
                       <div className="text-lg font-bold text-slate-200">{currency(bd.takeHomeAnnual)}</div>
                     </div>
                     <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-1">Est. Effective Tax Rate</div>
-                      <div className="text-lg font-bold text-amber-400">{(bd.effectiveRate * 100).toFixed(1)}%</div>
+                      <div className="text-xs text-slate-400 mb-1">Effective Take-Home Rate</div>
+                      <div className="text-lg font-bold text-green-400">{(bd.takeHomeRate * 100).toFixed(1)}%</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
+                      <div className="text-xs text-slate-400 mb-1">Effective Withholding Rate</div>
+                      <div className="text-lg font-bold text-slate-300">{(bd.effectiveRate * 100).toFixed(1)}%</div>
                     </div>
                   </div>
-                  <div className="space-y-0.5">
-                    <Row l="Federal income tax (est.)" v={currency(bd.fedTax)} valueClass="text-slate-300" />
-                    <Row l="Arizona state tax @ 2.5%" v={currency(bd.azTax)} valueClass="text-slate-300" />
-                    <Row l="Social Security (6.2%)" v={currency(bd.ssTax)} valueClass="text-slate-300" />
-                    <Row l="Medicare (1.45%)" v={currency(bd.medicareTax)} valueClass="text-slate-300" />
-                    <Row l="Total estimated withholding" v={currency(bd.totalTax)} valueClass="text-amber-300" />
-                  </div>
-                  <div className="mt-3 pt-3 border-t border-slate-700/60 grid md:grid-cols-3 gap-2">
-                    <div className="text-center">
-                      <div className="text-xs text-slate-400 mb-0.5">Weekly take-home</div>
-                      <div className="font-semibold text-slate-200">{currency(bd.takeHomeAnnual / 52)}</div>
+
+                  {/* Collapsible tax breakdown */}
+                  <button
+                    className="text-xs text-slate-400 hover:text-slate-200 transition-colors flex items-center gap-1.5"
+                    onClick={() => setTaxDetailsOpen(v => !v)}
+                  >
+                    <span>{taxDetailsOpen ? '▾' : '▸'}</span>
+                    <span>{taxDetailsOpen ? 'Hide' : 'Show'} tax estimate details</span>
+                  </button>
+                  {taxDetailsOpen && (
+                    <div className="mt-3 pt-3 border-t border-slate-700/50 space-y-0.5">
+                      <Row l="Federal income tax (progressive estimate)" v={currency(bd.fedTax)} valueClass="text-slate-300" />
+                      <Row l={`Federal effective rate`} v={`${fedEffRate.toFixed(1)}%`} valueClass="text-slate-400" />
+                      <Row l="Arizona state tax (2.5%)" v={currency(bd.azTax)} valueClass="text-slate-300" />
+                      <Row l="Social Security (6.2%)" v={currency(bd.ssTax)} valueClass="text-slate-300" />
+                      <Row l="Medicare (1.45%)" v={currency(bd.medicareTax)} valueClass="text-slate-300" />
+                      <Row l="Total estimated withholding" v={currency(bd.totalTax)} valueClass="text-slate-300" />
                     </div>
-                    <div className="text-center">
-                      <div className="text-xs text-slate-400 mb-0.5">Bi-weekly take-home</div>
-                      <div className="font-semibold text-slate-200">{currency(bd.takeHomeAnnual / 26)}</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-xs text-slate-400 mb-0.5">Monthly take-home</div>
-                      <div className="font-semibold text-slate-200">{currency(bd.takeHomeAnnual / 12)}</div>
-                    </div>
-                  </div>
+                  )}
                 </Card>
               )
             })()}
-            <div className="grid md:grid-cols-2 gap-4">
-              <Card title="Base Income">
-                <Row l="Weekly Net" v={currency(inc.baseWeekly)} />
-                <Row l="Bi-weekly Net" v={currency(inc.baseBiWeekly)} />
-                <Row l="Monthly Net" v={currency(inc.baseMonthly)} />
-              </Card>
-              <Card title="Commission Income">
-                <Row l="Weekly Commission" v={currency(inc.cWeekly)} />
-                <Row l="Bi-weekly Commission" v={currency(inc.cBiWeekly)} />
-                <Row l="Monthly Commission" v={currency(inc.cMonthly)} />
-              </Card>
-              <Card title="Total Income">
-                <Row l="Weekly Net" v={currency(inc.totalWeekly)} />
-                <Row l="Bi-weekly Net" v={currency(inc.totalBiWeekly)} />
-                <Row l="Monthly Net" v={currency(inc.totalMonthly)} />
-                <Row l="Gross Salary (annual)" v={currency(grossSalary)} />
-              </Card>
-              <Card title="Efficiency Metrics">
-                <Row l="Effective hourly net rate" v={currency(inc.totalWeekly / HOURS_PER_WEEK) + ' per hour'} />
-                <Row l="Commission as % of total" v={`${dep.toFixed(1)}%`} />
-                <Row l="Commission per hour" v={currency(inc.cWeekly / HOURS_PER_WEEK)} />
-              </Card>
-            </div>
           </section>
         )}
 
@@ -2561,7 +2589,14 @@ export default function App() {
                               value={inlineCatEditForm.name}
                               onChange={e => setInlineCatEditForm(v => ({ ...v, name: e.target.value }))}
                               onKeyDown={e => {
-                                if (e.key === 'ArrowRight') { e.preventDefault(); inlineCatTypeRef.current?.focus() }
+                                if (e.key === 'ArrowRight') {
+                                  // Only move to Type when cursor is already at the end of the text
+                                  const el = e.currentTarget
+                                  if (el.selectionStart === el.value.length && el.selectionEnd === el.value.length) {
+                                    e.preventDefault()
+                                    inlineCatTypeRef.current?.focus()
+                                  }
+                                }
                                 if (e.key === 'Enter') { e.preventDefault(); inlineCatTypeRef.current?.focus() }
                                 if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
                               }}
@@ -2622,7 +2657,7 @@ export default function App() {
                                 onFocus={e => e.target.select()}
                                 onKeyDown={e => {
                                   if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineCatAmountRef.current?.focus() }
-                                  if (e.key === 'ArrowRight') { e.preventDefault(); inlineCatSaveRef.current?.focus() }
+                                  if (e.key === 'ArrowRight') { e.preventDefault(); saveInlineCatEdit() }
                                   if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit() }
                                   if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
                                 }}
@@ -2783,7 +2818,7 @@ export default function App() {
         {/* ── ACCOUNTS ── */}
         {tab === 'Accounts' && (
           <section className="space-y-4 transition-all duration-300">
-            <Card title={editAccountId ? 'Edit Account' : 'Add Account'} noHover>
+            <Card title="Add Account" noHover>
               <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
                 {/* Account Name */}
                 <div>
@@ -2874,20 +2909,15 @@ export default function App() {
               </div>
               <div className="flex gap-2 mt-3 flex-wrap">
                 <button onClick={createOrSaveAccount} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-1.5 text-sm transition-colors">
-                  {editAccountId ? 'Save Changes' : 'Add Account'}
+                  Add Account
                 </button>
-                {editAccountId
-                  ? <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Cancel</button>
-                  : <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
-                }
+                <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
                 <button onClick={undoAccount} disabled={!accountHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoAccount} disabled={!accountRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
-                {!editAccountId && accounts.length > 0 && (
+                {accounts.length > 0 && (
                   <button onClick={() => { if (!accounts.length) return; setAccountsWithHistory(() => []); showUndoableToast(`${accounts.length} account${accounts.length !== 1 ? 's' : ''} cleared.`, undoAccount) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
-                {!editAccountId && (
-                  <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
-                )}
+                <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
               </div>
               {accountHint && <p className="mt-2 text-sm text-amber-300">{accountHint}</p>}
             </Card>
@@ -2906,24 +2936,109 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {accounts.map(a => (
-                        <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedAccountId === a.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
-                          <td className="py-2 pr-4 font-medium">{a.name}</td>
-                          <td className="py-2 pr-4 text-slate-400">{ACCOUNT_TYPE_LABELS[a.type]}</td>
-                          <td className={`py-2 pr-4 text-right font-semibold ${a.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)}
-                          </td>
-                          <td className="py-2 pr-4 text-slate-400 text-xs">{a.institution || '—'}</td>
-                          <td className="py-2 whitespace-nowrap space-x-2">
-                          <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
-                              setEditAccountId(a.id)
-                              setAccountForm({ name: a.name, type: a.type, balance: a.balance === 0 ? '' : String(a.balance), institution: a.institution })
-                              setTimeout(() => { accountBalanceRef.current?.focus(); accountBalanceRef.current?.select() }, 0)
-                            }}>Edit</button>
-                            <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))}>Delete</button>
-                          </td>
-                        </tr>
-                      ))}
+                      {accounts.map(a => {
+                        if (inlineAccountEditId === a.id) {
+                          return (
+                            <tr key={a.id} className="border-b border-slate-700 bg-blue-950/20">
+                              <td className="py-1.5 pr-2">
+                                <input
+                                  ref={inlineAccountNameRef}
+                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineAccountEditForm.name}
+                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, name: e.target.value }))}
+                                  onFocus={e => e.target.select()}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') saveInlineAccountEdit()
+                                    if (e.key === 'Escape') cancelInlineAccountEdit()
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) {
+                                      e.preventDefault(); inlineAccountTypeRef.current?.focus()
+                                    }
+                                  }}
+                                />
+                              </td>
+                              <td className="py-1.5 pr-2">
+                                <select
+                                  ref={inlineAccountTypeRef}
+                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineAccountEditForm.type}
+                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, type: e.target.value as AccountType }))}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); inlineAccountBalanceRef.current?.focus() }
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineAccountBalanceRef.current?.focus() }
+                                    if (e.key === 'ArrowLeft') { e.preventDefault(); inlineAccountNameRef.current?.focus() }
+                                    if (e.key === 'Escape') cancelInlineAccountEdit()
+                                  }}
+                                >
+                                  {ACCOUNT_TYPES.map(t => <option key={t} value={t}>{ACCOUNT_TYPE_LABELS[t]}</option>)}
+                                </select>
+                              </td>
+                              <td className="py-1.5 pr-2 text-right">
+                                <input
+                                  ref={inlineAccountBalanceRef}
+                                  type="text"
+                                  inputMode="decimal"
+                                  className="w-24 px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none text-right"
+                                  value={inlineAccountEditForm.balance}
+                                  onChange={e => {
+                                    const raw = e.target.value.replace(/[^0-9.-]/g, '')
+                                    setInlineAccountEditForm(v => ({ ...v, balance: raw }))
+                                  }}
+                                  onFocus={e => e.target.select()}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); inlineAccountInstRef.current?.focus() }
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineAccountInstRef.current?.focus() }
+                                    if (e.key === 'ArrowLeft') { e.preventDefault(); inlineAccountTypeRef.current?.focus() }
+                                    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                      e.preventDefault()
+                                      const cur = parseFloat(inlineAccountEditForm.balance) || 0
+                                      const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
+                                      setInlineAccountEditForm(v => ({ ...v, balance: next === 0 ? '' : String(next) }))
+                                    }
+                                    if (e.key === 'Escape') cancelInlineAccountEdit()
+                                  }}
+                                />
+                              </td>
+                              <td className="py-1.5 pr-2">
+                                <input
+                                  ref={inlineAccountInstRef}
+                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineAccountEditForm.institution}
+                                  placeholder="optional"
+                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, institution: e.target.value }))}
+                                  onFocus={e => e.target.select()}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit() }
+                                    if (e.key === 'ArrowLeft') { e.preventDefault(); inlineAccountBalanceRef.current?.focus() }
+                                    if (e.key === 'Escape') cancelInlineAccountEdit()
+                                  }}
+                                />
+                              </td>
+                              <td className="py-1.5 whitespace-nowrap space-x-2">
+                                <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={saveInlineAccountEdit}>Save</button>
+                                <button className="text-slate-400 hover:text-slate-300 text-xs" onClick={cancelInlineAccountEdit}>Cancel</button>
+                              </td>
+                            </tr>
+                          )
+                        }
+                        return (
+                          <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedAccountId === a.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
+                            <td className="py-2 pr-4 font-medium">{a.name}</td>
+                            <td className="py-2 pr-4 text-slate-400">{ACCOUNT_TYPE_LABELS[a.type]}</td>
+                            <td className={`py-2 pr-4 text-right font-semibold ${a.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)}
+                            </td>
+                            <td className="py-2 pr-4 text-slate-400 text-xs">{a.institution || '—'}</td>
+                            <td className="py-2 whitespace-nowrap space-x-2">
+                              <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
+                                setInlineAccountEditId(a.id)
+                                setInlineAccountEditForm({ name: a.name, type: a.type, balance: a.balance === 0 ? '' : String(Math.abs(a.balance)), institution: a.institution })
+                                setTimeout(() => { inlineAccountBalanceRef.current?.focus(); inlineAccountBalanceRef.current?.select() }, 0)
+                              }}>Edit</button>
+                              <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))}>Delete</button>
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                     <tfoot>
                       <tr className="border-t border-slate-700">
@@ -3295,7 +3410,7 @@ export default function App() {
                                   {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                                 </select>
                               </td>
-                              {/* Merchant — ArrowRight moves to Type */}
+                              {/* Merchant — ArrowRight at end moves to Type; ArrowLeft at beginning moves to Account */}
                               <td className="py-1.5 pr-2">
                                 <input
                                   ref={inlineTxnMerchantRef}
@@ -3305,6 +3420,20 @@ export default function App() {
                                   onBlur={scheduleBlurSave}
                                   onChange={e => { setInlineTxnEditForm(v => ({ ...v, merchant: e.target.value })); setTxnDupWarning(false) }}
                                  onKeyDown={e => {
+  if (e.key === 'ArrowLeft') {
+    const el = e.currentTarget
+    if (el.selectionStart === 0 && el.selectionEnd === 0) {
+      // cursor is at the very beginning — move to Account
+      e.preventDefault()
+      // Account select is the previous sibling td; focus via ref traversal isn't available,
+      // so we locate it via the parent row's querySelectorAll
+      const row = el.closest('tr')
+      const selects = row?.querySelectorAll('select')
+      if (selects && selects.length > 0) {
+        ;(selects[0] as HTMLSelectElement).focus()
+      }
+    }
+  }
   if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
   if (e.key === 'Escape') cancelInlineTxnEdit()
 }}
@@ -4050,7 +4179,22 @@ export default function App() {
 
             <Card title="Savings Goal Sets" noHover>
               <div className="grid md:grid-cols-3 gap-2">
-                <input className="p-2 rounded bg-slate-800 border border-slate-600" value={targetSetName} onChange={(e) => setTargetSetName(e.target.value)} placeholder="Savings goal set name" />
+                <input
+                  className="p-2 rounded bg-slate-800 border border-slate-600"
+                  value={targetSetName}
+                  onChange={(e) => setTargetSetName(e.target.value)}
+                  placeholder="Savings goal set name"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      const n = targetSetName.trim()
+                      if (!n) return
+                      pushSetHistory(savedTargetSets)
+                      setSavedTargetSets([{ name: n, targets, savedAt: new Date().toISOString() }, ...savedTargetSets.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
+                      showToast('Savings goal set saved.')
+                    }
+                  }}
+                />
                 <button className="rounded bg-blue-600" onClick={() => {
                   const n = targetSetName.trim()
                   if (!n) return
