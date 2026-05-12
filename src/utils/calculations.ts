@@ -3,8 +3,74 @@ import type { Period, Target, Category, ScenarioName } from '../types'
 // --- Income / salary constants -----------------------------------------------
 
 export const BASE_SALARY = 40000
+/** @deprecated Use estimateAZTakeHomeRate() instead. Kept for potential fallback use. */
 export const TAKE_HOME_RATE = 0.8243
 export const HOURS_PER_WEEK = 45
+
+// --- V9.1 Arizona take-home estimation ----------------------------------------
+//
+// Simple progressive estimate for a W-2 employee in Arizona, single filer.
+// Assumptions:
+//   • Federal standard deduction: $15,000 (2025 single filer)
+//   • Federal income tax: 2025 brackets, progressive
+//   • Arizona state income tax: 2.5% flat rate (effective Jan 2023+)
+//   • Social Security: 6.2% on wages up to $176,100 (2025 wage base)
+//   • Medicare: 1.45%
+//   • Commission is treated identically to salary for withholding purposes.
+// This is an estimate, not certified tax advice.
+
+const FED_STD_DEDUCTION_2025 = 15000
+const AZ_FLAT_RATE = 0.025
+const SS_RATE = 0.062
+const SS_WAGE_BASE_2025 = 176100
+const MEDICARE_RATE = 0.0145
+
+// 2025 federal income tax brackets (single filer)
+const FED_BRACKETS_2025: Array<{ upTo: number; rate: number }> = [
+  { upTo: 11925,    rate: 0.10 },
+  { upTo: 48475,    rate: 0.12 },
+  { upTo: 103350,   rate: 0.22 },
+  { upTo: 197300,   rate: 0.24 },
+  { upTo: 250525,   rate: 0.32 },
+  { upTo: 626350,   rate: 0.35 },
+  { upTo: Infinity, rate: 0.37 },
+]
+
+function calcFederalTax(taxableIncome: number): number {
+  let tax = 0, prev = 0
+  for (const b of FED_BRACKETS_2025) {
+    if (taxableIncome <= 0) break
+    const width = b.upTo === Infinity ? taxableIncome : b.upTo - prev
+    const amount = Math.min(taxableIncome, width)
+    tax += amount * b.rate
+    taxableIncome -= amount
+    prev = b.upTo
+  }
+  return tax
+}
+
+/** Full estimated tax breakdown for a given annual gross salary (Arizona, single). */
+export function estimateTaxBreakdown(annualGross: number) {
+  if (annualGross <= 0) {
+    return { grossAnnual: 0, fedTax: 0, azTax: 0, ssTax: 0, medicareTax: 0, totalTax: 0, takeHomeAnnual: 0, takeHomeRate: 0.82, effectiveRate: 0 }
+  }
+  const fedTaxable  = Math.max(0, annualGross - FED_STD_DEDUCTION_2025)
+  const fedTax      = calcFederalTax(fedTaxable)
+  const azTax       = annualGross * AZ_FLAT_RATE
+  const ssTax       = Math.min(annualGross, SS_WAGE_BASE_2025) * SS_RATE
+  const medicareTax = annualGross * MEDICARE_RATE
+  const totalTax    = fedTax + azTax + ssTax + medicareTax
+  const takeHomeAnnual = Math.max(0, annualGross - totalTax)
+  const takeHomeRate   = takeHomeAnnual / annualGross
+  const effectiveRate  = totalTax / annualGross
+  return { grossAnnual: annualGross, fedTax, azTax, ssTax, medicareTax, totalTax, takeHomeAnnual, takeHomeRate, effectiveRate }
+}
+
+/** Estimated take-home rate for a given annual gross salary (Arizona, single filer). */
+export function estimateAZTakeHomeRate(annualGross: number): number {
+  if (annualGross <= 0) return TAKE_HOME_RATE
+  return estimateTaxBreakdown(annualGross).takeHomeRate
+}
 
 // --- Commission brackets ------------------------------------------------------
 
@@ -74,9 +140,12 @@ export function commission(gp: number): number {
 
 // --- Income breakdown ---------------------------------------------------------
 
-export function income(gp: number, adjustedSalary: number, takeHomeRate: number = TAKE_HOME_RATE) {
+export function income(gp: number, adjustedSalary: number) {
+  // Use dynamic Arizona single-filer estimate instead of a fixed flat rate.
+  // Commission is treated the same as salary for withholding purposes.
+  const takeHomeRate   = estimateAZTakeHomeRate(adjustedSalary)
   const baseGrossMonthly = adjustedSalary / 12
-  const baseMonthly = baseGrossMonthly * takeHomeRate
+  const baseMonthly    = baseGrossMonthly * takeHomeRate
   const c = commission(gp)
   const totalMonthly = baseMonthly + c
   return {
@@ -91,6 +160,7 @@ export function income(gp: number, adjustedSalary: number, takeHomeRate: number 
     totalWeekly:   ((adjustedSalary / 52) * takeHomeRate) + c / 4,
     totalBiWeekly: ((adjustedSalary / 26) * takeHomeRate) + c / 2,
     commissionPct: totalMonthly > 0 ? (c / totalMonthly) * 100 : 0,
+    takeHomeRate,
   }
 }
 
