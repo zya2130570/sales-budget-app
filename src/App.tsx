@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule, TakeHomeSettings } from './types'
-import { DEFAULT_TAKE_HOME_SETTINGS } from './types'
+import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule } from './types'
 import { currency, labelPeriod, formatDate } from './utils/formatting'
 import {
   BASE_SALARY,
@@ -14,7 +13,7 @@ import {
   computeTargetStatus,
   requiredForTarget,
   computeDashboardStatus,
-  TAKE_HOME_RATE,
+  estimateTaxBreakdown,
 } from './utils/calculations'
 import type { DashboardStatus } from './utils/calculations'
 import {
@@ -38,8 +37,6 @@ import {
   saveAccounts,
   saveTransactions,
   saveTransactionRules,
-  loadTakeHomeSettings,
-  saveTakeHomeSettings,
   runMigrations,
 } from './utils/storage'
 
@@ -130,7 +127,8 @@ function getPeriodDateRange(period: Period): { start: string; end: string } {
 const EXPENSE_MERCHANTS  = ['Target', 'Walmart', "Fry's", 'Shell', 'Chevron', 'Costco', 'Amazon', 'Starbucks', 'Chipotle', 'Uber', 'Best Buy', 'CVS', "McDonald's", 'Walgreens', 'Apple', 'Lyft']
 const INCOME_MERCHANTS   = ['Payroll', 'Direct Deposit', 'Paycheck', 'Bonus', 'Refund', 'Venmo Cashout', 'Tax Refund']
 const TRANSFER_MERCHANTS = ['Chase Transfer', 'Savings Transfer', 'Internal Transfer', 'Brokerage Transfer']
-// EXPENSE_MERCHANTS is the primary pool; no SAMPLE_MERCHANTS alias needed
+// Keep for backward-compat references (generateTenSamples uses it)
+const SAMPLE_MERCHANTS   = EXPENSE_MERCHANTS
 const SAMPLE_ACCOUNT_TEMPLATES: Array<{ name: string; type: AccountType; balance: number; institution: string }> = [
   { name: 'Chase Checking',       type: 'checking',    balance: 2500,   institution: 'Chase'            },
   { name: 'Ally Savings',         type: 'savings',     balance: 8500,   institution: 'Ally'             },
@@ -209,21 +207,6 @@ export default function App() {
   const [dashboardQuickTargetId, setDashboardQuickTargetId] = useState('')
   const [dashboardQuickAmount, setDashboardQuickAmount] = useState('')
   const [baseBumpsAchieved, setBaseBumpsAchieved] = useState(0)
-
-  // V9.1 — Take-home pay settings (lazy-init from localStorage so save effect doesn't race)
-  const [takeHomeSettings, setTakeHomeSettings] = useState<TakeHomeSettings>(() => {
-    const saved = loadTakeHomeSettings()
-    return saved ?? DEFAULT_TAKE_HOME_SETTINGS
-  })
-  // Local input strings for the settings form (avoids re-parsing on every keystroke)
-  const [thsRateInput, setThsRateInput] = useState(() =>
-    ((loadTakeHomeSettings()?.simpleRate ?? DEFAULT_TAKE_HOME_SETTINGS.simpleRate) * 100).toFixed(2)
-  )
-  const [thsManualInput, setThsManualInput] = useState(() => {
-    const s = loadTakeHomeSettings()
-    return (s && s.manualMonthlyNet > 0) ? String(s.manualMonthlyNet) : ''
-  })
-  const [thsHint, setThsHint] = useState('')
   const [budgetTitle, setBudgetTitle] = useState('')
   const [scenarioTitle, setScenarioTitle] = useState('')
   const [changeSummary, setChangeSummary] = useState<string[]>([])
@@ -468,20 +451,54 @@ export default function App() {
   const [overwriteCategories, setOverwriteCategories] = useState(false)
   const [applyRulesMsg, setApplyRulesMsg]     = useState('')
 
+  // V9.1 — Budget category inline edit
+  const [inlineCatEditId, setInlineCatEditId]   = useState<string | null>(null)
+  const [inlineCatEditForm, setInlineCatEditForm] = useState<{
+    name: string; type: CategoryType; amount: string; actual: string; actualAtStart: string
+  }>({ name: '', type: 'fixed bill', amount: '', actual: '', actualAtStart: '' })
+  const inlineCatRowRef    = useRef<HTMLTableRowElement | null>(null)
+  const inlineCatNameRef   = useRef<HTMLInputElement>(null)
+  const inlineCatTypeRef   = useRef<HTMLSelectElement>(null)
+  const inlineCatAmountRef = useRef<HTMLInputElement>(null)
+  const inlineCatActualRef = useRef<HTMLInputElement>(null)
+  const inlineCatSaveRef   = useRef<HTMLButtonElement>(null)
+
+  // V9.1 — Savings Goal Set rename state + undo history
+  const [editingSetIdx, setEditingSetIdx]   = useState<number | null>(null)
+  const [renameSetValue, setRenameSetValue] = useState('')
+  const [savedTargetSetsHistory, setSavedTargetSetsHistory] = useState<SavedTargetSet[][]>([])
+  const [savedTargetSetsRedo, setSavedTargetSetsRedo]       = useState<SavedTargetSet[][]>([])
+
+  const pushSetHistory = (prev: SavedTargetSet[]) => {
+    setSavedTargetSetsHistory(h => [...h.slice(-19), prev])
+    setSavedTargetSetsRedo([])
+  }
+  const undoSavedSets = () => {
+    setSavedTargetSetsHistory(h => {
+      if (!h.length) return h
+      const next = [...h]
+      const prior = next.pop()!
+      setSavedTargetSetsRedo(r => [...r.slice(-19), savedTargetSets])
+      setSavedTargetSets(prior)
+      return next
+    })
+  }
+  const redoSavedSets = () => {
+    setSavedTargetSetsRedo(r => {
+      if (!r.length) return r
+      const next = [...r]
+      const snap = next.pop()!
+      setSavedTargetSetsHistory(h => [...h.slice(-19), savedTargetSets])
+      setSavedTargetSets(snap)
+      return next
+    })
+  }
+
   const gp = Math.max(0, Number(gpInput) || 0)
   const adjustedSalary = BASE_SALARY + (baseBumpsAchieved * 5000)
   const eligibleBumps = BUMP_THRESHOLDS.filter(t => gp >= t).length
   const nextUnreachedThreshold = BUMP_THRESHOLDS[eligibleBumps]
-  // V9.1 — derive the take-home rate to use from settings
-  const effectiveTakeHomeRate = (() => {
-    if (takeHomeSettings.mode === 'manual') {
-      const grossMonthly = adjustedSalary / 12
-      if (grossMonthly <= 0) return TAKE_HOME_RATE
-      return Math.min(1, Math.max(0.01, takeHomeSettings.manualMonthlyNet / grossMonthly))
-    }
-    return Math.min(1, Math.max(0.01, takeHomeSettings.simpleRate))
-  })()
-  const inc = useMemo(() => income(gp, adjustedSalary, effectiveTakeHomeRate), [gp, adjustedSalary, effectiveTakeHomeRate])
+  const inc = useMemo(() => income(gp, adjustedSalary), [gp, adjustedSalary])
   const grossSalary = adjustedSalary + (inc.cMonthly * 12)
 
   // Reset base bumps if GP drops below 20000
@@ -514,9 +531,7 @@ export default function App() {
     const ac = loadAccounts(); if (ac) setAccounts(ac)
     const tx = loadTransactions(); if (tx) setTransactions(tx)
     const rl = loadTransactionRules(); if (rl) setRules(rl)
-    // V9.1 — take-home settings are lazy-initialized above; nothing to reload here
   }, [])
-  useEffect(() => { saveTakeHomeSettings(takeHomeSettings) }, [takeHomeSettings])
   useEffect(() => saveTab(tab), [tab])
   useEffect(() => savePeriod(period), [period])
   useEffect(() => saveCategories(categories), [categories])
@@ -1297,10 +1312,10 @@ export default function App() {
     const range = getPeriodDateRange(period)
     const startMs = new Date(range.start + 'T00:00:00').getTime()
     const endMs   = Math.min(new Date(range.end + 'T23:59:59').getTime(), Date.now())
-    const batch: Transaction[] = []
     // Build 10 varied transactions — mix of types, ~30% uncategorized, ~15% duplicate-like
+    const batch: Transaction[] = []
     for (let i = 0; i < 10; i++) {
-    const roll     = Math.random()
+      const roll     = Math.random()
       const type: TransactionType = roll < 0.72 ? 'expense' : roll < 0.84 ? 'income' : roll < 0.93 ? 'transfer' : 'credit card payment'
       const merchant =
         type === 'income'               ? INCOME_MERCHANTS[Math.floor(Math.random() * INCOME_MERCHANTS.length)]
@@ -1308,7 +1323,7 @@ export default function App() {
         : type === 'credit card payment'? 'Credit Card Payment'
         : EXPENSE_MERCHANTS[Math.floor(Math.random() * EXPENSE_MERCHANTS.length)]
       const amount   = (Math.floor(Math.random() * 19) + 1) * 5
-        const catPool  = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
+      const catPool  = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
       const categoryId = Math.random() < 0.7 && catPool.length ? catPool[Math.floor(Math.random() * catPool.length)].id : undefined
       const accountId  = accounts[0]?.id ?? ''
       const date       = new Date(startMs + Math.random() * (endMs - startMs)).toISOString().slice(0, 10)
@@ -1358,6 +1373,28 @@ export default function App() {
     setForm({ name: '', amount: '', type: 'fixed bill' })
     setBudgetFormHint('')
     budgetNameRef.current?.focus()
+  }
+
+  // V9.1 — Budget category inline edit helpers
+  const saveInlineCatEdit = () => {
+    if (!inlineCatEditId) return
+    const n = inlineCatEditForm.name.trim()
+    if (!n) return
+    const amt = Math.max(0, Number(inlineCatEditForm.amount) || 0)
+    const monthlyAmt = convertToMonthly(amt, period)
+    if (monthlyAmt <= 0) return
+    const actualStr = inlineCatEditForm.actual.replace(/[^0-9.-]/g, '')
+    // Snapshot both budget and actuals together so undo restores both
+    pushBudgetHistory({ ...actuals })
+    setCategories(prev => prev.map(c => c.id === inlineCatEditId ? { ...c, name: n, amount: monthlyAmt, type: inlineCatEditForm.type } : c))
+    setActuals(prev => ({ ...prev, [inlineCatEditId]: actualStr || '' }))
+    setInlineCatEditId(null)
+  }
+  const cancelInlineCatEdit = () => {
+    if (!inlineCatEditId) return
+    // Restore actual to its pre-edit value
+    setActuals(prev => ({ ...prev, [inlineCatEditId]: inlineCatEditForm.actualAtStart }))
+    setInlineCatEditId(null)
   }
 
   const addTargetContribution = (targetId: string, amount: number, date: string, note: string) => {
@@ -2144,132 +2181,56 @@ export default function App() {
                 </p>
               )}
             </Card>
-            {/* ── V9.1 Take-Home Settings ── */}
-            <Card title="Take-Home Pay Settings">
-              <p className="text-xs text-slate-400 mb-3">
-                Simple mode uses your chosen take-home percentage. Manual mode uses your expected monthly net pay directly.
-              </p>
-              {/* Mode toggle */}
-              <div className="flex gap-2 mb-4">
-                <button
-                  onClick={() => setTakeHomeSettings(s => ({ ...s, mode: 'simple' }))}
-                  className={`rounded-lg px-4 py-1.5 text-sm transition-colors ${takeHomeSettings.mode === 'simple' ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
-                >
-                  Simple Rate
-                </button>
-                <button
-                  onClick={() => setTakeHomeSettings(s => ({ ...s, mode: 'manual' }))}
-                  className={`rounded-lg px-4 py-1.5 text-sm transition-colors ${takeHomeSettings.mode === 'manual' ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
-                >
-                  Manual Net Pay
-                </button>
-              </div>
-
-              {takeHomeSettings.mode === 'simple' ? (
-                <div className="space-y-2">
-                  <label className="block text-xs text-slate-400">Take-home percentage (after all taxes and deductions)</label>
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1 max-w-[160px]">
-                      <input
-                        type="number"
-                        min={1}
-                        max={100}
-                        step={0.01}
-                        className="w-full px-2 py-1.5 pr-7 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
-                        value={thsRateInput}
-                        onChange={e => setThsRateInput(e.target.value)}
-                        onBlur={() => {
-                          const v = parseFloat(thsRateInput)
-                          if (isNaN(v) || v <= 0 || v > 100) {
-                            setThsHint('Enter a percentage between 1 and 100.')
-                            setThsRateInput((takeHomeSettings.simpleRate * 100).toFixed(2))
-                          } else {
-                            setThsHint('')
-                            setTakeHomeSettings(s => ({ ...s, simpleRate: v / 100 }))
-                          }
-                        }}
-                        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                      />
-                      <span className="absolute right-2 top-1.5 text-slate-400 text-sm">%</span>
-                    </div>
-                    <button
-                      className="rounded-lg px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
-                      onClick={() => {
-                        const defaultRate = DEFAULT_TAKE_HOME_SETTINGS.simpleRate
-                        setTakeHomeSettings(s => ({ ...s, mode: 'simple', simpleRate: defaultRate }))
-                        setThsRateInput((defaultRate * 100).toFixed(2))
-                        setThsHint('')
-                        showToast('Take-home settings reset to default (82.43%).')
-                      }}
-                    >
-                      Reset to Default
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-slate-500">
-                    Example: 82.43% means $41,000 gross → $33,796 net per year. Adjust to match your actual paycheck stub.
+            {/* V9.1 — Arizona take-home estimate */}
+            {(() => {
+              const bd = estimateTaxBreakdown(adjustedSalary)
+              return (
+                <Card title="Estimated Take-Home (Arizona, Single Filer)">
+                  <p className="text-xs text-slate-400 mb-3">
+                    Take-home pay is estimated automatically using simplified 2025 federal, Arizona state, and FICA assumptions. This is an estimate — not certified tax advice.
                   </p>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <label className="block text-xs text-slate-400">Expected monthly net pay (base pay only, excluding commission)</label>
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1 max-w-[200px]">
-                      <span className="absolute left-2 top-1.5 text-slate-400 text-sm">$</span>
-                      <input
-                        type="number"
-                        min={1}
-                        step={50}
-                        className="w-full pl-6 pr-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
-                        placeholder="e.g. 2800"
-                        value={thsManualInput}
-                        onChange={e => setThsManualInput(e.target.value)}
-                        onBlur={() => {
-                          const v = parseFloat(thsManualInput)
-                          if (isNaN(v) || v <= 0) {
-                            setThsHint('Enter your expected monthly net pay.')
-                          } else {
-                            setThsHint('')
-                            setTakeHomeSettings(s => ({ ...s, manualMonthlyNet: v }))
-                          }
-                        }}
-                        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-                      />
+                  <div className="grid md:grid-cols-2 gap-3 mb-3">
+                    <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
+                      <div className="text-xs text-slate-400 mb-1">Estimated Annual Gross</div>
+                      <div className="text-lg font-bold text-slate-200">{currency(bd.grossAnnual)}</div>
                     </div>
-                    <span className="text-xs text-slate-500">per month</span>
-                    <button
-                      className="rounded-lg px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
-                      onClick={() => {
-                        setTakeHomeSettings(DEFAULT_TAKE_HOME_SETTINGS)
-                        setThsRateInput((DEFAULT_TAKE_HOME_SETTINGS.simpleRate * 100).toFixed(2))
-                        setThsManualInput('')
-                        setThsHint('')
-                        showToast('Take-home settings reset to default (82.43%).')
-                      }}
-                    >
-                      Reset to Default
-                    </button>
+                    <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
+                      <div className="text-xs text-slate-400 mb-1">Est. Effective Take-Home Rate</div>
+                      <div className="text-lg font-bold text-green-400">{(bd.takeHomeRate * 100).toFixed(1)}%</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
+                      <div className="text-xs text-slate-400 mb-1">Est. Annual Take-Home</div>
+                      <div className="text-lg font-bold text-slate-200">{currency(bd.takeHomeAnnual)}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
+                      <div className="text-xs text-slate-400 mb-1">Est. Effective Tax Rate</div>
+                      <div className="text-lg font-bold text-amber-400">{(bd.effectiveRate * 100).toFixed(1)}%</div>
+                    </div>
                   </div>
-                  <p className="text-[10px] text-slate-500">
-                    Enter the net amount from your base pay. Commission is tracked separately and added on top.
-                  </p>
-                </div>
-              )}
-
-              {thsHint && <p className="mt-2 text-sm text-amber-300">{thsHint}</p>}
-
-              {/* Active method status */}
-              <div className="mt-3 pt-3 border-t border-slate-700/60">
-                <p className="text-xs text-slate-400">
-                  {takeHomeSettings.mode === 'simple'
-                    ? <>Currently using: <span className="text-slate-200 font-medium">simple take-home rate of {(takeHomeSettings.simpleRate * 100).toFixed(2)}%</span></>
-                    : takeHomeSettings.manualMonthlyNet > 0
-                      ? <>Currently using: <span className="text-slate-200 font-medium">manual net pay of {currency(takeHomeSettings.manualMonthlyNet)}/month</span> (effective rate: {(effectiveTakeHomeRate * 100).toFixed(1)}%)</>
-                      : <span className="text-amber-300">Manual mode selected — enter your monthly net pay above to apply.</span>
-                  }
-                </p>
-              </div>
-            </Card>
-
+                  <div className="space-y-0.5">
+                    <Row l="Federal income tax (est.)" v={currency(bd.fedTax)} valueClass="text-slate-300" />
+                    <Row l="Arizona state tax @ 2.5%" v={currency(bd.azTax)} valueClass="text-slate-300" />
+                    <Row l="Social Security (6.2%)" v={currency(bd.ssTax)} valueClass="text-slate-300" />
+                    <Row l="Medicare (1.45%)" v={currency(bd.medicareTax)} valueClass="text-slate-300" />
+                    <Row l="Total estimated withholding" v={currency(bd.totalTax)} valueClass="text-amber-300" />
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-slate-700/60 grid md:grid-cols-3 gap-2">
+                    <div className="text-center">
+                      <div className="text-xs text-slate-400 mb-0.5">Weekly take-home</div>
+                      <div className="font-semibold text-slate-200">{currency(bd.takeHomeAnnual / 52)}</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-xs text-slate-400 mb-0.5">Bi-weekly take-home</div>
+                      <div className="font-semibold text-slate-200">{currency(bd.takeHomeAnnual / 26)}</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-xs text-slate-400 mb-0.5">Monthly take-home</div>
+                      <div className="font-semibold text-slate-200">{currency(bd.takeHomeAnnual / 12)}</div>
+                    </div>
+                  </div>
+                </Card>
+              )
+            })()}
             <div className="grid md:grid-cols-2 gap-4">
               <Card title="Base Income">
                 <Row l="Weekly Net" v={currency(inc.baseWeekly)} />
@@ -2574,6 +2535,120 @@ export default function App() {
                       vTone === 'neutral' ? 'text-slate-300' :
                       vTone === 'warn' ? 'text-yellow-300' : 'text-red-400'
                     const isPressure  = pressureFocusCategoryId === c.id
+                    const isInlineCatEdit = inlineCatEditId === c.id
+
+                    // ── Inline edit row ──────────────────────────────────────
+                    if (isInlineCatEdit) {
+                      // colSpan math: Name + Type + planned + [monthly ref?] + Actual + Variance + Actions
+                      // We show inputs spanning all columns. Blur-save fires when focus leaves the row.
+                      const extraCols = (period === 'weekly' || period === 'bi-weekly' || period === 'yearly') ? 1 : 0
+                      const totalCols = 5 + extraCols // name, type, planned, [monthly], actual, variance, actions = varies
+                      return (
+                        <tr
+                          key={c.id}
+                          ref={el => { inlineCatRowRef.current = el }}
+                          className="border-b border-slate-700 bg-blue-950/20"
+                          onBlur={e => {
+                            // Save only if focus left the row entirely
+                            if (!inlineCatRowRef.current?.contains(e.relatedTarget as Node)) {
+                              saveInlineCatEdit()
+                            }
+                          }}
+                        >
+                          {/* Name */}
+                          <td className="py-1 pr-1.5">
+                            <input
+                              ref={inlineCatNameRef}
+                              className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                              value={inlineCatEditForm.name}
+                              onChange={e => setInlineCatEditForm(v => ({ ...v, name: e.target.value }))}
+                              onKeyDown={e => {
+                                if (e.key === 'ArrowRight') { e.preventDefault(); inlineCatTypeRef.current?.focus() }
+                                if (e.key === 'Enter') { e.preventDefault(); inlineCatTypeRef.current?.focus() }
+                                if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
+                              }}
+                            />
+                          </td>
+                          {/* Type */}
+                          <td className="py-1 pr-1.5">
+                            <select
+                              ref={inlineCatTypeRef}
+                              className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                              value={inlineCatEditForm.type}
+                              onChange={e => setInlineCatEditForm(v => ({ ...v, type: e.target.value as CategoryType }))}
+                              onKeyDown={e => {
+                                if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineCatNameRef.current?.focus() }
+                                if (e.key === 'ArrowRight') { e.preventDefault(); inlineCatAmountRef.current?.focus() }
+                                if (e.key === 'Enter') { e.preventDefault(); inlineCatAmountRef.current?.focus() }
+                                if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
+                              }}
+                            >
+                              <option value="fixed bill">Fixed</option>
+                              <option value="variable spending">Variable</option>
+                              <option value="savings">Savings</option>
+                              <option value="investing">Investing</option>
+                            </select>
+                          </td>
+                          {/* Planned amount — spans period planned + monthly ref columns */}
+                          <td className="py-1 pr-1.5" colSpan={1 + extraCols}>
+                            <input
+                              ref={inlineCatAmountRef}
+                              type="number"
+                              min={0}
+                              step={25}
+                              className="w-24 px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none text-right"
+                              value={inlineCatEditForm.amount}
+                              onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))}
+                              onFocus={e => e.target.select()}
+                              onKeyDown={e => {
+                                if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineCatTypeRef.current?.focus() }
+                                if (e.key === 'ArrowRight') { e.preventDefault(); inlineCatActualRef.current?.focus() }
+                                if (e.key === 'Enter') { e.preventDefault(); inlineCatActualRef.current?.focus() }
+                                if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
+                              }}
+                            />
+                            <span className="ml-1 text-[10px] text-slate-500">{labelPeriod(period)}</span>
+                          </td>
+                          {/* Actual adjustment */}
+                          <td className="py-1 pr-1.5">
+                            <div className="flex items-center gap-1">
+                              <input
+                                ref={inlineCatActualRef}
+                                type="number"
+                                min={0}
+                                step={25}
+                                className="w-20 px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none text-right"
+                                placeholder="—"
+                                value={inlineCatEditForm.actual}
+                                onChange={e => setInlineCatEditForm(v => ({ ...v, actual: e.target.value }))}
+                                onFocus={e => e.target.select()}
+                                onKeyDown={e => {
+                                  if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineCatAmountRef.current?.focus() }
+                                  if (e.key === 'ArrowRight') { e.preventDefault(); inlineCatSaveRef.current?.focus() }
+                                  if (e.key === 'Enter') { e.preventDefault(); saveInlineCatEdit() }
+                                  if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
+                                }}
+                              />
+                              {hasTxn && <span className="text-[9px] text-slate-500">adj</span>}
+                            </div>
+                          </td>
+                          {/* Variance — empty during edit */}
+                          <td className="py-1 pr-1.5" />
+                          {/* Save / Cancel */}
+                          <td className="py-1 whitespace-nowrap space-x-2">
+                            <button
+                              ref={inlineCatSaveRef}
+                              className="text-blue-400 hover:text-blue-300 text-xs"
+                              onClick={saveInlineCatEdit}
+                              onKeyDown={e => { if (e.key === 'Escape') cancelInlineCatEdit() }}
+                            >Save</button>
+                            <button className="text-slate-400 hover:text-slate-300 text-xs" onClick={cancelInlineCatEdit}>Cancel</button>
+                          </td>
+                        </tr>
+                      )
+                    }
+
+                    // ── Normal display row ────────────────────────────────────
                     return (
                       <tr
                         key={c.id}
@@ -2684,7 +2759,18 @@ export default function App() {
                                 : `Over by ${currency(variance)}`}
                         </td>
                         <td className="py-1.5 space-x-2 whitespace-nowrap">
-                          <button className="text-blue-300 hover:text-blue-200" onClick={() => { setForm({ name: c.name, amount: String(convertFromMonthly(c.amount, period)), type: c.type }); setEditId(c.id); budgetNameRef.current?.focus() }}>Edit</button>
+                          <button className="text-blue-300 hover:text-blue-200" onClick={() => {
+                            setInlineCatEditId(c.id)
+                            setInlineCatEditForm({
+                              name: c.name,
+                              type: c.type,
+                              amount: String(convertFromMonthly(c.amount, period)),
+                              actual: actuals[c.id] ?? '',
+                              actualAtStart: actuals[c.id] ?? '',
+                            })
+                            // Focus the amount field (per spec: Weekly Planned is focused/selected)
+                            setTimeout(() => { inlineCatAmountRef.current?.focus(); inlineCatAmountRef.current?.select() }, 0)
+                          }}>Edit</button>
                           <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
                         </td>
                       </tr>
@@ -3967,17 +4053,77 @@ export default function App() {
             <Card title="Savings Goal Sets" noHover>
               <div className="grid md:grid-cols-3 gap-2">
                 <input className="p-2 rounded bg-slate-800 border border-slate-600" value={targetSetName} onChange={(e) => setTargetSetName(e.target.value)} placeholder="Savings goal set name" />
-                <button className="rounded bg-blue-600" onClick={() => { const n = targetSetName.trim(); if (!n) return; setSavedTargetSets([{ name: n, targets, savedAt: new Date().toISOString() }, ...savedTargetSets.filter(s => s.name.toLowerCase() !== n.toLowerCase())]) }}>Save</button>
-                <div className="text-xs text-slate-400 self-center">Saved locally</div>
+                <button className="rounded bg-blue-600" onClick={() => {
+                  const n = targetSetName.trim()
+                  if (!n) return
+                  pushSetHistory(savedTargetSets)
+                  setSavedTargetSets([{ name: n, targets, savedAt: new Date().toISOString() }, ...savedTargetSets.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
+                  showToast('Savings goal set saved.')
+                }}>Save</button>
+                <div className="flex items-center gap-2">
+                  <div className="text-xs text-slate-400">Saved locally</div>
+                  {savedTargetSetsHistory.length > 0 && (
+                    <button onClick={undoSavedSets} className="text-xs text-slate-400 hover:text-slate-200 underline">Undo</button>
+                  )}
+                  {savedTargetSetsRedo.length > 0 && (
+                    <button onClick={redoSavedSets} className="text-xs text-slate-400 hover:text-slate-200 underline">Redo</button>
+                  )}
+                </div>
               </div>
               <div className="space-y-2 mt-2">
-                {savedTargetSets.map(s => (
-                  <div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between">
-                    <div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div>
-                    <div className="flex gap-2">
-                      <button className="text-blue-300" onClick={() => setTargets(s.targets)}>Load</button>
-                      <button className="text-red-300" onClick={() => setSavedTargetSets(prev => prev.filter(x => x.name !== s.name))}>Delete</button>
-                    </div>
+                {savedTargetSets.map((s, idx) => (
+                  <div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between items-center gap-2">
+                    {editingSetIdx === idx ? (
+                      <>
+                        <input
+                          className="flex-1 p-1 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                          value={renameSetValue}
+                          onChange={e => setRenameSetValue(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              const newName = renameSetValue.trim()
+                              if (!newName) return
+                              pushSetHistory(savedTargetSets)
+                              setSavedTargetSets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName, savedAt: new Date().toISOString() } : x))
+                              showToast('Savings goal set renamed.')
+                              setEditingSetIdx(null)
+                            }
+                            if (e.key === 'Escape') setEditingSetIdx(null)
+                          }}
+                          autoFocus
+                        />
+                        <div className="flex gap-2 shrink-0">
+                          <button className="text-blue-300 hover:text-blue-200 text-sm" onClick={() => {
+                            const newName = renameSetValue.trim()
+                            if (!newName) return
+                            pushSetHistory(savedTargetSets)
+                            setSavedTargetSets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName, savedAt: new Date().toISOString() } : x))
+                            showToast('Savings goal set renamed.')
+                            setEditingSetIdx(null)
+                          }}>Save</button>
+                          <button className="text-slate-400 hover:text-slate-300 text-sm" onClick={() => setEditingSetIdx(null)}>Cancel</button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div>
+                          <div className="text-sm font-medium">{s.name}</div>
+                          <div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div>
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button className="text-blue-300 hover:text-blue-200 text-sm" onClick={() => {
+                            const same = JSON.stringify(targets) === JSON.stringify(s.targets)
+                            if (!same) {
+                              pushTargetHistory(targets)
+                              setTargets(s.targets)
+                              showToast('Savings goal set loaded.')
+                            }
+                          }}>Load</button>
+                          <button className="text-slate-400 hover:text-slate-300 text-sm" onClick={() => { setEditingSetIdx(idx); setRenameSetValue(s.name) }}>Rename</button>
+                          <button className="text-red-300 hover:text-red-200 text-sm" onClick={() => { pushSetHistory(savedTargetSets); setSavedTargetSets(prev => prev.filter(x => x.name !== s.name)) }}>Delete</button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
