@@ -377,6 +377,7 @@ export default function App() {
   const inlineTxnMerchantRef  = useRef<HTMLInputElement>(null)
   const inlineTxnTypeRef      = useRef<HTMLSelectElement>(null)
   const inlineTxnCategoryRef  = useRef<HTMLSelectElement>(null)
+  const inlineTxnNotesRef     = useRef<HTMLInputElement>(null)
 // V8.6.1 — Inline rule edit refs
   const inlineRuleNameRef   = useRef<HTMLInputElement>(null)
   const inlineRuleMatchRef  = useRef<HTMLInputElement>(null)
@@ -449,8 +450,9 @@ export default function App() {
   const [overwriteCategories, setOverwriteCategories] = useState(false)
   const [applyRulesMsg, setApplyRulesMsg]     = useState('')
 
-  // V9.1.1 — Income tab: separate period control + collapsible tax details
-  const [incomePeriod, setIncomePeriod] = useState<Period>('monthly')
+  // V9.1.2 — Budget inline rename state
+  const [renamingBudgetName, setRenamingBudgetName] = useState<string | null>(null)
+  const [renameBudgetValue, setRenameBudgetValue] = useState('')
   const [taxDetailsOpen, setTaxDetailsOpen] = useState(false)
 
   // V9.1.1 — Accounts inline edit state (separate from top create form)
@@ -460,7 +462,6 @@ export default function App() {
   const inlineAccountTypeRef    = useRef<HTMLSelectElement>(null)
   const inlineAccountBalanceRef = useRef<HTMLInputElement>(null)
   const inlineAccountInstRef    = useRef<HTMLInputElement>(null)
-  const [inlineCatEditId, setInlineCatEditId] = useState<string | null>(null)
   const [inlineCatEditForm, setInlineCatEditForm] = useState<{
     name: string; type: CategoryType; amount: string; actual: string; actualAtStart: string
   }>({ name: '', type: 'fixed bill', amount: '', actual: '', actualAtStart: '' })
@@ -905,6 +906,7 @@ export default function App() {
   }
   const clearAccountForm = () => {
     setAccountForm({ name: '', type: 'checking', balance: '', institution: '' })
+    setEditAccountId(null)
     setAccountHint('')
   }
 
@@ -2234,7 +2236,7 @@ export default function App() {
 
             {/* V9.1.1 — Simplified take-home estimate card */}
             {(() => {
-              const bd = estimateTaxBreakdown(adjustedSalary)
+              const bd = estimateTaxBreakdown(grossSalary)
               const fedEffRate = bd.grossAnnual > 0 ? (bd.fedTax / bd.grossAnnual) * 100 : 0
               return (
                 <Card title="Estimated Take-Home (Arizona, Single Filer)">
@@ -2497,13 +2499,49 @@ export default function App() {
               {changeSummary.length > 0 && <div className="mt-2 text-sm rounded border border-slate-700 p-2">What Changed: {changeSummary.join(' • ')}</div>}
               <div className="mt-2 space-y-2">
                 {savedBudgets.map(b => (
-                  <div key={b.name} className="rounded border border-slate-700 p-2 flex justify-between">
-                    <div><div>{b.name}</div><div className="text-xs text-slate-400">{new Date(b.savedAt).toLocaleString()}</div></div>
-                    <div className="flex gap-2">
-                      <button className="text-blue-300" onClick={() => setCategories(b.categories)}>Load</button>
-                      <button className="text-amber-300" onClick={() => { const nn = window.prompt('Rename budget', b.name); if (!nn) return; setSavedBudgets(prev => prev.map(x => x.name === b.name ? { ...x, name: nn } : x)) }}>Rename</button>
-                      <button className="text-red-300" onClick={() => setSavedBudgets(prev => prev.filter(x => x.name !== b.name))}>Delete</button>
-                    </div>
+                  <div key={b.name} className="rounded border border-slate-700 p-2 flex justify-between items-center gap-2">
+                    {renamingBudgetName === b.name ? (
+                      <>
+                        <input
+                          className="flex-1 p-1 text-sm rounded bg-slate-800 border border-blue-500 focus:outline-none"
+                          value={renameBudgetValue}
+                          autoFocus
+                          onChange={e => setRenameBudgetValue(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              const nn = renameBudgetValue.trim()
+                              if (!nn) return
+                              setSavedBudgets(prev => prev.map(x => x.name === b.name ? { ...x, name: nn } : x))
+                              setRenamingBudgetName(null)
+                            }
+                            if (e.key === 'Escape') setRenamingBudgetName(null)
+                          }}
+                          onBlur={() => {
+                            const nn = renameBudgetValue.trim()
+                            if (nn && nn !== b.name) setSavedBudgets(prev => prev.map(x => x.name === b.name ? { ...x, name: nn } : x))
+                            setRenamingBudgetName(null)
+                          }}
+                        />
+                        <div className="flex gap-2 shrink-0">
+                          <button className="text-blue-300 hover:text-blue-200 text-xs" onClick={() => {
+                            const nn = renameBudgetValue.trim()
+                            if (!nn) return
+                            setSavedBudgets(prev => prev.map(x => x.name === b.name ? { ...x, name: nn } : x))
+                            setRenamingBudgetName(null)
+                          }}>Save</button>
+                          <button className="text-slate-400 hover:text-slate-300 text-xs" onClick={() => setRenamingBudgetName(null)}>Cancel</button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div><div>{b.name}</div><div className="text-xs text-slate-400">{new Date(b.savedAt).toLocaleString()}</div></div>
+                        <div className="flex gap-2">
+                          <button className="text-blue-300 hover:text-blue-200 text-xs" onClick={() => setCategories(b.categories)}>Load</button>
+                          <button className="text-amber-300 hover:text-amber-200 text-xs" onClick={() => { setRenamingBudgetName(b.name); setRenameBudgetValue(b.name) }}>Rename</button>
+                          <button className="text-red-300 hover:text-red-200 text-xs" onClick={() => setSavedBudgets(prev => prev.filter(x => x.name !== b.name))}>Delete</button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -3008,7 +3046,8 @@ export default function App() {
                                   onFocus={e => e.target.select()}
                                   onKeyDown={e => {
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit() }
-                                    if (e.key === 'ArrowLeft') { e.preventDefault(); inlineAccountBalanceRef.current?.focus() }
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineAccountBalanceRef.current?.focus() }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); saveInlineAccountEdit() }
                                     if (e.key === 'Escape') cancelInlineAccountEdit()
                                   }}
                                 />
@@ -3353,9 +3392,9 @@ export default function App() {
                         <th className="pb-1.5 pr-3 font-medium whitespace-nowrap">Date</th>
                         <th className="pb-1.5 pr-3 font-medium">Account</th>
                         <th className="pb-1.5 pr-3 font-medium">Merchant</th>
+                        <th className="pb-1.5 pr-3 font-medium text-right whitespace-nowrap">Amount</th>
                         <th className="pb-1.5 pr-3 font-medium">Type</th>
                         <th className="pb-1.5 pr-3 font-medium">Category</th>
-                        <th className="pb-1.5 pr-3 font-medium text-right whitespace-nowrap">Amount</th>
                         <th className="pb-1.5 pr-3 font-medium hidden sm:table-cell">Notes</th>
                         <th className="pb-1.5 sticky right-0 bg-slate-800" />
                       </tr>
@@ -3410,7 +3449,7 @@ export default function App() {
                                   {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                                 </select>
                               </td>
-                              {/* Merchant — ArrowRight at end moves to Type; ArrowLeft at beginning moves to Account */}
+                              {/* Merchant — ArrowLeft at beginning→Account; ArrowRight at end→Amount */}
                               <td className="py-1.5 pr-2">
                                 <input
                                   ref={inlineTxnMerchantRef}
@@ -3419,66 +3458,25 @@ export default function App() {
                                   onFocus={e => { e.target.select(); cancelBlurSave() }}
                                   onBlur={scheduleBlurSave}
                                   onChange={e => { setInlineTxnEditForm(v => ({ ...v, merchant: e.target.value })); setTxnDupWarning(false) }}
-                                 onKeyDown={e => {
-  if (e.key === 'ArrowLeft') {
-    const el = e.currentTarget
-    if (el.selectionStart === 0 && el.selectionEnd === 0) {
-      // cursor is at the very beginning — move to Account
-      e.preventDefault()
-      // Account select is the previous sibling td; focus via ref traversal isn't available,
-      // so we locate it via the parent row's querySelectorAll
-      const row = el.closest('tr')
-      const selects = row?.querySelectorAll('select')
-      if (selects && selects.length > 0) {
-        ;(selects[0] as HTMLSelectElement).focus()
-      }
-    }
-  }
-  if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
-  if (e.key === 'Escape') cancelInlineTxnEdit()
-}}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft') {
+                                      const el = e.currentTarget
+                                      if (el.selectionStart === 0 && el.selectionEnd === 0) {
+                                        e.preventDefault()
+                                        const row = el.closest('tr')
+                                        const selects = row?.querySelectorAll('select')
+                                        if (selects && selects.length > 0) (selects[0] as HTMLSelectElement).focus()
+                                      }
+                                    }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) {
+                                      e.preventDefault(); inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select()
+                                    }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
+                                    if (e.key === 'Escape') cancelInlineTxnEdit()
+                                  }}
                                 />
                               </td>
-                              {/* Type — ArrowLeft → Merchant, ArrowRight → Category */}
-                              <td className="py-1.5 pr-2">
-                                <select
-                                  ref={inlineTxnTypeRef}
-                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
-                                  value={inlineTxnEditForm.type}
-                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, type: e.target.value as TransactionType }))}
-                                  onFocus={cancelBlurSave}
-                                  onBlur={scheduleBlurSave}
-                                  onKeyDown={e => {
-                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineTxnMerchantRef.current?.focus(); inlineTxnMerchantRef.current?.select(); return }
-                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnCategoryRef.current?.focus(); return }
-                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
-                                    if (e.key === 'Escape') cancelInlineTxnEdit()
-                                  }}
-                                >
-                                  {TXN_TYPES.map(t => <option key={t} value={t}>{TXN_TYPE_LABELS[t]}</option>)}
-                                </select>
-                              </td>
-                              {/* Category — ArrowLeft → Type, ArrowRight → Amount */}
-                              <td className="py-1.5 pr-2">
-                                <select
-                                  ref={inlineTxnCategoryRef}
-                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
-                                  value={inlineTxnEditForm.categoryId}
-                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, categoryId: e.target.value }))}
-                                  onFocus={cancelBlurSave}
-                                  onBlur={scheduleBlurSave}
-                                  onKeyDown={e => {
-                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineTxnTypeRef.current?.focus(); return }
-                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select(); return }
-                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
-                                    if (e.key === 'Escape') cancelInlineTxnEdit()
-                                  }}
-                                >
-                                  <option value="">— none —</option>
-                                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                </select>
-                              </td>
-                              {/* Amount — default focus target; ArrowLeft → Category */}
+                              {/* Amount — ArrowLeft→Merchant; ArrowRight at end→Type; Up/Down ±5 */}
                               <td className="py-1.5 pr-2">
                                 <input
                                   ref={inlineTxnAmountRef}
@@ -3500,26 +3498,72 @@ export default function App() {
                                     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
                                       e.preventDefault()
                                       const cur = parseFloat(inlineTxnEditForm.amount) || 0
-                                      const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
+                                      const next = e.key === 'ArrowUp' ? cur + 5 : Math.max(0, cur - 5)
                                       setInlineTxnEditForm(v => ({ ...v, amount: next === 0 ? '' : String(next) }))
                                       setTxnDupWarning(false)
                                       return
                                     }
-                                    if (e.key === 'ArrowLeft') { e.preventDefault(); inlineTxnCategoryRef.current?.focus(); return }
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineTxnMerchantRef.current?.focus(); inlineTxnMerchantRef.current?.select(); return }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineTxnTypeRef.current?.focus(); return }
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
                                     if (e.key === 'Escape') cancelInlineTxnEdit()
                                   }}
                                 />
                               </td>
-                              {/* Notes */}
+                              {/* Type — ArrowLeft→Amount; ArrowRight→Category */}
+                              <td className="py-1.5 pr-2">
+                                <select
+                                  ref={inlineTxnTypeRef}
+                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineTxnEditForm.type}
+                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, type: e.target.value as TransactionType }))}
+                                  onFocus={cancelBlurSave}
+                                  onBlur={scheduleBlurSave}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select(); return }
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnCategoryRef.current?.focus(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
+                                    if (e.key === 'Escape') cancelInlineTxnEdit()
+                                  }}
+                                >
+                                  {TXN_TYPES.map(t => <option key={t} value={t}>{TXN_TYPE_LABELS[t]}</option>)}
+                                </select>
+                              </td>
+                              {/* Category — ArrowLeft→Type; ArrowRight→Notes */}
+                              <td className="py-1.5 pr-2">
+                                <select
+                                  ref={inlineTxnCategoryRef}
+                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
+                                  value={inlineTxnEditForm.categoryId}
+                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, categoryId: e.target.value }))}
+                                  onFocus={cancelBlurSave}
+                                  onBlur={scheduleBlurSave}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineTxnTypeRef.current?.focus(); return }
+                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnNotesRef.current?.focus(); inlineTxnNotesRef.current?.select(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
+                                    if (e.key === 'Escape') cancelInlineTxnEdit()
+                                  }}
+                                >
+                                  <option value="">— none —</option>
+                                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                </select>
+                              </td>
+                              {/* Notes — ArrowLeft at beginning→Category; ArrowRight at end→Save */}
                               <td className="py-1.5 pr-2">
                                 <input
+                                  ref={inlineTxnNotesRef}
                                   className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
                                   value={inlineTxnEditForm.notes}
                                   onFocus={cancelBlurSave}
                                   onBlur={scheduleBlurSave}
                                   onChange={e => setInlineTxnEditForm(v => ({ ...v, notes: e.target.value }))}
-                                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() } if (e.key === 'Escape') cancelInlineTxnEdit() }}
+                                  onKeyDown={e => {
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineTxnCategoryRef.current?.focus(); return }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); saveInlineTxnEdit(); return }
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
+                                    if (e.key === 'Escape') cancelInlineTxnEdit()
+                                  }}
                                 />
                               </td>
                               <td className="py-1.5 whitespace-nowrap space-x-2">
@@ -3543,6 +3587,9 @@ export default function App() {
                             <td className="py-2 pr-3 text-slate-300 text-xs whitespace-nowrap">{tx.date}</td>
                             <td className="py-2 pr-3 text-slate-400 text-xs">{acct?.name ?? '—'}</td>
                             <td className="py-2 pr-3 font-medium">{tx.merchant}</td>
+                            <td className={`py-2 pr-3 text-right font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-100'}`}>
+                              {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : ''}{currency(tx.amount)}
+                            </td>
                             <td className="py-2 pr-3">
                               <span className={`text-xs px-1.5 py-0.5 rounded ${txTypeColor}`}>{TXN_TYPE_LABELS[tx.type]}</span>
                             </td>
@@ -3551,9 +3598,6 @@ export default function App() {
                               {tx.appliedByRule && (
                                 <span className="ml-1.5 text-[9px] text-indigo-400 bg-indigo-900/40 border border-indigo-700/40 px-1 py-0.5 rounded">Rule Applied</span>
                               )}
-                            </td>
-                            <td className={`py-2 pr-3 text-right font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-100'}`}>
-                              {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : ''}{currency(tx.amount)}
                             </td>
                             <td className="py-2 pr-3 text-slate-500 text-xs max-w-[100px] truncate hidden sm:table-cell">{tx.notes ?? '—'}</td>
                             <td className="py-2 whitespace-nowrap space-x-2">
@@ -4191,6 +4235,7 @@ export default function App() {
                       if (!n) return
                       pushSetHistory(savedTargetSets)
                       setSavedTargetSets([{ name: n, targets, savedAt: new Date().toISOString() }, ...savedTargetSets.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
+                      setTargetSetName('')
                       showToast('Savings goal set saved.')
                     }
                   }}
