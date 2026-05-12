@@ -905,7 +905,6 @@ export default function App() {
   }
   const clearAccountForm = () => {
     setAccountForm({ name: '', type: 'checking', balance: '', institution: '' })
-    setEditAccountId(null)
     setAccountHint('')
   }
 
