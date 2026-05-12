@@ -484,7 +484,7 @@ export default function App() {
   const pushSetHistory = (prev: SavedTargetSet[]) => {
     setSavedTargetSetsHistory(h => [...h.slice(-19), prev])
     setSavedTargetSetsRedo([])
-  }
+  
 
   const gp = Math.max(0, Number(gpInput) || 0)
   const adjustedSalary = BASE_SALARY + (baseBumpsAchieved * 5000)
