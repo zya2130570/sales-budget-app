@@ -460,6 +460,7 @@ export default function App() {
   const inlineAccountTypeRef    = useRef<HTMLSelectElement>(null)
   const inlineAccountBalanceRef = useRef<HTMLInputElement>(null)
   const inlineAccountInstRef    = useRef<HTMLInputElement>(null)
+  const [inlineCatEditId, setInlineCatEditId] = useState<string | null>(null)
   const [inlineCatEditForm, setInlineCatEditForm] = useState<{
     name: string; type: CategoryType; amount: string; actual: string; actualAtStart: string
   }>({ name: '', type: 'fixed bill', amount: '', actual: '', actualAtStart: '' })
