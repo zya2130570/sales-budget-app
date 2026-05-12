@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule } from './types'
+import { isMoneyMovement } from './types'
 import { currency, labelPeriod, formatDate } from './utils/formatting'
 import {
   BASE_SALARY,
@@ -414,6 +415,7 @@ export default function App() {
     type: 'expense' as TransactionType,
     categoryId: '',
     notes: '',
+    toAccountId: '',
   })
   const [txnHistory, setTxnHistory]           = useState<Transaction[][]>([])
   const [txnRedo, setTxnRedo]                 = useState<Transaction[][]>([])
@@ -443,7 +445,7 @@ export default function App() {
   const [inlineTxnEditId, setInlineTxnEditId] = useState<string | null>(null)
   const [inlineTxnEditForm, setInlineTxnEditForm] = useState({
     date: '', accountId: '', merchant: '', amount: '',
-    type: 'expense' as TransactionType, categoryId: '', notes: '',
+    type: 'expense' as TransactionType, categoryId: '', notes: '', toAccountId: '',
   })
 
   // V8.3 — Transaction Rules
@@ -656,8 +658,8 @@ export default function App() {
   const plannedPeriodTotal = convertFromMonthly(monthlyBudget, period)
 
   // ── V8.4 Transaction-driven actuals ──────────────────────────────────────────
-  // Sum categorized transaction amounts within the current period window.
-  // Only expense/transfer/credit-card-payment transactions count toward spending.
+  // V9.2: Transfers and credit card payments are money movements — excluded from
+  // budget category spending totals. Only genuine expenses count toward actuals.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const txnActuals = useMemo(() => {
     const range = getPeriodDateRange(period)
@@ -665,6 +667,8 @@ export default function App() {
     for (const tx of transactions) {
       if (!tx.categoryId) continue
       if (tx.date < range.start || tx.date > range.end) continue
+      // V9.2 — exclude transfers and credit card payments from budget spending
+      if (isMoneyMovement(tx.type)) continue
       result[tx.categoryId] = (result[tx.categoryId] ?? 0) + tx.amount
     }
     return result
@@ -720,6 +724,61 @@ export default function App() {
 
   // ── V7.3 Dashboard Status Engine ───────────────────────────────────────────
   const activeTargets = targets.filter(t => !t.completed && (t.goalAmount <= 0 || t.currentSaved < t.goalAmount))
+
+  // ── V9.2 Account Balance Engine ─────────────────────────────────────────────
+  // Computes transaction-adjusted balances by applying all transactions on top of
+  // the manual base balance set on each account. This is additive — base balance
+  // is the user's starting point, transactions adjust from there.
+  const computedAccountBalances = useMemo((): Record<string, number> => {
+    const deltas: Record<string, number> = {}
+    for (const tx of transactions) {
+      // Expense: decreases source account
+      if (tx.type === 'expense') {
+        deltas[tx.accountId] = (deltas[tx.accountId] ?? 0) - tx.amount
+      }
+      // Income: increases destination account
+      if (tx.type === 'income') {
+        deltas[tx.accountId] = (deltas[tx.accountId] ?? 0) + tx.amount
+      }
+      // Transfer: decreases source, increases destination
+      if (tx.type === 'transfer') {
+        deltas[tx.accountId] = (deltas[tx.accountId] ?? 0) - tx.amount
+        if (tx.toAccountId) {
+          deltas[tx.toAccountId] = (deltas[tx.toAccountId] ?? 0) + tx.amount
+        }
+      }
+      // Credit card payment: decreases checking (source), decreases card balance owed (destination)
+      if (tx.type === 'credit card payment') {
+        deltas[tx.accountId] = (deltas[tx.accountId] ?? 0) - tx.amount
+        if (tx.toAccountId) {
+          // Credit card balance is negative (debt) — payment reduces the debt (increases toward 0)
+          deltas[tx.toAccountId] = (deltas[tx.toAccountId] ?? 0) + tx.amount
+        }
+      }
+    }
+    const result: Record<string, number> = {}
+    for (const acct of accounts) {
+      result[acct.id] = acct.balance + (deltas[acct.id] ?? 0)
+    }
+    return result
+  }, [accounts, transactions])
+
+  // V9.2 — Net worth summary helpers (groundwork for future Dashboard widget)
+  const netWorthSummary = useMemo(() => {
+    let totalCash = 0, totalDebt = 0, totalInvestments = 0
+    for (const acct of accounts) {
+      const bal = computedAccountBalances[acct.id] ?? acct.balance
+      if (acct.type === 'credit card') {
+        totalDebt += Math.abs(Math.min(0, bal))
+      } else if (acct.type === 'investment' || acct.type === 'roth ira' || acct.type === 'retirement') {
+        totalInvestments += Math.max(0, bal)
+      } else {
+        totalCash += bal
+      }
+    }
+    const netWorth = totalCash + totalInvestments - totalDebt
+    return { totalCash, totalDebt, totalInvestments, netWorth }
+  }, [accounts, computedAccountBalances])
 
   // ── V8.6.3 Uncategorized expense count ──────────────────────────────────────
   // Single source of truth: expense transactions with no budget category assigned.
@@ -970,7 +1029,7 @@ export default function App() {
     })
   }
  const clearTxnForm = () => {
-    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '' })
+    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '', toAccountId: '' })
     setTxnHint('')
     setTxnDupWarning(false)
   }
@@ -1020,7 +1079,7 @@ export default function App() {
     }
 
    setTxnWithHistory(prev => [
-      { id: crypto.randomUUID(), date: txnForm.date, accountId: txnForm.accountId, merchant, amount, type: txnForm.type, categoryId: autoCategoryId || undefined, appliedByRule: matchedRuleId, notes: txnForm.notes.trim() || undefined, createdAt: new Date().toISOString() },
+      { id: crypto.randomUUID(), date: txnForm.date, accountId: resolvedAccountId, merchant, amount, type: txnForm.type, categoryId: autoCategoryId || undefined, appliedByRule: matchedRuleId, notes: txnForm.notes.trim() || undefined, toAccountId: txnForm.toAccountId || undefined, createdAt: new Date().toISOString() },
       ...prev,
     ])
     // Set blur guard BEFORE moving focus so Amount's onBlur skips its format-back
@@ -1069,6 +1128,7 @@ export default function App() {
         type: inlineTxnEditForm.type,
         categoryId: inlineTxnEditForm.categoryId || undefined,
         notes: inlineTxnEditForm.notes.trim() || undefined,
+        toAccountId: inlineTxnEditForm.toAccountId || undefined,
         // V8.6.1 — If user manually changed the category, strip rule ownership
         // so deleting the rule later won't clear this user-owned category.
         appliedByRule: categoryChangedManually ? undefined : x.appliedByRule,
@@ -3001,24 +3061,53 @@ export default function App() {
 
             {accounts.length > 0 ? (
               <Card title="Your Accounts">
+                {/* V9.2 — Net worth summary */}
+                {accounts.length > 0 && (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                    <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
+                      <div className="text-xs text-slate-400 mb-0.5">Cash & Bank</div>
+                      <div className={`text-lg font-bold ${netWorthSummary.totalCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>{currency(netWorthSummary.totalCash)}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
+                      <div className="text-xs text-slate-400 mb-0.5">Investments</div>
+                      <div className="text-lg font-bold text-blue-300">{currency(netWorthSummary.totalInvestments)}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
+                      <div className="text-xs text-slate-400 mb-0.5">Total Debt</div>
+                      <div className="text-lg font-bold text-red-400">{currency(netWorthSummary.totalDebt)}</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
+                      <div className="text-xs text-slate-400 mb-0.5">Net Worth</div>
+                      <div className={`text-lg font-bold ${netWorthSummary.netWorth >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{currency(netWorthSummary.netWorth)}</div>
+                    </div>
+                  </div>
+                )}
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-slate-400 border-b border-slate-700">
                         <th className="pb-1.5 pr-4 font-medium">Name</th>
                         <th className="pb-1.5 pr-4 font-medium">Type</th>
-                        <th className="pb-1.5 pr-4 font-medium text-right">Balance</th>
+                        <th className="pb-1.5 pr-4 font-medium text-right">Base Balance</th>
+                        <th className="pb-1.5 pr-4 font-medium text-right">Adj. Balance</th>
                         <th className="pb-1.5 pr-4 font-medium">Institution</th>
                         <th className="pb-1.5" />
                       </tr>
                     </thead>
                     <tbody>
-                      {accounts.map(a => (
+                      {accounts.map(a => {
+                        const adjBal = computedAccountBalances[a.id] ?? a.balance
+                        const hasDelta = Math.abs(adjBal - a.balance) > 0.005
+                        return (
                         <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedAccountId === a.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
                           <td className="py-2 pr-4 font-medium">{a.name}</td>
                           <td className="py-2 pr-4 text-slate-400">{ACCOUNT_TYPE_LABELS[a.type]}</td>
-                          <td className={`py-2 pr-4 text-right font-semibold ${a.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          <td className={`py-2 pr-4 text-right ${a.balance >= 0 ? 'text-slate-400' : 'text-red-400/70'} text-xs`}>
                             {a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)}
+                          </td>
+                          <td className={`py-2 pr-4 text-right font-semibold ${adjBal >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {adjBal < 0 ? `−${currency(Math.abs(adjBal))}` : currency(adjBal)}
+                            {hasDelta && <span className="ml-1 text-[10px] text-slate-500">txn-adj</span>}
                           </td>
                           <td className="py-2 pr-4 text-slate-400 text-xs">{a.institution || '—'}</td>
                           <td className="py-2 whitespace-nowrap space-x-2">
@@ -3030,13 +3119,14 @@ export default function App() {
                             <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))}>Delete</button>
                           </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                     <tfoot>
                       <tr className="border-t border-slate-700">
-                        <td colSpan={2} className="pt-2 text-xs text-slate-500 font-medium">Net Balance</td>
-                        <td className={`pt-2 text-right text-sm font-bold ${accounts.reduce((s, a) => s + a.balance, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {currency(accounts.reduce((s, a) => s + a.balance, 0))}
+                        <td colSpan={3} className="pt-2 text-xs text-slate-500 font-medium">Net Balance (adjusted)</td>
+                        <td className={`pt-2 text-right text-sm font-bold ${Object.values(computedAccountBalances).reduce((s, v) => s + v, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {currency(Object.values(computedAccountBalances).reduce((s, v) => s + v, 0))}
                         </td>
                         <td colSpan={2} />
                       </tr>
@@ -3059,8 +3149,9 @@ export default function App() {
             {/* ── V8.5 Review queue summary ── */}
             {transactions.length > 0 && (() => {
               const range = getPeriodDateRange(period)
+              // V9.2 — period spend = expenses only; transfers/CC payments are money movements, not spending
               const periodSpend  = transactions
-                .filter(tx => tx.date >= range.start && tx.date <= range.end && (tx.type === 'expense' || tx.type === 'credit card payment'))
+                .filter(tx => tx.date >= range.start && tx.date <= range.end && tx.type === 'expense')
                 .reduce((s, tx) => s + tx.amount, 0)
               const rulesApplied = transactions.filter(tx => tx.appliedByRule).length
               return (
@@ -3223,7 +3314,7 @@ export default function App() {
                     ref={txnTypeRef}
                     className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
                     value={txnForm.type}
-                    onChange={e => setTxnForm(v => ({ ...v, type: e.target.value as TransactionType }))}
+                    onChange={e => setTxnForm(v => ({ ...v, type: e.target.value as TransactionType, toAccountId: '' }))}
                     onKeyDown={e => {
                       if (e.key === 'ArrowLeft')  { e.preventDefault(); txnAmountRef.current?.focus(); txnAmountRef.current?.select() }
                       if (e.key === 'ArrowRight') { e.preventDefault(); txnCategoryRef.current?.focus() }
@@ -3238,6 +3329,29 @@ export default function App() {
                   </select>
                   <p className="text-[10px] text-slate-500 mt-0.5">Use Credit Card Payment when checking pays down a credit card.</p>
                 </div>
+                {/* V9.2 — Transfer To account (only for transfer + credit card payment) */}
+                {isMoneyMovement(txnForm.type) && (
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">
+                      {txnForm.type === 'credit card payment' ? 'Credit Card Being Paid' : 'Transfer To Account'}
+                    </label>
+                    <select
+                      className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                      value={txnForm.toAccountId}
+                      onChange={e => setTxnForm(v => ({ ...v, toAccountId: e.target.value }))}
+                    >
+                      <option value="">— optional —</option>
+                      {accounts.filter(a => a.id !== txnForm.accountId).map(a => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      {txnForm.type === 'credit card payment'
+                        ? 'Selecting the card updates both account balances.'
+                        : 'Selecting a destination updates both account balances.'}
+                    </p>
+                  </div>
+                )}
                 {/* Category */}
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Category <span className="text-slate-600">(optional)</span></label>
@@ -3615,7 +3729,7 @@ export default function App() {
                               <td className="py-2 whitespace-nowrap space-x-2">
                                 <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
                                   setInlineTxnEditId(tx.id)
-                                  setInlineTxnEditForm({ date: tx.date, accountId: tx.accountId, merchant: tx.merchant, amount: String(tx.amount), type: tx.type, categoryId: tx.categoryId ?? '', notes: tx.notes ?? '' })
+                                  setInlineTxnEditForm({ date: tx.date, accountId: tx.accountId, merchant: tx.merchant, amount: String(tx.amount), type: tx.type, categoryId: tx.categoryId ?? '', notes: tx.notes ?? '', toAccountId: tx.toAccountId ?? '' })
                                   setTxnFilter('all')
                                   setTxnDupWarning(false)
                                   setTimeout(() => { inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select() }, 0)
