@@ -767,11 +767,19 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   , [transactions, period])
 
-  const createSnapshot = (): BudgetSnapshot => ({ categories: categories.map((c) => ({ ...c })), form: { ...form }, editId })
-    const snap = createSnapshot()
-    const aSnap = prevActuals ?? { ...actuals }
-    setBudgetHistory((prev) => [...prev.slice(-19), snap])
-    setActualsHistory((prev) => [...prev.slice(-19), aSnap])
+ const createSnapshot = (): BudgetSnapshot => ({
+  categories: categories.map((c) => ({ ...c })),
+  form: { ...form },
+  editId,
+})
+
+const pushBudgetHistory = (prevActuals?: Record<string, string>) => {
+  const snap = createSnapshot()
+  const aSnap = prevActuals ?? { ...actuals }
+
+  setBudgetHistory((prev) => [...prev.slice(-19), snap])
+  setActualsHistory((prev) => [...prev.slice(-19), aSnap])
+
     setBudgetRedo([])
     setActualsRedo([])
   }
