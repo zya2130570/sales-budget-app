@@ -202,6 +202,7 @@ export default function App() {
   const [targetSetName, setTargetSetName] = useState('')
   const [targetForm, setTargetForm] = useState(() => ({ name: '', goalAmount: '', currentSaved: '', startDate: new Date().toISOString().slice(0, 10), deadline: '' }))
   const [targetLogForm, setTargetLogForm] = useState<Record<string, { date: string; amount: string; note: string }>>({})
+  const [incomePeriod, setIncomePeriod] = useState<Period>('monthly')
   const [dashboardQuickDate, setDashboardQuickDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [dashboardQuickTargetId, setDashboardQuickTargetId] = useState('')
   const [dashboardQuickAmount, setDashboardQuickAmount] = useState('')
@@ -462,6 +463,7 @@ export default function App() {
   const inlineAccountTypeRef    = useRef<HTMLSelectElement>(null)
   const inlineAccountBalanceRef = useRef<HTMLInputElement>(null)
   const inlineAccountInstRef    = useRef<HTMLInputElement>(null)
+  const [inlineCatEditId, setInlineCatEditId] = useState<string | null>(null)
   const [inlineCatEditForm, setInlineCatEditForm] = useState<{
     name: string; type: CategoryType; amount: string; actual: string; actualAtStart: string
   }>({ name: '', type: 'fixed bill', amount: '', actual: '', actualAtStart: '' })
@@ -906,7 +908,6 @@ export default function App() {
   }
   const clearAccountForm = () => {
     setAccountForm({ name: '', type: 'checking', balance: '', institution: '' })
-    setEditAccountId(null)
     setAccountHint('')
   }
 
