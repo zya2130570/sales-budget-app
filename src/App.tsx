@@ -406,6 +406,7 @@ export default function App() {
   const [txnForm, setTxnForm]                 = useState({
     date: new Date().toISOString().slice(0, 10),
     accountId: '',
+    toAccountId: '',      // V9.2 — destination account for transfers and CC payments
     merchant: '',
     amount: '',
     type: 'expense' as TransactionType,
@@ -429,7 +430,7 @@ export default function App() {
   // V8.3.1 — Inline transaction editing (rows edit in place; top form is create-only)
   const [inlineTxnEditId, setInlineTxnEditId] = useState<string | null>(null)
   const [inlineTxnEditForm, setInlineTxnEditForm] = useState({
-    date: '', accountId: '', merchant: '', amount: '',
+    date: '', accountId: '', toAccountId: '', merchant: '', amount: '',
     type: 'expense' as TransactionType, categoryId: '', notes: '',
   })
 
@@ -483,26 +484,6 @@ export default function App() {
   const pushSetHistory = (prev: SavedTargetSet[]) => {
     setSavedTargetSetsHistory(h => [...h.slice(-19), prev])
     setSavedTargetSetsRedo([])
-  }
-  const undoSavedSets = () => {
-    setSavedTargetSetsHistory(h => {
-      if (!h.length) return h
-      const next = [...h]
-      const prior = next.pop()!
-      setSavedTargetSetsRedo(r => [...r.slice(-19), savedTargetSets])
-      setSavedTargetSets(prior)
-      return next
-    })
-  }
-  const redoSavedSets = () => {
-    setSavedTargetSetsRedo(r => {
-      if (!r.length) return r
-      const next = [...r]
-      const snap = next.pop()!
-      setSavedTargetSetsHistory(h => [...h.slice(-19), savedTargetSets])
-      setSavedTargetSets(snap)
-      return next
-    })
   }
 
   const gp = Math.max(0, Number(gpInput) || 0)
@@ -647,8 +628,8 @@ export default function App() {
   const plannedPeriodTotal = convertFromMonthly(monthlyBudget, period)
 
   // ── V8.4 Transaction-driven actuals ──────────────────────────────────────────
-  // Sum categorized transaction amounts within the current period window.
-  // Only expense/transfer/credit-card-payment transactions count toward spending.
+  // Only expense transactions count toward budget category spending.
+  // Transfers and credit card payments are money movements — NOT spending.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const txnActuals = useMemo(() => {
     const range = getPeriodDateRange(period)
@@ -656,6 +637,8 @@ export default function App() {
     for (const tx of transactions) {
       if (!tx.categoryId) continue
       if (tx.date < range.start || tx.date > range.end) continue
+      // V9.2 — Only expenses count toward budget. Transfers + CC payments are excluded.
+      if (tx.type !== 'expense') continue
       result[tx.categoryId] = (result[tx.categoryId] ?? 0) + tx.amount
     }
     return result
@@ -755,10 +738,36 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inc.totalMonthly, monthlyBudget, monthlyLeft, savingsRate, fixedRatio, inc.commissionPct, categories, activeTargets, period, hasBudgetData, selectedPeriodRemaining, remainingTier.label, actualOverspendPct])
 
-  const createSnapshot = (): BudgetSnapshot => ({ categories: categories.map((c) => ({ ...c })), form: { ...form }, editId })
+  // ── V9.2 Net worth groundwork ─────────────────────────────────────────────────
+  // Clean computed helpers for future net worth, cash flow, and reconciliation.
+  // No UI required yet — structured for future Dashboard panel expansion.
+  const netWorth = useMemo(() => {
+    const totalCash        = accounts.filter(a => ['checking', 'savings', 'cash'].includes(a.type)).reduce((s, a) => s + a.balance, 0)
+    const totalInvesting   = accounts.filter(a => ['investment', 'roth ira', 'retirement'].includes(a.type)).reduce((s, a) => s + a.balance, 0)
+    const totalDebt        = accounts.filter(a => a.type === 'credit card').reduce((s, a) => s + a.balance, 0) // always ≤ 0
+    const totalAssets      = accounts.reduce((s, a) => s + Math.max(0, a.balance), 0)
+    const totalLiabilities = accounts.reduce((s, a) => s + Math.min(0, a.balance), 0)
+    const net              = totalAssets + totalLiabilities // liabilities already negative
+    return { totalCash, totalInvesting, totalDebt, totalAssets, totalLiabilities, net }
+  }, [accounts])
 
-  // Push budget snapshot + matching actuals snapshot together so undo/redo stays in sync
-  const pushBudgetHistory = (prevActuals?: Record<string, string>) => {
+  // ── V9.2 Transaction accounting helpers ──────────────────────────────────────
+  // These are pure helpers — no side effects. Used for the Transactions summary
+  // and future account balance reconciliation.
+  const isTransferLike = (type: TransactionType) => type === 'transfer' || type === 'credit card payment'
+  const periodRange = getPeriodDateRange(period)
+  const periodSpend = useMemo(() => transactions
+    .filter(tx => tx.date >= periodRange.start && tx.date <= periodRange.end && tx.type === 'expense')
+    .reduce((s, tx) => s + tx.amount, 0)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  , [transactions, period])
+  const periodIncome = useMemo(() => transactions
+    .filter(tx => tx.date >= periodRange.start && tx.date <= periodRange.end && tx.type === 'income')
+    .reduce((s, tx) => s + tx.amount, 0)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  , [transactions, period])
+
+  const createSnapshot = (): BudgetSnapshot => ({ categories: categories.map((c) => ({ ...c })), form: { ...form }, editId })
     const snap = createSnapshot()
     const aSnap = prevActuals ?? { ...actuals }
     setBudgetHistory((prev) => [...prev.slice(-19), snap])
@@ -968,7 +977,7 @@ export default function App() {
     })
   }
  const clearTxnForm = () => {
-    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '' })
+    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', toAccountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '' })
     setTxnHint('')
     setTxnDupWarning(false)
   }
@@ -1018,7 +1027,19 @@ export default function App() {
     }
 
    setTxnWithHistory(prev => [
-      { id: crypto.randomUUID(), date: txnForm.date, accountId: txnForm.accountId, merchant, amount, type: txnForm.type, categoryId: autoCategoryId || undefined, appliedByRule: matchedRuleId, notes: txnForm.notes.trim() || undefined, createdAt: new Date().toISOString() },
+      {
+        id: crypto.randomUUID(),
+        date: txnForm.date,
+        accountId: txnForm.accountId,
+        toAccountId: isTransferLike(txnForm.type) ? txnForm.toAccountId || undefined : undefined,
+        merchant,
+        amount,
+        type: txnForm.type,
+        categoryId: isTransferLike(txnForm.type) ? undefined : (autoCategoryId || undefined),
+        appliedByRule: isTransferLike(txnForm.type) ? undefined : matchedRuleId,
+        notes: txnForm.notes.trim() || undefined,
+        createdAt: new Date().toISOString(),
+      },
       ...prev,
     ])
     // Set blur guard BEFORE moving focus so Amount's onBlur skips its format-back
@@ -1062,14 +1083,14 @@ export default function App() {
         ...x,
         date: inlineTxnEditForm.date,
         accountId: inlineTxnEditForm.accountId,
+        toAccountId: isTransferLike(inlineTxnEditForm.type) ? inlineTxnEditForm.toAccountId || undefined : undefined,
         merchant,
         amount,
         type: inlineTxnEditForm.type,
-        categoryId: inlineTxnEditForm.categoryId || undefined,
+        categoryId: isTransferLike(inlineTxnEditForm.type) ? undefined : (inlineTxnEditForm.categoryId || undefined),
         notes: inlineTxnEditForm.notes.trim() || undefined,
         // V8.6.1 — If user manually changed the category, strip rule ownership
-        // so deleting the rule later won't clear this user-owned category.
-        appliedByRule: categoryChangedManually ? undefined : x.appliedByRule,
+        appliedByRule: isTransferLike(inlineTxnEditForm.type) ? undefined : (categoryChangedManually ? undefined : x.appliedByRule),
       }
     }))
     setInlineTxnEditId(null)
@@ -3088,6 +3109,17 @@ export default function App() {
                         </td>
                         <td colSpan={2} />
                       </tr>
+                      {/* V9.2 Net Worth groundwork — structured helpers surfaced here for transparency */}
+                      <tr>
+                        <td colSpan={5} className="pt-3 pb-1">
+                          <div className="flex flex-wrap gap-4 text-xs text-slate-500">
+                            <span>Cash: <span className="text-slate-300 font-medium">{currency(netWorth.totalCash)}</span></span>
+                            <span>Investments: <span className="text-slate-300 font-medium">{currency(netWorth.totalInvesting)}</span></span>
+                            <span>Debt: <span className="text-red-400 font-medium">{currency(netWorth.totalDebt)}</span></span>
+                            <span className="font-semibold">Net Worth: <span className={netWorth.net >= 0 ? 'text-green-300' : 'text-red-300'}>{currency(netWorth.net)}</span></span>
+                          </div>
+                        </td>
+                      </tr>
                     </tfoot>
                   </table>
                 </div>
@@ -3106,18 +3138,13 @@ export default function App() {
           <section className="space-y-4 transition-all duration-300">
             {/* ── V8.5 Review queue summary ── */}
             {transactions.length > 0 && (() => {
-              const range = getPeriodDateRange(period)
-              const periodSpend  = transactions
-                .filter(tx => tx.date >= range.start && tx.date <= range.end && (tx.type === 'expense' || tx.type === 'credit card payment'))
-                .reduce((s, tx) => s + tx.amount, 0)
-              const rulesApplied = transactions.filter(tx => tx.appliedByRule).length
               return (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {[
-                    { label: 'Uncategorized',     value: uncategorizedExpenseCount,          alert: uncategorizedExpenseCount > 0 },
-                    { label: 'Period Spend',       value: currency(periodSpend),              alert: false                          },
-                    { label: 'Rules Applied',      value: rulesApplied,                       alert: false                          },
-                    { label: 'Total Transactions', value: transactions.length,                alert: false                          },
+                    { label: 'Uncategorized',     value: uncategorizedExpenseCount,      alert: uncategorizedExpenseCount > 0 },
+                    { label: 'Period Spend',       value: currency(periodSpend),          alert: false },
+                    { label: 'Period Income',      value: currency(periodIncome),         alert: false },
+                    { label: 'Total Transactions', value: transactions.length,            alert: false },
                   ].map(({ label, value, alert }) => (
                     <div key={label} className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
                       <div className="text-xs text-slate-400 mb-1">{label}</div>
@@ -3181,6 +3208,23 @@ export default function App() {
                     {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                   </select>
                 </div>
+                {/* V9.2 — Transfer To Account (only for transfer / credit card payment) */}
+                {isTransferLike(txnForm.type) && (
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">
+                      {txnForm.type === 'credit card payment' ? 'Credit Card Being Paid' : 'Transfer To Account'}
+                    </label>
+                    <select
+                      className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                      value={txnForm.toAccountId}
+                      onChange={e => setTxnForm(v => ({ ...v, toAccountId: e.target.value }))}
+                    >
+                      <option value="">— destination account —</option>
+                      {accounts.filter(a => a.id !== txnForm.accountId).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                    <p className="text-[10px] text-slate-500 mt-0.5">Optional — helps track paired movements between accounts.</p>
+                  </div>
+                )}
                 {/* Merchant — boundary-aware arrows so normal cursor movement still works */}
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Merchant / Description</label>
@@ -3604,7 +3648,16 @@ export default function App() {
                             <td className="py-2 whitespace-nowrap space-x-2">
                               <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
                                 setInlineTxnEditId(tx.id)
-                                setInlineTxnEditForm({ date: tx.date, accountId: tx.accountId, merchant: tx.merchant, amount: String(tx.amount), type: tx.type, categoryId: tx.categoryId ?? '', notes: tx.notes ?? '' })
+                                setInlineTxnEditForm({
+                                  date: tx.date,
+                                  accountId: tx.accountId,
+                                  toAccountId: tx.toAccountId ?? '',
+                                  merchant: tx.merchant,
+                                  amount: String(tx.amount),
+                                  type: tx.type,
+                                  categoryId: tx.categoryId ?? '',
+                                  notes: tx.notes ?? '',
+                                })
                                 setTxnDupWarning(false)
                                 setTimeout(() => { inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select() }, 0)
                               }}>Edit</button>
@@ -4223,7 +4276,7 @@ export default function App() {
             </div>
 
             <Card title="Savings Goal Sets" noHover>
-              <div className="grid md:grid-cols-3 gap-2">
+              <div className="grid md:grid-cols-2 gap-2">
                 <input
                   className="p-2 rounded bg-slate-800 border border-slate-600"
                   value={targetSetName}
@@ -4241,22 +4294,14 @@ export default function App() {
                     }
                   }}
                 />
-                <button className="rounded bg-blue-600" onClick={() => {
+                <button className="rounded bg-blue-600 hover:bg-blue-500 transition-colors px-4 py-2 text-sm" onClick={() => {
                   const n = targetSetName.trim()
                   if (!n) return
                   pushSetHistory(savedTargetSets)
                   setSavedTargetSets([{ name: n, targets, savedAt: new Date().toISOString() }, ...savedTargetSets.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
+                  setTargetSetName('')
                   showToast('Savings goal set saved.')
-                }}>Save</button>
-                <div className="flex items-center gap-2">
-                  <div className="text-xs text-slate-400">Saved locally</div>
-                  {savedTargetSetsHistory.length > 0 && (
-                    <button onClick={undoSavedSets} className="text-xs text-slate-400 hover:text-slate-200 underline">Undo</button>
-                  )}
-                  {savedTargetSetsRedo.length > 0 && (
-                    <button onClick={redoSavedSets} className="text-xs text-slate-400 hover:text-slate-200 underline">Redo</button>
-                  )}
-                </div>
+                }}>Save Goal Set</button>
               </div>
               <div className="space-y-2 mt-2">
                 {savedTargetSets.map((s, idx) => (
