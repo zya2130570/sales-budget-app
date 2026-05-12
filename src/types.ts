@@ -1,4 +1,4 @@
-export type Tab = 'Dashboard' | 'Income' | 'Budget' | 'Accounts' | 'Transactions' | 'Scenarios' | 'Targets'
+export type Tab = 'Dashboard' | 'Income' | 'Budget' | 'Scenarios' | 'Targets' | 'Accounts' | 'Transactions'
 export type Period = 'weekly' | 'bi-weekly' | 'monthly' | 'yearly'
 export type CategoryType = 'fixed bill' | 'variable spending' | 'savings' | 'investing'
 export type Category = { id: string; name: string; amount: number; type: CategoryType }
@@ -9,51 +9,11 @@ export type BudgetSnapshot = { categories: Category[]; form: { name: string; amo
 export type Contribution = { id: string; date: string; amount: number; note: string }
 export type Target = { id: string; name: string; goalAmount: number; currentSaved: number; startDate?: string; deadline: string; createdAt?: string; type: 'savings'; contributions: Contribution[]; completed?: boolean }
 export type SavedTargetSet = { name: string; targets: Target[]; savedAt: string }
-
-// ── V8 — Accounts ─────────────────────────────────────────────────────────────
-
 export type AccountType = 'checking' | 'savings' | 'credit card' | 'investment' | 'cash' | 'roth ira' | 'retirement' | 'other'
-
-export type Account = {
-  id: string
-  name: string
-  type: AccountType
-  balance: number
-  institution: string
-  createdAt: string
-}
-
-// ── V8 — Transactions ─────────────────────────────────────────────────────────
-
+export type Account = { id: string; name: string; type: AccountType; balance: number; institution: string; createdAt: string }
 export type TransactionType = 'expense' | 'income' | 'transfer' | 'credit card payment'
-
-export type Transaction = {
-  id: string
-  date: string
-  accountId: string
-  merchant: string
-  amount: number
-  type: TransactionType
-  categoryId?: string
-  notes?: string
-  appliedByRule?: string   // rule id that auto-assigned the category (V8.5)
-  createdAt: string
-  // ── V9.0 CSV import metadata (optional; only present on imported transactions) ──
-  importedAt?: string      // ISO timestamp of when the import was committed
-  importBatchId?: string   // groups all rows from one import session
-  importSource?: 'csv'     // always 'csv' for now; extensible later
-}
-
-// ── V8.3 — Transaction Rules ──────────────────────────────────────────────────
-// Keyword-based rules that auto-assign a budget category to matching transactions.
-// matchText supports comma-separated aliases: "Target, TGT, Target Store"
-
-export type TransactionRule = {
-  id: string
-  name: string
-  matchText: string              // comma-separated aliases, case-insensitive
-  matchField: 'merchant' | 'notes'
-  categoryId: string
-  type?: TransactionType         // optional filter: only fire for this transaction type
-  createdAt: string
-}
+export type Transaction = { id: string; date: string; accountId: string; merchant: string; amount: number; type: TransactionType; categoryId?: string; notes?: string; appliedByRule?: string; createdAt: string }
+export type TransactionRule = { id: string; name: string; matchText: string; matchField: 'merchant' | 'notes'; categoryId: string; type?: TransactionType; createdAt: string }
+export type TakeHomeMode = 'simple' | 'manual'
+export type TakeHomeSettings = { mode: TakeHomeMode; simpleRate: number; manualMonthlyNet: number }
+export const DEFAULT_TAKE_HOME_SETTINGS: TakeHomeSettings = { mode: 'simple', simpleRate: 0.8243, manualMonthlyNet: 0 }
