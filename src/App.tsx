@@ -128,7 +128,6 @@ const EXPENSE_MERCHANTS  = ['Target', 'Walmart', "Fry's", 'Shell', 'Chevron', 'C
 const INCOME_MERCHANTS   = ['Payroll', 'Direct Deposit', 'Paycheck', 'Bonus', 'Refund', 'Venmo Cashout', 'Tax Refund']
 const TRANSFER_MERCHANTS = ['Chase Transfer', 'Savings Transfer', 'Internal Transfer', 'Brokerage Transfer']
 // Keep for backward-compat references (generateTenSamples uses it)
-const SAMPLE_MERCHANTS   = EXPENSE_MERCHANTS
 const SAMPLE_ACCOUNT_TEMPLATES: Array<{ name: string; type: AccountType; balance: number; institution: string }> = [
   { name: 'Chase Checking',       type: 'checking',    balance: 2500,   institution: 'Chase'            },
   { name: 'Ally Savings',         type: 'savings',     balance: 8500,   institution: 'Ally'             },
@@ -2542,7 +2541,6 @@ export default function App() {
                       // colSpan math: Name + Type + planned + [monthly ref?] + Actual + Variance + Actions
                       // We show inputs spanning all columns. Blur-save fires when focus leaves the row.
                       const extraCols = (period === 'weekly' || period === 'bi-weekly' || period === 'yearly') ? 1 : 0
-                      const totalCols = 5 + extraCols // name, type, planned, [monthly], actual, variance, actions = varies
                       return (
                         <tr
                           key={c.id}
