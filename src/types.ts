@@ -46,7 +46,20 @@ export type Transaction = {
   importSource?: 'csv'
 }
 
-// ── V8.3 — Transaction Rules ──────────────────────────────────────────────────
+// ── V9.1 — Take-home settings ─────────────────────────────────────────────────
+// Persisted overrides for the income take-home rate calculation.
+// All fields are optional so existing storage without them still loads safely.
+
+export type TakeHomeSettings = {
+  /** Override the default TAKE_HOME_RATE (e.g. 0.78 for a lower net rate). */
+  takeHomeRate?: number
+  /** If true, use the custom rate instead of the calculated default. */
+  useCustomRate?: boolean
+  /** Filing status used for tax estimation. */
+  filingStatus?: 'single' | 'married_jointly' | 'married_separately' | 'head_of_household'
+  /** State abbreviation for state-tax estimation (e.g. "CA", "TX"). */
+  state?: string
+}
 // Keyword-based rules that auto-assign a budget category to matching transactions.
 // matchText supports comma-separated aliases: "Target, TGT, Target Store"
 
