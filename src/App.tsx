@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule } from './types'
-
-const isMoneyMovement = (type: TransactionType): boolean =>
-  type === 'transfer' || type === 'credit card payment'
+import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule, TakeHomeSettings } from './types'
+import { DEFAULT_TAKE_HOME_SETTINGS } from './types'
 import { currency, labelPeriod, formatDate } from './utils/formatting'
 import {
   BASE_SALARY,
@@ -16,7 +14,7 @@ import {
   computeTargetStatus,
   requiredForTarget,
   computeDashboardStatus,
-  estimateTaxBreakdown,
+  TAKE_HOME_RATE,
 } from './utils/calculations'
 import type { DashboardStatus } from './utils/calculations'
 import {
@@ -40,12 +38,10 @@ import {
   saveAccounts,
   saveTransactions,
   saveTransactionRules,
+  loadTakeHomeSettings,
+  saveTakeHomeSettings,
   runMigrations,
 } from './utils/storage'
-// V9.0 — CSV import pipeline
-import { runImportPipeline, buildImportedTransactions } from './utils/importHelpers'
-import type { ImportPipelineResult } from './utils/importHelpers'
-import { parseCsv, detectColumns, generateSampleCsvString } from './utils/csv'
 
 const presetTypeMap: Record<string, CategoryType> = {
   Bike: 'fixed bill',
@@ -134,7 +130,7 @@ function getPeriodDateRange(period: Period): { start: string; end: string } {
 const EXPENSE_MERCHANTS  = ['Target', 'Walmart', "Fry's", 'Shell', 'Chevron', 'Costco', 'Amazon', 'Starbucks', 'Chipotle', 'Uber', 'Best Buy', 'CVS', "McDonald's", 'Walgreens', 'Apple', 'Lyft']
 const INCOME_MERCHANTS   = ['Payroll', 'Direct Deposit', 'Paycheck', 'Bonus', 'Refund', 'Venmo Cashout', 'Tax Refund']
 const TRANSFER_MERCHANTS = ['Chase Transfer', 'Savings Transfer', 'Internal Transfer', 'Brokerage Transfer']
-// Keep for backward-compat references (generateTenSamples uses it)
+// EXPENSE_MERCHANTS is the primary pool; no SAMPLE_MERCHANTS alias needed
 const SAMPLE_ACCOUNT_TEMPLATES: Array<{ name: string; type: AccountType; balance: number; institution: string }> = [
   { name: 'Chase Checking',       type: 'checking',    balance: 2500,   institution: 'Chase'            },
   { name: 'Ally Savings',         type: 'savings',     balance: 8500,   institution: 'Ally'             },
@@ -213,6 +209,21 @@ export default function App() {
   const [dashboardQuickTargetId, setDashboardQuickTargetId] = useState('')
   const [dashboardQuickAmount, setDashboardQuickAmount] = useState('')
   const [baseBumpsAchieved, setBaseBumpsAchieved] = useState(0)
+
+  // V9.1 — Take-home pay settings (lazy-init from localStorage so save effect doesn't race)
+  const [takeHomeSettings, setTakeHomeSettings] = useState<TakeHomeSettings>(() => {
+    const saved = loadTakeHomeSettings()
+    return saved ?? DEFAULT_TAKE_HOME_SETTINGS
+  })
+  // Local input strings for the settings form (avoids re-parsing on every keystroke)
+  const [thsRateInput, setThsRateInput] = useState(() =>
+    ((loadTakeHomeSettings()?.simpleRate ?? DEFAULT_TAKE_HOME_SETTINGS.simpleRate) * 100).toFixed(2)
+  )
+  const [thsManualInput, setThsManualInput] = useState(() => {
+    const s = loadTakeHomeSettings()
+    return (s && s.manualMonthlyNet > 0) ? String(s.manualMonthlyNet) : ''
+  })
+  const [thsHint, setThsHint] = useState('')
   const [budgetTitle, setBudgetTitle] = useState('')
   const [scenarioTitle, setScenarioTitle] = useState('')
   const [changeSummary, setChangeSummary] = useState<string[]>([])
@@ -226,6 +237,24 @@ export default function App() {
   const [budgetHistory, setBudgetHistory] = useState<BudgetSnapshot[]>([])
   const [budgetRedo, setBudgetRedo] = useState<BudgetSnapshot[]>([])
   const [form, setForm] = useState({ name: '', amount: '', type: 'fixed bill' as CategoryType })
+
+  // V9.1 — Budget category inline edit (edit-in-row, not top form)
+  const [inlineCatEditId, setInlineCatEditId]     = useState<string | null>(null)
+  const [inlineCatEditForm, setInlineCatEditForm] = useState<{
+    name: string; type: CategoryType; amount: string; actual: string; actualAtStart: string
+  }>({ name: '', type: 'fixed bill', amount: '', actual: '', actualAtStart: '' })
+  const inlineCatRowRef    = useRef<HTMLTableRowElement | null>(null)
+  const inlineCatNameRef   = useRef<HTMLInputElement>(null)
+  const inlineCatTypeRef   = useRef<HTMLSelectElement>(null)
+  const inlineCatAmountRef = useRef<HTMLInputElement>(null)
+  const inlineCatActualRef = useRef<HTMLInputElement>(null)
+  const inlineCatSaveRef   = useRef<HTMLButtonElement>(null)
+
+  // V9.1 — Saved goal set rename + undo
+  const [editingSetIdx, setEditingSetIdx]           = useState<number | null>(null)
+  const [renameSetValue, setRenameSetValue]         = useState('')
+  const [savedSetsHistory, setSavedSetsHistory]     = useState<SavedTargetSet[][]>([])
+  const [savedSetsRedo, setSavedSetsRedo]           = useState<SavedTargetSet[][]>([])
 
   // ── V7.5 Plan vs Actual ──────────────────────────────────────────────────────
   // Keyed by category id → raw string so blank stays blank, never forced to "0".
@@ -417,7 +446,6 @@ export default function App() {
     type: 'expense' as TransactionType,
     categoryId: '',
     notes: '',
-    toAccountId: '',
   })
   const [txnHistory, setTxnHistory]           = useState<Transaction[][]>([])
   const [txnRedo, setTxnRedo]                 = useState<Transaction[][]>([])
@@ -429,16 +457,6 @@ export default function App() {
   const [accountHint, setAccountHint]         = useState('')
   const [txnHint, setTxnHint]                 = useState('')
 
-  // V9.0 — CSV import state
-  const [csvImportOpen, setCsvImportOpen]       = useState(false)
-  const [csvImportPreview, setCsvImportPreview] = useState<ImportPipelineResult | null>(null)
-  const [csvImportLoading, setCsvImportLoading] = useState(false)
-  const [csvImportError, setCsvImportError]     = useState('')
-  const csvFileInputRef                         = useRef<HTMLInputElement>(null)
-
-  // V9.0.1 — Back to top
-  const [showScrollTop, setShowScrollTop] = useState(false)
-
   // V8.6.3 — Uncategorized glow: suppressed once the user clicks the pill; re-arms on new items
   const uncategorizedGlowSeenRef  = useRef(false)
   const prevUncategorizedCountRef = useRef(0)
@@ -447,7 +465,7 @@ export default function App() {
   const [inlineTxnEditId, setInlineTxnEditId] = useState<string | null>(null)
   const [inlineTxnEditForm, setInlineTxnEditForm] = useState({
     date: '', accountId: '', merchant: '', amount: '',
-    type: 'expense' as TransactionType, categoryId: '', notes: '', toAccountId: '',
+    type: 'expense' as TransactionType, categoryId: '', notes: '',
   })
 
   // V8.3 — Transaction Rules
@@ -468,54 +486,20 @@ export default function App() {
   const [overwriteCategories, setOverwriteCategories] = useState(false)
   const [applyRulesMsg, setApplyRulesMsg]     = useState('')
 
-  // V9.1 — Budget category inline edit
-  const [inlineCatEditId, setInlineCatEditId]   = useState<string | null>(null)
-  const [inlineCatEditForm, setInlineCatEditForm] = useState<{
-    name: string; type: CategoryType; amount: string; actual: string; actualAtStart: string
-  }>({ name: '', type: 'fixed bill', amount: '', actual: '', actualAtStart: '' })
-  const inlineCatRowRef    = useRef<HTMLTableRowElement | null>(null)
-  const inlineCatNameRef   = useRef<HTMLInputElement>(null)
-  const inlineCatTypeRef   = useRef<HTMLSelectElement>(null)
-  const inlineCatAmountRef = useRef<HTMLInputElement>(null)
-  const inlineCatActualRef = useRef<HTMLInputElement>(null)
-  const inlineCatSaveRef   = useRef<HTMLButtonElement>(null)
-
-  // V9.1 — Savings Goal Set rename state + undo history
-  const [editingSetIdx, setEditingSetIdx]   = useState<number | null>(null)
-  const [renameSetValue, setRenameSetValue] = useState('')
-  const [savedTargetSetsHistory, setSavedTargetSetsHistory] = useState<SavedTargetSet[][]>([])
-  const [savedTargetSetsRedo, setSavedTargetSetsRedo]       = useState<SavedTargetSet[][]>([])
-
-  const pushSetHistory = (prev: SavedTargetSet[]) => {
-    setSavedTargetSetsHistory(h => [...h.slice(-19), prev])
-    setSavedTargetSetsRedo([])
-  }
-  const undoSavedSets = () => {
-    setSavedTargetSetsHistory(h => {
-      if (!h.length) return h
-      const next = [...h]
-      const prior = next.pop()!
-      setSavedTargetSetsRedo(r => [...r.slice(-19), savedTargetSets])
-      setSavedTargetSets(prior)
-      return next
-    })
-  }
-  const redoSavedSets = () => {
-    setSavedTargetSetsRedo(r => {
-      if (!r.length) return r
-      const next = [...r]
-      const snap = next.pop()!
-      setSavedTargetSetsHistory(h => [...h.slice(-19), savedTargetSets])
-      setSavedTargetSets(snap)
-      return next
-    })
-  }
-
   const gp = Math.max(0, Number(gpInput) || 0)
   const adjustedSalary = BASE_SALARY + (baseBumpsAchieved * 5000)
   const eligibleBumps = BUMP_THRESHOLDS.filter(t => gp >= t).length
   const nextUnreachedThreshold = BUMP_THRESHOLDS[eligibleBumps]
-  const inc = useMemo(() => income(gp, adjustedSalary), [gp, adjustedSalary])
+  // V9.1 — derive the take-home rate to use from settings
+  const effectiveTakeHomeRate = (() => {
+    if (takeHomeSettings.mode === 'manual') {
+      const grossMonthly = adjustedSalary / 12
+      if (grossMonthly <= 0) return TAKE_HOME_RATE
+      return Math.min(1, Math.max(0.01, takeHomeSettings.manualMonthlyNet / grossMonthly))
+    }
+    return Math.min(1, Math.max(0.01, takeHomeSettings.simpleRate))
+  })()
+  const inc = useMemo(() => income(gp, adjustedSalary, effectiveTakeHomeRate), [gp, adjustedSalary, effectiveTakeHomeRate])
   const grossSalary = adjustedSalary + (inc.cMonthly * 12)
 
   // Reset base bumps if GP drops below 20000
@@ -548,7 +532,9 @@ export default function App() {
     const ac = loadAccounts(); if (ac) setAccounts(ac)
     const tx = loadTransactions(); if (tx) setTransactions(tx)
     const rl = loadTransactionRules(); if (rl) setRules(rl)
+    // V9.1 — take-home settings are lazy-initialized above; nothing to reload here
   }, [])
+  useEffect(() => { saveTakeHomeSettings(takeHomeSettings) }, [takeHomeSettings])
   useEffect(() => saveTab(tab), [tab])
   useEffect(() => savePeriod(period), [period])
   useEffect(() => saveCategories(categories), [categories])
@@ -559,13 +545,6 @@ export default function App() {
   useEffect(() => saveAccounts(accounts), [accounts])
   useEffect(() => saveTransactions(transactions), [transactions])
  useEffect(() => saveTransactionRules(rules), [rules])
-
-  // V9.0.1 — Back-to-top: show button once user scrolls down 400px
-  useEffect(() => {
-    const onScroll = () => setShowScrollTop(window.scrollY > 400)
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
 
   // V8.7 — auto-select the only account in the transaction form
   useEffect(() => {
@@ -660,8 +639,8 @@ export default function App() {
   const plannedPeriodTotal = convertFromMonthly(monthlyBudget, period)
 
   // ── V8.4 Transaction-driven actuals ──────────────────────────────────────────
-  // V9.2: Transfers and credit card payments are money movements — excluded from
-  // budget category spending totals. Only genuine expenses count toward actuals.
+  // Sum categorized transaction amounts within the current period window.
+  // Only expense/transfer/credit-card-payment transactions count toward spending.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const txnActuals = useMemo(() => {
     const range = getPeriodDateRange(period)
@@ -669,8 +648,6 @@ export default function App() {
     for (const tx of transactions) {
       if (!tx.categoryId) continue
       if (tx.date < range.start || tx.date > range.end) continue
-      // V9.2 — exclude transfers and credit card payments from budget spending
-      if (isMoneyMovement(tx.type)) continue
       result[tx.categoryId] = (result[tx.categoryId] ?? 0) + tx.amount
     }
     return result
@@ -726,61 +703,6 @@ export default function App() {
 
   // ── V7.3 Dashboard Status Engine ───────────────────────────────────────────
   const activeTargets = targets.filter(t => !t.completed && (t.goalAmount <= 0 || t.currentSaved < t.goalAmount))
-
-  // ── V9.2 Account Balance Engine ─────────────────────────────────────────────
-  // Computes transaction-adjusted balances by applying all transactions on top of
-  // the manual base balance set on each account. This is additive — base balance
-  // is the user's starting point, transactions adjust from there.
-  const computedAccountBalances = useMemo((): Record<string, number> => {
-    const deltas: Record<string, number> = {}
-    for (const tx of transactions) {
-      // Expense: decreases source account
-      if (tx.type === 'expense') {
-        deltas[tx.accountId] = (deltas[tx.accountId] ?? 0) - tx.amount
-      }
-      // Income: increases destination account
-      if (tx.type === 'income') {
-        deltas[tx.accountId] = (deltas[tx.accountId] ?? 0) + tx.amount
-      }
-      // Transfer: decreases source, increases destination
-      if (tx.type === 'transfer') {
-        deltas[tx.accountId] = (deltas[tx.accountId] ?? 0) - tx.amount
-        if (tx.toAccountId) {
-          deltas[tx.toAccountId] = (deltas[tx.toAccountId] ?? 0) + tx.amount
-        }
-      }
-      // Credit card payment: decreases checking (source), decreases card balance owed (destination)
-      if (tx.type === 'credit card payment') {
-        deltas[tx.accountId] = (deltas[tx.accountId] ?? 0) - tx.amount
-        if (tx.toAccountId) {
-          // Credit card balance is negative (debt) — payment reduces the debt (increases toward 0)
-          deltas[tx.toAccountId] = (deltas[tx.toAccountId] ?? 0) + tx.amount
-        }
-      }
-    }
-    const result: Record<string, number> = {}
-    for (const acct of accounts) {
-      result[acct.id] = acct.balance + (deltas[acct.id] ?? 0)
-    }
-    return result
-  }, [accounts, transactions])
-
-  // V9.2 — Net worth summary helpers (groundwork for future Dashboard widget)
-  const netWorthSummary = useMemo(() => {
-    let totalCash = 0, totalDebt = 0, totalInvestments = 0
-    for (const acct of accounts) {
-      const bal = computedAccountBalances[acct.id] ?? acct.balance
-      if (acct.type === 'credit card') {
-        totalDebt += Math.abs(Math.min(0, bal))
-      } else if (acct.type === 'investment' || acct.type === 'roth ira' || acct.type === 'retirement') {
-        totalInvestments += Math.max(0, bal)
-      } else {
-        totalCash += bal
-      }
-    }
-    const netWorth = totalCash + totalInvestments - totalDebt
-    return { totalCash, totalDebt, totalInvestments, netWorth }
-  }, [accounts, computedAccountBalances])
 
   // ── V8.6.3 Uncategorized expense count ──────────────────────────────────────
   // Single source of truth: expense transactions with no budget category assigned.
@@ -1031,7 +953,7 @@ export default function App() {
     })
   }
  const clearTxnForm = () => {
-    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '', toAccountId: '' })
+    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '' })
     setTxnHint('')
     setTxnDupWarning(false)
   }
@@ -1081,7 +1003,7 @@ export default function App() {
     }
 
    setTxnWithHistory(prev => [
-      { id: crypto.randomUUID(), date: txnForm.date, accountId: resolvedAccountId, merchant, amount, type: txnForm.type, categoryId: autoCategoryId || undefined, appliedByRule: matchedRuleId, notes: txnForm.notes.trim() || undefined, toAccountId: txnForm.toAccountId || undefined, createdAt: new Date().toISOString() },
+      { id: crypto.randomUUID(), date: txnForm.date, accountId: txnForm.accountId, merchant, amount, type: txnForm.type, categoryId: autoCategoryId || undefined, appliedByRule: matchedRuleId, notes: txnForm.notes.trim() || undefined, createdAt: new Date().toISOString() },
       ...prev,
     ])
     // Set blur guard BEFORE moving focus so Amount's onBlur skips its format-back
@@ -1130,7 +1052,6 @@ export default function App() {
         type: inlineTxnEditForm.type,
         categoryId: inlineTxnEditForm.categoryId || undefined,
         notes: inlineTxnEditForm.notes.trim() || undefined,
-        toAccountId: inlineTxnEditForm.toAccountId || undefined,
         // V8.6.1 — If user manually changed the category, strip rule ownership
         // so deleting the rule later won't clear this user-owned category.
         appliedByRule: categoryChangedManually ? undefined : x.appliedByRule,
@@ -1394,10 +1315,10 @@ export default function App() {
     const range = getPeriodDateRange(period)
     const startMs = new Date(range.start + 'T00:00:00').getTime()
     const endMs   = Math.min(new Date(range.end + 'T23:59:59').getTime(), Date.now())
-    // Build 10 varied transactions — mix of types, ~30% uncategorized, ~15% duplicate-like
     const batch: Transaction[] = []
+    // Build 10 varied transactions — mix of types, ~30% uncategorized, ~15% duplicate-like
     for (let i = 0; i < 10; i++) {
-      const roll     = Math.random()
+    const roll     = Math.random()
       const type: TransactionType = roll < 0.72 ? 'expense' : roll < 0.84 ? 'income' : roll < 0.93 ? 'transfer' : 'credit card payment'
       const merchant =
         type === 'income'               ? INCOME_MERCHANTS[Math.floor(Math.random() * INCOME_MERCHANTS.length)]
@@ -1405,7 +1326,7 @@ export default function App() {
         : type === 'credit card payment'? 'Credit Card Payment'
         : EXPENSE_MERCHANTS[Math.floor(Math.random() * EXPENSE_MERCHANTS.length)]
       const amount   = (Math.floor(Math.random() * 19) + 1) * 5
-      const catPool  = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
+        const catPool  = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
       const categoryId = Math.random() < 0.7 && catPool.length ? catPool[Math.floor(Math.random() * catPool.length)].id : undefined
       const accountId  = accounts[0]?.id ?? ''
       const date       = new Date(startMs + Math.random() * (endMs - startMs)).toISOString().slice(0, 10)
@@ -1422,92 +1343,6 @@ export default function App() {
     // Highlight the first generated row so the user knows where to look
     flashHighlight(firstId, setHighlightedTxnId, highlightTxnTimerRef)
     showToast(`${batch.length} sample transactions added.`)
-  }
-
-  // ── V9.0 CSV Import handlers ──────────────────────────────────────────────────
-
-  const openCsvImport = () => {
-    setCsvImportOpen(true)
-    setCsvImportPreview(null)
-    setCsvImportError('')
-  }
-  const closeCsvImport = () => {
-    setCsvImportOpen(false)
-    setCsvImportPreview(null)
-    setCsvImportError('')
-  }
-  const processCsvText = (text: string) => {
-    setCsvImportLoading(true)
-    setCsvImportError('')
-    try {
-      const parsed = parseCsv(text)
-      if (parsed.errorMessage) {
-        setCsvImportError(parsed.errorMessage)
-        return
-      }
-      if (parsed.rows.length === 0) {
-        setCsvImportError('No rows found. Make sure the CSV has a header row and at least one data row.')
-        return
-      }
-      const mapping = detectColumns(parsed.headers)
-      const preview = runImportPipeline({
-        rows: parsed.rows,
-        mapping,
-        existing: transactions,
-        rules,
-        defaultAccountId: accounts[0]?.id ?? '',
-      })
-      setCsvImportPreview(preview)
-    } catch {
-      setCsvImportError('Failed to parse the CSV. Please check the file format and try again.')
-    } finally {
-      setCsvImportLoading(false)
-    }
-  }
-  const handleCsvFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => { const text = ev.target?.result; if (typeof text === 'string') processCsvText(text) }
-    reader.onerror = () => setCsvImportError('Could not read the file. Please try again.')
-    reader.readAsText(file)
-    e.target.value = ''
-  }
-  const handleCsvDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault()
-    const file = e.dataTransfer.files?.[0]
-    if (!file) return
-    if (!file.name.toLowerCase().endsWith('.csv') && file.type !== 'text/csv' && file.type !== 'text/plain') {
-      setCsvImportError('Please drop a .csv file.')
-      return
-    }
-    const reader = new FileReader()
-    reader.onload = ev => { const text = ev.target?.result; if (typeof text === 'string') processCsvText(text) }
-    reader.onerror = () => setCsvImportError('Could not read the file.')
-    reader.readAsText(file)
-  }
-  const commitCsvImport = () => {
-    if (!csvImportPreview) return
-    const batchId = crypto.randomUUID().slice(0, 8)
-    const newTxns = buildImportedTransactions(
-      csvImportPreview.importRows,
-      accounts[0]?.id ?? '',
-      batchId,
-      false,
-    )
-    if (newTxns.length === 0) { closeCsvImport(); return }
-    setTxnWithHistory(prev => [...newTxns, ...prev])
-    closeCsvImport()
-    if (newTxns[0]) flashHighlight(newTxns[0].id, setHighlightedTxnId, highlightTxnTimerRef)
-    showUndoableToast(`Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''}.`, undoTxn)
-  }
-  const downloadSampleCsv = () => {
-    const text = generateSampleCsvString()
-    const blob = new Blob([text], { type: 'text/csv' })
-    const url  = URL.createObjectURL(blob)
-    const a    = document.createElement('a')
-    a.href = url; a.download = 'flow-sample-transactions.csv'; a.click()
-    URL.revokeObjectURL(url)
   }
 
   const upsert = () => {
@@ -1543,7 +1378,7 @@ export default function App() {
     budgetNameRef.current?.focus()
   }
 
-  // V9.1 — Budget category inline edit helpers
+  // V9.1 — Inline budget category edit ----------------------------------------
   const saveInlineCatEdit = () => {
     if (!inlineCatEditId) return
     const n = inlineCatEditForm.name.trim()
@@ -1551,18 +1386,48 @@ export default function App() {
     const amt = Math.max(0, Number(inlineCatEditForm.amount) || 0)
     const monthlyAmt = convertToMonthly(amt, period)
     if (monthlyAmt <= 0) return
+    // Capture current actuals BEFORE updating, for undo
+    const prevActuals = { ...actuals }
     const actualStr = inlineCatEditForm.actual.replace(/[^0-9.-]/g, '')
-    // Snapshot both budget and actuals together so undo restores both
-    pushBudgetHistory({ ...actuals })
-    setCategories(prev => prev.map(c => c.id === inlineCatEditId ? { ...c, name: n, amount: monthlyAmt, type: inlineCatEditForm.type } : c))
-    setActuals(prev => ({ ...prev, [inlineCatEditId]: actualStr || '' }))
+    pushBudgetHistory(prevActuals)
+    setCategories(prev => prev.map(c => c.id === inlineCatEditId
+      ? { ...c, name: n, amount: monthlyAmt, type: inlineCatEditForm.type }
+      : c
+    ))
+    setActuals(prev => ({ ...prev, [inlineCatEditId]: actualStr }))
     setInlineCatEditId(null)
   }
   const cancelInlineCatEdit = () => {
     if (!inlineCatEditId) return
-    // Restore actual to its pre-edit value
+    // Restore actual to pre-edit value
     setActuals(prev => ({ ...prev, [inlineCatEditId]: inlineCatEditForm.actualAtStart }))
     setInlineCatEditId(null)
+  }
+
+  // V9.1 — Saved goal sets helpers ---------------------------------------------
+  const pushSetsHistory = (prev: SavedTargetSet[]) => {
+    setSavedSetsHistory(h => [...h.slice(-19), prev])
+    setSavedSetsRedo([])
+  }
+  const undoSavedSets = () => {
+    setSavedSetsHistory(h => {
+      if (!h.length) return h
+      const next = [...h]
+      const prior = next.pop()!
+      setSavedSetsRedo(r => [...r.slice(-19), savedTargetSets])
+      setSavedTargetSets(prior)
+      return next
+    })
+  }
+  const redoSavedSets = () => {
+    setSavedSetsRedo(r => {
+      if (!r.length) return r
+      const next = [...r]
+      const snap = next.pop()!
+      setSavedSetsHistory(h => [...h.slice(-19), savedTargetSets])
+      setSavedTargetSets(snap)
+      return next
+    })
   }
 
   const addTargetContribution = (targetId: string, amount: number, date: string, note: string) => {
@@ -2349,56 +2214,132 @@ export default function App() {
                 </p>
               )}
             </Card>
-            {/* V9.1 — Arizona take-home estimate */}
-            {(() => {
-              const bd = estimateTaxBreakdown(adjustedSalary)
-              return (
-                <Card title="Estimated Take-Home (Arizona, Single Filer)">
-                  <p className="text-xs text-slate-400 mb-3">
-                    Take-home pay is estimated automatically using simplified 2025 federal, Arizona state, and FICA assumptions. This is an estimate — not certified tax advice.
+            {/* ── V9.1 Take-Home Settings ── */}
+            <Card title="Take-Home Pay Settings">
+              <p className="text-xs text-slate-400 mb-3">
+                Simple mode uses your chosen take-home percentage. Manual mode uses your expected monthly net pay directly.
+              </p>
+              {/* Mode toggle */}
+              <div className="flex gap-2 mb-4">
+                <button
+                  onClick={() => setTakeHomeSettings(s => ({ ...s, mode: 'simple' }))}
+                  className={`rounded-lg px-4 py-1.5 text-sm transition-colors ${takeHomeSettings.mode === 'simple' ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
+                >
+                  Simple Rate
+                </button>
+                <button
+                  onClick={() => setTakeHomeSettings(s => ({ ...s, mode: 'manual' }))}
+                  className={`rounded-lg px-4 py-1.5 text-sm transition-colors ${takeHomeSettings.mode === 'manual' ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
+                >
+                  Manual Net Pay
+                </button>
+              </div>
+
+              {takeHomeSettings.mode === 'simple' ? (
+                <div className="space-y-2">
+                  <label className="block text-xs text-slate-400">Take-home percentage (after all taxes and deductions)</label>
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1 max-w-[160px]">
+                      <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        step={0.01}
+                        className="w-full px-2 py-1.5 pr-7 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                        value={thsRateInput}
+                        onChange={e => setThsRateInput(e.target.value)}
+                        onBlur={() => {
+                          const v = parseFloat(thsRateInput)
+                          if (isNaN(v) || v <= 0 || v > 100) {
+                            setThsHint('Enter a percentage between 1 and 100.')
+                            setThsRateInput((takeHomeSettings.simpleRate * 100).toFixed(2))
+                          } else {
+                            setThsHint('')
+                            setTakeHomeSettings(s => ({ ...s, simpleRate: v / 100 }))
+                          }
+                        }}
+                        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                      />
+                      <span className="absolute right-2 top-1.5 text-slate-400 text-sm">%</span>
+                    </div>
+                    <button
+                      className="rounded-lg px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
+                      onClick={() => {
+                        const defaultRate = DEFAULT_TAKE_HOME_SETTINGS.simpleRate
+                        setTakeHomeSettings(s => ({ ...s, mode: 'simple', simpleRate: defaultRate }))
+                        setThsRateInput((defaultRate * 100).toFixed(2))
+                        setThsHint('')
+                        showToast('Take-home settings reset to default (82.43%).')
+                      }}
+                    >
+                      Reset to Default
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Example: 82.43% means $41,000 gross → $33,796 net per year. Adjust to match your actual paycheck stub.
                   </p>
-                  <div className="grid md:grid-cols-2 gap-3 mb-3">
-                    <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-1">Estimated Annual Gross</div>
-                      <div className="text-lg font-bold text-slate-200">{currency(bd.grossAnnual)}</div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <label className="block text-xs text-slate-400">Expected monthly net pay (base pay only, excluding commission)</label>
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1 max-w-[200px]">
+                      <span className="absolute left-2 top-1.5 text-slate-400 text-sm">$</span>
+                      <input
+                        type="number"
+                        min={1}
+                        step={50}
+                        className="w-full pl-6 pr-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                        placeholder="e.g. 2800"
+                        value={thsManualInput}
+                        onChange={e => setThsManualInput(e.target.value)}
+                        onBlur={() => {
+                          const v = parseFloat(thsManualInput)
+                          if (isNaN(v) || v <= 0) {
+                            setThsHint('Enter your expected monthly net pay.')
+                          } else {
+                            setThsHint('')
+                            setTakeHomeSettings(s => ({ ...s, manualMonthlyNet: v }))
+                          }
+                        }}
+                        onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                      />
                     </div>
-                    <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-1">Est. Effective Take-Home Rate</div>
-                      <div className="text-lg font-bold text-green-400">{(bd.takeHomeRate * 100).toFixed(1)}%</div>
-                    </div>
-                    <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-1">Est. Annual Take-Home</div>
-                      <div className="text-lg font-bold text-slate-200">{currency(bd.takeHomeAnnual)}</div>
-                    </div>
-                    <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-1">Est. Effective Tax Rate</div>
-                      <div className="text-lg font-bold text-amber-400">{(bd.effectiveRate * 100).toFixed(1)}%</div>
-                    </div>
+                    <span className="text-xs text-slate-500">per month</span>
+                    <button
+                      className="rounded-lg px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
+                      onClick={() => {
+                        setTakeHomeSettings(DEFAULT_TAKE_HOME_SETTINGS)
+                        setThsRateInput((DEFAULT_TAKE_HOME_SETTINGS.simpleRate * 100).toFixed(2))
+                        setThsManualInput('')
+                        setThsHint('')
+                        showToast('Take-home settings reset to default (82.43%).')
+                      }}
+                    >
+                      Reset to Default
+                    </button>
                   </div>
-                  <div className="space-y-0.5">
-                    <Row l="Federal income tax (est.)" v={currency(bd.fedTax)} valueClass="text-slate-300" />
-                    <Row l="Arizona state tax @ 2.5%" v={currency(bd.azTax)} valueClass="text-slate-300" />
-                    <Row l="Social Security (6.2%)" v={currency(bd.ssTax)} valueClass="text-slate-300" />
-                    <Row l="Medicare (1.45%)" v={currency(bd.medicareTax)} valueClass="text-slate-300" />
-                    <Row l="Total estimated withholding" v={currency(bd.totalTax)} valueClass="text-amber-300" />
-                  </div>
-                  <div className="mt-3 pt-3 border-t border-slate-700/60 grid md:grid-cols-3 gap-2">
-                    <div className="text-center">
-                      <div className="text-xs text-slate-400 mb-0.5">Weekly take-home</div>
-                      <div className="font-semibold text-slate-200">{currency(bd.takeHomeAnnual / 52)}</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-xs text-slate-400 mb-0.5">Bi-weekly take-home</div>
-                      <div className="font-semibold text-slate-200">{currency(bd.takeHomeAnnual / 26)}</div>
-                    </div>
-                    <div className="text-center">
-                      <div className="text-xs text-slate-400 mb-0.5">Monthly take-home</div>
-                      <div className="font-semibold text-slate-200">{currency(bd.takeHomeAnnual / 12)}</div>
-                    </div>
-                  </div>
-                </Card>
-              )
-            })()}
+                  <p className="text-[10px] text-slate-500">
+                    Enter the net amount from your base pay. Commission is tracked separately and added on top.
+                  </p>
+                </div>
+              )}
+
+              {thsHint && <p className="mt-2 text-sm text-amber-300">{thsHint}</p>}
+
+              {/* Active method status */}
+              <div className="mt-3 pt-3 border-t border-slate-700/60">
+                <p className="text-xs text-slate-400">
+                  {takeHomeSettings.mode === 'simple'
+                    ? <>Currently using: <span className="text-slate-200 font-medium">simple take-home rate of {(takeHomeSettings.simpleRate * 100).toFixed(2)}%</span></>
+                    : takeHomeSettings.manualMonthlyNet > 0
+                      ? <>Currently using: <span className="text-slate-200 font-medium">manual net pay of {currency(takeHomeSettings.manualMonthlyNet)}/month</span> (effective rate: {(effectiveTakeHomeRate * 100).toFixed(1)}%)</>
+                      : <span className="text-amber-300">Manual mode selected — enter your monthly net pay above to apply.</span>
+                  }
+                </p>
+              </div>
+            </Card>
+
             <div className="grid md:grid-cols-2 gap-4">
               <Card title="Base Income">
                 <Row l="Weekly Net" v={currency(inc.baseWeekly)} />
@@ -2704,25 +2645,23 @@ export default function App() {
                       vTone === 'warn' ? 'text-yellow-300' : 'text-red-400'
                     const isPressure  = pressureFocusCategoryId === c.id
                     const isInlineCatEdit = inlineCatEditId === c.id
+                    // Extra column count: weekly/bi-weekly/yearly have a monthly reference column
+                    const hasRefCol = period === 'weekly' || period === 'bi-weekly' || period === 'yearly'
 
                     // ── Inline edit row ──────────────────────────────────────
                     if (isInlineCatEdit) {
-                      // colSpan math: Name + Type + planned + [monthly ref?] + Actual + Variance + Actions
-                      // We show inputs spanning all columns. Blur-save fires when focus leaves the row.
-                      const extraCols = (period === 'weekly' || period === 'bi-weekly' || period === 'yearly') ? 1 : 0
                       return (
                         <tr
                           key={c.id}
                           ref={el => { inlineCatRowRef.current = el }}
                           className="border-b border-slate-700 bg-blue-950/20"
                           onBlur={e => {
-                            // Save only if focus left the row entirely
+                            // Only save when focus leaves the entire row
                             if (!inlineCatRowRef.current?.contains(e.relatedTarget as Node)) {
                               saveInlineCatEdit()
                             }
                           }}
                         >
-                          {/* Name */}
                           <td className="py-1 pr-1.5">
                             <input
                               ref={inlineCatNameRef}
@@ -2730,13 +2669,11 @@ export default function App() {
                               value={inlineCatEditForm.name}
                               onChange={e => setInlineCatEditForm(v => ({ ...v, name: e.target.value }))}
                               onKeyDown={e => {
-                                if (e.key === 'ArrowRight') { e.preventDefault(); inlineCatTypeRef.current?.focus() }
                                 if (e.key === 'Enter') { e.preventDefault(); inlineCatTypeRef.current?.focus() }
                                 if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
                               }}
                             />
                           </td>
-                          {/* Type */}
                           <td className="py-1 pr-1.5">
                             <select
                               ref={inlineCatTypeRef}
@@ -2756,36 +2693,34 @@ export default function App() {
                               <option value="investing">Investing</option>
                             </select>
                           </td>
-                          {/* Planned amount — spans period planned + monthly ref columns */}
-                          <td className="py-1 pr-1.5" colSpan={1 + extraCols}>
-                            <input
-                              ref={inlineCatAmountRef}
-                              type="number"
-                              min={0}
-                              step={25}
-                              className="w-24 px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none text-right"
-                              value={inlineCatEditForm.amount}
-                              onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))}
-                              onFocus={e => e.target.select()}
-                              onKeyDown={e => {
-                                if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineCatTypeRef.current?.focus() }
-                                if (e.key === 'ArrowRight') { e.preventDefault(); inlineCatActualRef.current?.focus() }
-                                if (e.key === 'Enter') { e.preventDefault(); inlineCatActualRef.current?.focus() }
-                                if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
-                              }}
-                            />
-                            <span className="ml-1 text-[10px] text-slate-500">{labelPeriod(period)}</span>
+                          {/* Planned amount — spans period + optional ref columns */}
+                          <td className="py-1 pr-1.5" colSpan={hasRefCol ? 2 : 1}>
+                            <div className="flex items-center gap-1">
+                              <input
+                                ref={inlineCatAmountRef}
+                                type="number" min={0} step={25}
+                                className="w-24 px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none text-right"
+                                value={inlineCatEditForm.amount}
+                                onChange={e => setInlineCatEditForm(v => ({ ...v, amount: e.target.value }))}
+                                onFocus={e => e.target.select()}
+                                onKeyDown={e => {
+                                  if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineCatTypeRef.current?.focus() }
+                                  if (e.key === 'ArrowRight') { e.preventDefault(); inlineCatActualRef.current?.focus() }
+                                  if (e.key === 'Enter') { e.preventDefault(); inlineCatActualRef.current?.focus() }
+                                  if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
+                                }}
+                              />
+                              <span className="text-[10px] text-slate-500">{labelPeriod(period)}</span>
+                            </div>
                           </td>
-                          {/* Actual adjustment */}
+                          {/* Manual actual adjustment */}
                           <td className="py-1 pr-1.5">
                             <div className="flex items-center gap-1">
                               <input
                                 ref={inlineCatActualRef}
-                                type="number"
-                                min={0}
-                                step={25}
+                                type="number" min={0} step={25}
                                 className="w-20 px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none text-right"
-                                placeholder="—"
+                                placeholder="actual"
                                 value={inlineCatEditForm.actual}
                                 onChange={e => setInlineCatEditForm(v => ({ ...v, actual: e.target.value }))}
                                 onFocus={e => e.target.select()}
@@ -2796,18 +2731,16 @@ export default function App() {
                                   if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
                                 }}
                               />
-                              {hasTxn && <span className="text-[9px] text-slate-500">adj</span>}
+                              {hasTxn && <span className="text-[9px] text-slate-500">+adj</span>}
                             </div>
                           </td>
-                          {/* Variance — empty during edit */}
+                          {/* Variance empty during edit */}
                           <td className="py-1 pr-1.5" />
-                          {/* Save / Cancel */}
                           <td className="py-1 whitespace-nowrap space-x-2">
                             <button
                               ref={inlineCatSaveRef}
                               className="text-blue-400 hover:text-blue-300 text-xs"
                               onClick={saveInlineCatEdit}
-                              onKeyDown={e => { if (e.key === 'Escape') cancelInlineCatEdit() }}
                             >Save</button>
                             <button className="text-slate-400 hover:text-slate-300 text-xs" onClick={cancelInlineCatEdit}>Cancel</button>
                           </td>
@@ -2935,7 +2868,6 @@ export default function App() {
                               actual: actuals[c.id] ?? '',
                               actualAtStart: actuals[c.id] ?? '',
                             })
-                            // Focus the amount field (per spec: Weekly Planned is focused/selected)
                             setTimeout(() => { inlineCatAmountRef.current?.focus(); inlineCatAmountRef.current?.select() }, 0)
                           }}>Edit</button>
                           <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
@@ -3063,53 +2995,24 @@ export default function App() {
 
             {accounts.length > 0 ? (
               <Card title="Your Accounts">
-                {/* V9.2 — Net worth summary */}
-                {accounts.length > 0 && (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                    <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-0.5">Cash & Bank</div>
-                      <div className={`text-lg font-bold ${netWorthSummary.totalCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>{currency(netWorthSummary.totalCash)}</div>
-                    </div>
-                    <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-0.5">Investments</div>
-                      <div className="text-lg font-bold text-blue-300">{currency(netWorthSummary.totalInvestments)}</div>
-                    </div>
-                    <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-0.5">Total Debt</div>
-                      <div className="text-lg font-bold text-red-400">{currency(netWorthSummary.totalDebt)}</div>
-                    </div>
-                    <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-0.5">Net Worth</div>
-                      <div className={`text-lg font-bold ${netWorthSummary.netWorth >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{currency(netWorthSummary.netWorth)}</div>
-                    </div>
-                  </div>
-                )}
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-slate-400 border-b border-slate-700">
                         <th className="pb-1.5 pr-4 font-medium">Name</th>
                         <th className="pb-1.5 pr-4 font-medium">Type</th>
-                        <th className="pb-1.5 pr-4 font-medium text-right">Base Balance</th>
-                        <th className="pb-1.5 pr-4 font-medium text-right">Adj. Balance</th>
+                        <th className="pb-1.5 pr-4 font-medium text-right">Balance</th>
                         <th className="pb-1.5 pr-4 font-medium">Institution</th>
                         <th className="pb-1.5" />
                       </tr>
                     </thead>
                     <tbody>
-                      {accounts.map(a => {
-                        const adjBal = computedAccountBalances[a.id] ?? a.balance
-                        const hasDelta = Math.abs(adjBal - a.balance) > 0.005
-                        return (
+                      {accounts.map(a => (
                         <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedAccountId === a.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
                           <td className="py-2 pr-4 font-medium">{a.name}</td>
                           <td className="py-2 pr-4 text-slate-400">{ACCOUNT_TYPE_LABELS[a.type]}</td>
-                          <td className={`py-2 pr-4 text-right ${a.balance >= 0 ? 'text-slate-400' : 'text-red-400/70'} text-xs`}>
+                          <td className={`py-2 pr-4 text-right font-semibold ${a.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                             {a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)}
-                          </td>
-                          <td className={`py-2 pr-4 text-right font-semibold ${adjBal >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {adjBal < 0 ? `−${currency(Math.abs(adjBal))}` : currency(adjBal)}
-                            {hasDelta && <span className="ml-1 text-[10px] text-slate-500">txn-adj</span>}
                           </td>
                           <td className="py-2 pr-4 text-slate-400 text-xs">{a.institution || '—'}</td>
                           <td className="py-2 whitespace-nowrap space-x-2">
@@ -3121,14 +3024,13 @@ export default function App() {
                             <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))}>Delete</button>
                           </td>
                         </tr>
-                        )
-                      })}
+                      ))}
                     </tbody>
                     <tfoot>
                       <tr className="border-t border-slate-700">
-                        <td colSpan={3} className="pt-2 text-xs text-slate-500 font-medium">Net Balance (adjusted)</td>
-                        <td className={`pt-2 text-right text-sm font-bold ${Object.values(computedAccountBalances).reduce((s, v) => s + v, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {currency(Object.values(computedAccountBalances).reduce((s, v) => s + v, 0))}
+                        <td colSpan={2} className="pt-2 text-xs text-slate-500 font-medium">Net Balance</td>
+                        <td className={`pt-2 text-right text-sm font-bold ${accounts.reduce((s, a) => s + a.balance, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {currency(accounts.reduce((s, a) => s + a.balance, 0))}
                         </td>
                         <td colSpan={2} />
                       </tr>
@@ -3151,9 +3053,8 @@ export default function App() {
             {/* ── V8.5 Review queue summary ── */}
             {transactions.length > 0 && (() => {
               const range = getPeriodDateRange(period)
-              // V9.2 — period spend = expenses only; transfers/CC payments are money movements, not spending
               const periodSpend  = transactions
-                .filter(tx => tx.date >= range.start && tx.date <= range.end && tx.type === 'expense')
+                .filter(tx => tx.date >= range.start && tx.date <= range.end && (tx.type === 'expense' || tx.type === 'credit card payment'))
                 .reduce((s, tx) => s + tx.amount, 0)
               const rulesApplied = transactions.filter(tx => tx.appliedByRule).length
               return (
@@ -3316,7 +3217,7 @@ export default function App() {
                     ref={txnTypeRef}
                     className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
                     value={txnForm.type}
-                    onChange={e => setTxnForm(v => ({ ...v, type: e.target.value as TransactionType, toAccountId: '' }))}
+                    onChange={e => setTxnForm(v => ({ ...v, type: e.target.value as TransactionType }))}
                     onKeyDown={e => {
                       if (e.key === 'ArrowLeft')  { e.preventDefault(); txnAmountRef.current?.focus(); txnAmountRef.current?.select() }
                       if (e.key === 'ArrowRight') { e.preventDefault(); txnCategoryRef.current?.focus() }
@@ -3331,29 +3232,6 @@ export default function App() {
                   </select>
                   <p className="text-[10px] text-slate-500 mt-0.5">Use Credit Card Payment when checking pays down a credit card.</p>
                 </div>
-                {/* V9.2 — Transfer To account (only for transfer + credit card payment) */}
-                {isMoneyMovement(txnForm.type) && (
-                  <div>
-                    <label className="block text-xs text-slate-400 mb-1">
-                      {txnForm.type === 'credit card payment' ? 'Credit Card Being Paid' : 'Transfer To Account'}
-                    </label>
-                    <select
-                      className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
-                      value={txnForm.toAccountId}
-                      onChange={e => setTxnForm(v => ({ ...v, toAccountId: e.target.value }))}
-                    >
-                      <option value="">— optional —</option>
-                      {accounts.filter(a => a.id !== txnForm.accountId).map(a => (
-                        <option key={a.id} value={a.id}>{a.name}</option>
-                      ))}
-                    </select>
-                    <p className="text-[10px] text-slate-500 mt-0.5">
-                      {txnForm.type === 'credit card payment'
-                        ? 'Selecting the card updates both account balances.'
-                        : 'Selecting a destination updates both account balances.'}
-                    </p>
-                  </div>
-                )}
                 {/* Category */}
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Category <span className="text-slate-600">(optional)</span></label>
@@ -3419,7 +3297,6 @@ export default function App() {
                 )}
                 <button onClick={generateSampleTransaction} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a random sample transaction">Generate Sample</button>
                 <button onClick={generateTenSamples} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Add 10 varied samples — mixed categories, some uncategorized, some duplicate-like">Generate 10 Samples</button>
-                <button onClick={openCsvImport} className="rounded-lg px-3 py-1.5 text-xs bg-indigo-800/70 hover:bg-indigo-700/80 text-indigo-200 border border-indigo-700/50 transition-colors" title="Import transactions from a CSV file">Import CSV</button>
               </div>
               {txnHint && <p className="mt-2 text-sm text-amber-300">{txnHint}</p>}
             </Card>
@@ -3654,7 +3531,7 @@ export default function App() {
                             <td className="py-2 whitespace-nowrap space-x-2">
                               <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
                                 setInlineTxnEditId(tx.id)
-                                setInlineTxnEditForm({ date: tx.date, accountId: tx.accountId, merchant: tx.merchant, amount: String(tx.amount), type: tx.type, categoryId: tx.categoryId ?? '', notes: tx.notes ?? '', toAccountId: tx.toAccountId ?? '' })
+                                setInlineTxnEditForm({ date: tx.date, accountId: tx.accountId, merchant: tx.merchant, amount: String(tx.amount), type: tx.type, categoryId: tx.categoryId ?? '', notes: tx.notes ?? '' })
                                 setTxnDupWarning(false)
                                 setTimeout(() => { inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select() }, 0)
                               }}>Edit</button>
@@ -3731,7 +3608,7 @@ export default function App() {
                               <td className="py-2 whitespace-nowrap space-x-2">
                                 <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
                                   setInlineTxnEditId(tx.id)
-                                  setInlineTxnEditForm({ date: tx.date, accountId: tx.accountId, merchant: tx.merchant, amount: String(tx.amount), type: tx.type, categoryId: tx.categoryId ?? '', notes: tx.notes ?? '', toAccountId: tx.toAccountId ?? '' })
+                                  setInlineTxnEditForm({ date: tx.date, accountId: tx.accountId, merchant: tx.merchant, amount: String(tx.amount), type: tx.type, categoryId: tx.categoryId ?? '', notes: tx.notes ?? '' })
                                   setTxnFilter('all')
                                   setTxnDupWarning(false)
                                   setTimeout(() => { inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select() }, 0)
@@ -4043,7 +3920,7 @@ export default function App() {
             </Card>
             <div className="grid md:grid-cols-2 gap-3">
               {(['Slow', 'Medium', 'Fast', 'Custom'] as ScenarioName[]).map(n => {
-                const ii = income(scenario[n], adjustedSalary)
+                const ii = income(scenario[n], adjustedSalary, effectiveTakeHomeRate)
                 const rem = convertFromMonthly(ii.totalMonthly - monthlyBudget, period)
                 const tone = n === 'Slow' ? 'border-yellow-500/60 text-yellow-200' : n === 'Medium' ? 'border-blue-500/60 text-blue-200' : n === 'Fast' ? 'border-green-500/60 text-green-200' : 'border-slate-300/60 text-slate-100'
                 const b = n === 'Slow' ? '#facc15' : n === 'Medium' ? '#60a5fa' : n === 'Fast' ? '#4ade80' : '#cbd5e1'
@@ -4274,21 +4151,27 @@ export default function App() {
 
             <Card title="Savings Goal Sets" noHover>
               <div className="grid md:grid-cols-3 gap-2">
-                <input className="p-2 rounded bg-slate-800 border border-slate-600" value={targetSetName} onChange={(e) => setTargetSetName(e.target.value)} placeholder="Savings goal set name" />
+                <input className="p-2 rounded bg-slate-800 border border-slate-600" value={targetSetName} onChange={(e) => setTargetSetName(e.target.value)} placeholder="Savings goal set name"
+                  onKeyDown={e => { if (e.key === 'Enter') {
+                    const n = targetSetName.trim(); if (!n) return
+                    pushSetsHistory(savedTargetSets)
+                    setSavedTargetSets([{ name: n, targets, savedAt: new Date().toISOString() }, ...savedTargetSets.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
+                    showToast('Savings goal set saved.')
+                  }}}
+                />
                 <button className="rounded bg-blue-600" onClick={() => {
-                  const n = targetSetName.trim()
-                  if (!n) return
-                  pushSetHistory(savedTargetSets)
+                  const n = targetSetName.trim(); if (!n) return
+                  pushSetsHistory(savedTargetSets)
                   setSavedTargetSets([{ name: n, targets, savedAt: new Date().toISOString() }, ...savedTargetSets.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
                   showToast('Savings goal set saved.')
                 }}>Save</button>
-                <div className="flex items-center gap-2">
-                  <div className="text-xs text-slate-400">Saved locally</div>
-                  {savedTargetSetsHistory.length > 0 && (
-                    <button onClick={undoSavedSets} className="text-xs text-slate-400 hover:text-slate-200 underline">Undo</button>
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <span>Saved locally</span>
+                  {savedSetsHistory.length > 0 && (
+                    <button onClick={undoSavedSets} className="underline hover:text-slate-200">Undo</button>
                   )}
-                  {savedTargetSetsRedo.length > 0 && (
-                    <button onClick={redoSavedSets} className="text-xs text-slate-400 hover:text-slate-200 underline">Redo</button>
+                  {savedSetsRedo.length > 0 && (
+                    <button onClick={redoSavedSets} className="underline hover:text-slate-200">Redo</button>
                   )}
                 </div>
               </div>
@@ -4301,24 +4184,22 @@ export default function App() {
                           className="flex-1 p-1 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
                           value={renameSetValue}
                           onChange={e => setRenameSetValue(e.target.value)}
+                          autoFocus
                           onKeyDown={e => {
                             if (e.key === 'Enter') {
-                              const newName = renameSetValue.trim()
-                              if (!newName) return
-                              pushSetHistory(savedTargetSets)
+                              const newName = renameSetValue.trim(); if (!newName) return
+                              pushSetsHistory(savedTargetSets)
                               setSavedTargetSets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName, savedAt: new Date().toISOString() } : x))
                               showToast('Savings goal set renamed.')
                               setEditingSetIdx(null)
                             }
                             if (e.key === 'Escape') setEditingSetIdx(null)
                           }}
-                          autoFocus
                         />
                         <div className="flex gap-2 shrink-0">
                           <button className="text-blue-300 hover:text-blue-200 text-sm" onClick={() => {
-                            const newName = renameSetValue.trim()
-                            if (!newName) return
-                            pushSetHistory(savedTargetSets)
+                            const newName = renameSetValue.trim(); if (!newName) return
+                            pushSetsHistory(savedTargetSets)
                             setSavedTargetSets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName, savedAt: new Date().toISOString() } : x))
                             showToast('Savings goal set renamed.')
                             setEditingSetIdx(null)
@@ -4334,15 +4215,11 @@ export default function App() {
                         </div>
                         <div className="flex gap-2 shrink-0">
                           <button className="text-blue-300 hover:text-blue-200 text-sm" onClick={() => {
-                            const same = JSON.stringify(targets) === JSON.stringify(s.targets)
-                            if (!same) {
-                              pushTargetHistory(targets)
-                              setTargets(s.targets)
-                              showToast('Savings goal set loaded.')
-                            }
+                            const isSame = JSON.stringify(targets) === JSON.stringify(s.targets)
+                            if (!isSame) { pushTargetHistory(targets); setTargets(s.targets); showToast('Savings goal set loaded.') }
                           }}>Load</button>
                           <button className="text-slate-400 hover:text-slate-300 text-sm" onClick={() => { setEditingSetIdx(idx); setRenameSetValue(s.name) }}>Rename</button>
-                          <button className="text-red-300 hover:text-red-200 text-sm" onClick={() => { pushSetHistory(savedTargetSets); setSavedTargetSets(prev => prev.filter(x => x.name !== s.name)) }}>Delete</button>
+                          <button className="text-red-300 hover:text-red-200 text-sm" onClick={() => { pushSetsHistory(savedTargetSets); setSavedTargetSets(prev => prev.filter(x => x.name !== s.name)) }}>Delete</button>
                         </div>
                       </>
                     )}
@@ -4409,38 +4286,6 @@ export default function App() {
         )}
 
       </div>
-
-      {/* V9.0 CSV Import Modal */}
-      {csvImportOpen && (
-        <CsvImportModal
-          preview={csvImportPreview}
-          loading={csvImportLoading}
-          error={csvImportError}
-          accounts={accounts}
-          onFileSelect={handleCsvFileSelect}
-          onDrop={handleCsvDrop}
-          onCommit={commitCsvImport}
-          onCancel={closeCsvImport}
-          onResetPreview={() => { setCsvImportPreview(null); setCsvImportError('') }}
-          onDownloadSample={downloadSampleCsv}
-          onUseSampleData={() => processCsvText(generateSampleCsvString())}
-          fileInputRef={csvFileInputRef}
-        />
-      )}
-      {/* Hidden file input for CSV selection */}
-      <input ref={csvFileInputRef} type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={handleCsvFileSelect} />
-
-      {/* V9.0.4 Back-to-Top button — top-left, visible after scroll */}
-      {showScrollTop && (
-        <button
-          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          className="fixed top-20 left-3 z-40 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-600 shadow-lg px-3 py-2 text-xs text-slate-300 transition-all duration-200 hover:translate-y-0.5"
-          title="Back to top"
-          aria-label="Scroll to top"
-        >
-          ↑ Top
-        </button>
-      )}
 
       {/* Toast notification — top-left, amber/warning style, Undo when applicable, click anywhere to dismiss */}
       {toast && (
@@ -4605,136 +4450,6 @@ function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; va
     <div className="py-1.5 border-b border-slate-700 last:border-b-0 flex justify-between gap-2 text-sm">
       <span className="text-slate-400 shrink-0">{l}</span>
       <span className={`font-medium text-right ${valueClass}`}>{v}</span>
-    </div>
-  )
-}
-
-// ── V9.0 CSV Import Modal ─────────────────────────────────────────────────────
-
-interface CsvImportModalProps {
-  preview: ImportPipelineResult | null
-  loading: boolean
-  error: string
-  accounts: Account[]
-  onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void
-  onDrop: (e: React.DragEvent<HTMLDivElement>) => void
-  onCommit: () => void
-  onCancel: () => void
-  onDownloadSample: () => void
-  onUseSampleData: () => void
-  fileInputRef: React.RefObject<HTMLInputElement | null>
-  onResetPreview: () => void
-}
-
-function CsvImportModal({
-  preview, loading, error, accounts,
-  onFileSelect, onDrop,
-  onCommit, onCancel, onDownloadSample, onUseSampleData, fileInputRef, onResetPreview,
-}: CsvImportModalProps) {
-  const [dragOver, setDragOver] = useState(false)
-
-  const defaultAccount = accounts[0]
-  const accountNote = accounts.length === 0
-    ? 'No accounts set up yet — add an account first so imports can be assigned correctly.'
-    : accounts.length === 1
-      ? `Transactions will be assigned to: ${defaultAccount.name}. Account-specific import handling will be expanded in a future update.`
-      : `Imports are assigned to the first account (${defaultAccount.name}) by default. Account-specific import handling will be expanded in a future update.`
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-8 px-4 pb-8 bg-black/70 overflow-y-auto">
-      <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col">
-        <div className="flex items-center justify-between p-5 border-b border-slate-700">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-100">Import CSV</h2>
-            <p className="text-xs text-slate-400 mt-0.5">Import transactions from a bank or financial export.</p>
-          </div>
-          <button onClick={onCancel} className="text-slate-400 hover:text-slate-200 text-xl leading-none px-2">x</button>
-        </div>
-
-        <div className="p-5 space-y-4 flex-1 overflow-y-auto">
-          <div className="rounded-lg border border-slate-700/60 bg-slate-800/60 px-3 py-2.5 text-xs text-slate-400">
-            <span className="text-slate-300 font-medium">Account: </span>{accountNote}
-          </div>
-
-          {!preview && !loading && (
-            <div
-              className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${dragOver ? 'border-blue-500 bg-blue-900/20' : 'border-slate-600 hover:border-slate-500 bg-slate-800/50'}`}
-              onDragOver={e => { e.preventDefault(); setDragOver(true) }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={e => { setDragOver(false); onDrop(e) }}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <div className="text-4xl mb-3">&#128196;</div>
-              <p className="text-slate-200 font-medium mb-1">Drop a CSV file here</p>
-              <p className="text-slate-400 text-sm mb-4">or click to browse</p>
-              <p className="text-slate-500 text-xs">Supported headers: date, merchant/description, amount, type, notes</p>
-              <input type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={onFileSelect} ref={fileInputRef} />
-            </div>
-          )}
-
-          {loading && <div className="text-center py-8 text-slate-400">Parsing CSV...</div>}
-
-          {error && (
-            <div className="rounded-lg border border-red-700/50 bg-red-900/20 px-4 py-3 text-sm text-red-300">{error}</div>
-          )}
-
-          {!preview && !loading && (
-            <div className="flex gap-3 flex-wrap text-xs">
-              <button onClick={onDownloadSample} className="text-blue-400 hover:text-blue-300 underline underline-offset-2">Download sample CSV</button>
-              <span className="text-slate-600">.</span>
-              <button onClick={onUseSampleData} className="text-blue-400 hover:text-blue-300 underline underline-offset-2">Preview sample data without a file</button>
-            </div>
-          )}
-
-          {preview && !loading && (
-            <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-3">
-                <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
-                  <div className="text-xs text-slate-400 mb-0.5">Ready</div>
-                  <div className="text-xl font-bold text-green-400">{preview.readyCount}</div>
-                </div>
-                <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
-                  <div className="text-xs text-slate-400 mb-0.5">Duplicates</div>
-                  <div className={`text-xl font-bold ${preview.duplicateCount > 0 ? 'text-amber-300' : 'text-slate-400'}`}>{preview.duplicateCount}</div>
-                </div>
-                <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
-                  <div className="text-xs text-slate-400 mb-0.5">Invalid</div>
-                  <div className={`text-xl font-bold ${preview.invalidCount > 0 ? 'text-red-400' : 'text-slate-400'}`}>{preview.invalidCount}</div>
-                </div>
-              </div>
-              {preview.duplicateCount > 0 && (
-                <p className="text-xs text-amber-300/80">Duplicates are excluded by default. Click Import to bring in only the {preview.readyCount} ready row{preview.readyCount !== 1 ? 's' : ''}.</p>
-              )}
-              {preview.readyCount === 0 && (
-                <p className="text-xs text-red-300">No importable rows found - all rows are duplicates or invalid. Check your CSV format.</p>
-              )}
-              {preview.readyCount > 0 && (
-                <p className="text-xs text-slate-400">
-                  Duplicate detection, rule matching, and type inference applied.
-                  Click <span className="font-medium text-slate-300">Import Transactions</span> to commit, or{' '}
-                  <button onClick={onResetPreview} className="underline text-blue-400 hover:text-blue-300">choose a different file</button>.
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between gap-3 p-5 border-t border-slate-700 flex-wrap">
-          <div className="flex gap-2">
-            <button onClick={onCancel} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-2 text-sm transition-colors">Cancel</button>
-            {preview && (
-              <button onClick={onResetPreview} className="rounded-lg bg-slate-800 hover:bg-slate-700 px-4 py-2 text-sm text-slate-400 transition-colors border border-slate-700">
-                Choose different file
-              </button>
-            )}
-          </div>
-          {preview && preview.readyCount > 0 && (
-            <button onClick={onCommit} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-5 py-2 text-sm font-medium transition-colors">
-              Import {preview.readyCount} transaction{preview.readyCount !== 1 ? 's' : ''}
-            </button>
-          )}
-        </div>
-      </div>
     </div>
   )
 }
