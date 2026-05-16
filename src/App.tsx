@@ -227,6 +227,9 @@ export default function App() {
   const [budgetTitle, setBudgetTitle] = useState('')
   const [scenarioTitle, setScenarioTitle] = useState('')
   const [changeSummary, setChangeSummary] = useState<string[]>([])
+  // V9.2.1 — Inline budget rename state (replaces window.prompt)
+  const [renamingBudgetName, setRenamingBudgetName] = useState<string | null>(null)
+  const [renameBudgetValue, setRenameBudgetValue] = useState('')
   const [editId, setEditId] = useState<string | null>(null)
   const [sIndex, setSIndex] = useState(-1)
   const [showSuggestions, setShowSuggestions] = useState(false)
@@ -446,9 +449,20 @@ export default function App() {
     type: 'expense' as TransactionType,
     categoryId: '',
     notes: '',
+    toAccountId: '',          // V9.2.1 — for transfer/credit card payment pairing (display only)
   })
   const [txnHistory, setTxnHistory]           = useState<Transaction[][]>([])
   const [txnRedo, setTxnRedo]                 = useState<Transaction[][]>([])
+
+  // V9.2.1 — CSV Import
+  const csvFileRef = useRef<HTMLInputElement>(null)
+  const [csvImportOpen, setCsvImportOpen]       = useState(false)
+  const [csvFileName, setCsvFileName]           = useState('')
+  const [csvError, setCsvError]                 = useState('')
+  const [csvPreviewRows, setCsvPreviewRows]     = useState<Array<{
+    date: string; merchant: string; amount: string; type: TransactionType; categoryId: string; notes: string; isDup: boolean
+  }>>([])
+  const [csvImportedIds, setCsvImportedIds]     = useState<Set<string>>(new Set())
 
 // V8.5 — review / filter
   const [txnFilter, setTxnFilter]             = useState<typeof TXN_FILTER_OPTIONS[number]['value']>('all')
@@ -731,6 +745,18 @@ export default function App() {
       period,
       budgetHealthTier: !hasBudgetData ? 'No Data' : selectedPeriodRemaining < 0 ? 'Over Budget' : remainingTier.label,
     })
+    // V9.2.1 — Period-aware over-budget alert (replaces hardcoded /month wording from calculations.ts)
+    if (selectedPeriodRemaining < 0) {
+      const overAmt = Math.abs(selectedPeriodRemaining)
+      const pl = period === 'weekly' ? 'week' : period === 'bi-weekly' ? 'pay period' : period === 'monthly' ? 'month' : 'year'
+      return {
+        ...base,
+        tone: 'danger' as const,
+        label: 'Over Budget',
+        explanation: `Planned expenses are ${currency(overAmt)} over ${labelPeriod(period)} income this ${pl}.`,
+        context: base.context,
+      }
+    }
     // If actuals show meaningful overspend, surface it in the dashboard explanation
     if (actualOverspendPct > 5 && base.tone !== 'danger') {
       const severity: DashboardStatus['tone'] = actualOverspendPct > 20 ? 'risk' : 'warn'
@@ -953,15 +979,117 @@ export default function App() {
     })
   }
  const clearTxnForm = () => {
-    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '' })
+    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '', toAccountId: '' })
     setTxnHint('')
     setTxnDupWarning(false)
   }
   // Soft reset after successful add — preserves accountId/type/date for fast sequential entry
   const resetTxnFormAfterAdd = () => {
-    setTxnForm(prev => ({ ...prev, merchant: '', amount: '', categoryId: '', notes: '' }))
+    setTxnForm(prev => ({ ...prev, merchant: '', amount: '', categoryId: '', notes: '', toAccountId: '' }))
     setTxnHint('')
     setTxnDupWarning(false)
+  }
+
+  // V9.2.1 — CSV Import helpers ─────────────────────────────────────────────────
+  // Simple built-in CSV parser — no papaparse dependency.
+  // Supports: Date, Merchant/Description, Amount, Type (optional), Category (optional), Notes (optional)
+  // Amount: positive = expense, negative = income. "Credit"/"Debit" type columns mapped automatically.
+  const parseCsvForImport = (text: string) => {
+    setCsvError('')
+    setCsvPreviewRows([])
+    const lines = text.split(/\r?\n/).filter(l => l.trim())
+    if (lines.length < 2) { setCsvError('CSV must have a header row and at least one data row.'); return }
+    const headerRaw = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, '').toLowerCase())
+    const col = (names: string[]) => names.reduce((found, n) => found !== -1 ? found : headerRaw.indexOf(n), -1)
+    const dateCol     = col(['date', 'transaction date', 'posted date', 'trans date'])
+    const merchantCol = col(['merchant', 'description', 'payee', 'name', 'memo'])
+    const amountCol   = col(['amount', 'transaction amount', 'debit', 'credit'])
+    const typeCol     = col(['type', 'transaction type', 'category type'])
+    const catCol      = col(['category', 'budget category'])
+    const notesCol    = col(['notes', 'note', 'memo', 'reference'])
+    if (dateCol === -1 || merchantCol === -1 || amountCol === -1) {
+      setCsvError('Could not find required columns. Expected: Date, Merchant/Description, Amount.')
+      return
+    }
+    const parseDate = (raw: string): string => {
+      const cleaned = raw.replace(/^["']|["']$/g, '').trim()
+      // MM/DD/YYYY → YYYY-MM-DD
+      const mmddyyyy = cleaned.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+      if (mmddyyyy) return `${mmddyyyy[3]}-${mmddyyyy[1].padStart(2,'0')}-${mmddyyyy[2].padStart(2,'0')}`
+      // Already YYYY-MM-DD
+      if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) return cleaned
+      return cleaned
+    }
+    const rows = lines.slice(1).map(line => {
+      // Simple CSV split respecting quoted fields
+      const cols: string[] = []
+      let cur = '', inQ = false
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i]
+        if (ch === '"') { inQ = !inQ }
+        else if (ch === ',' && !inQ) { cols.push(cur.trim()); cur = '' }
+        else { cur += ch }
+      }
+      cols.push(cur.trim())
+      const get = (i: number) => (i !== -1 && i < cols.length) ? cols[i].replace(/^["']|["']$/g, '').trim() : ''
+      const rawAmt = get(amountCol).replace(/[$,]/g, '')
+      const amtNum = parseFloat(rawAmt) || 0
+      const rawType = get(typeCol).toLowerCase()
+      let type: TransactionType = 'expense'
+      if (rawType.includes('income') || rawType.includes('credit') || rawType.includes('deposit') || amtNum < 0) type = 'income'
+      else if (rawType.includes('transfer')) type = 'transfer'
+      else if (rawType.includes('payment')) type = 'credit card payment'
+      const merchant = get(merchantCol)
+      const date = parseDate(get(dateCol))
+      const amount = String(Math.abs(amtNum))
+      const catName = get(catCol)
+      const matchedCat = catName ? categories.find(c => c.name.toLowerCase() === catName.toLowerCase()) : undefined
+      const notes = get(notesCol)
+      // Duplicate detection
+      const isDup = transactions.some(x =>
+        x.merchant.toLowerCase() === merchant.toLowerCase() &&
+        String(x.amount) === amount &&
+        x.date === date
+      )
+      return { date, merchant, amount, type, categoryId: matchedCat?.id ?? '', notes, isDup }
+    }).filter(r => r.merchant && parseFloat(r.amount) > 0)
+    if (!rows.length) { setCsvError('No valid rows found in CSV.'); return }
+    setCsvPreviewRows(rows)
+  }
+
+  const importCsvRows = () => {
+    if (!csvPreviewRows.length) return
+    const newIds: string[] = []
+    const accountId = accounts[0]?.id ?? ''
+    const newTxns: Transaction[] = csvPreviewRows.map(r => {
+      const id = crypto.randomUUID()
+      newIds.push(id)
+      return { id, date: r.date, accountId, merchant: r.merchant, amount: parseFloat(r.amount), type: r.type, categoryId: r.categoryId || undefined, notes: r.notes || undefined, createdAt: new Date().toISOString() }
+    })
+    const prevTxns = [...transactions]
+    setTxnWithHistory(prev => [...newTxns, ...prev])
+    const addedIds = new Set(newIds)
+    setCsvImportedIds(addedIds)
+    showUndoableToast(`${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''} imported from CSV.`, () => {
+      setTransactions(prevTxns)
+      setCsvImportedIds(new Set())
+    })
+    setCsvImportOpen(false)
+    setCsvPreviewRows([])
+    setCsvFileName('')
+  }
+
+  const downloadSampleCsv = () => {
+    const sample = [
+      'Date,Merchant,Amount,Type,Category,Notes',
+      `${new Date().toISOString().slice(0,10)},Target,45.00,expense,Groceries,Weekly run`,
+      `${new Date().toISOString().slice(0,10)},Payroll,2500.00,income,,`,
+      `${new Date().toISOString().slice(0,10)},Shell,35.00,expense,Gas,Fill-up`,
+    ].join('\n')
+    const blob = new Blob([sample], { type: 'text/csv' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href = url; a.download = 'sample-transactions.csv'; a.click()
+    URL.revokeObjectURL(url)
   }
   // Soft reset after a successful add — keeps account, type, date so rapid entry is frictionless
   const createOrSaveTxn = () => {
@@ -981,7 +1109,17 @@ export default function App() {
     )
     if (isDup && !txnDupWarning) {
       setTxnDupWarning(true)
-      setTimedTxnHint('Possible duplicate — same merchant, amount, and date already exists. Click Add again to save anyway.')
+      // V9.2.1 — distinguish transfer pairs from regular duplicates
+      const isTransferType = txnForm.type === 'transfer' || txnForm.type === 'credit card payment'
+      const existingIsSameType = transactions.some(x =>
+        x.merchant.toLowerCase() === merchant.toLowerCase() && x.amount === amount && x.date === txnForm.date &&
+        (x.type === 'transfer' || x.type === 'credit card payment')
+      )
+      if (isTransferType && existingIsSameType) {
+        setTimedTxnHint('Possible transfer pair — a matching transfer already exists on this date. Add again to save anyway.')
+      } else {
+        setTimedTxnHint('Possible duplicate — same merchant, amount, and date already exists. Click Add again to save anyway.')
+      }
       return
     }
     setTxnDupWarning(false)
@@ -2215,6 +2353,8 @@ export default function App() {
               )}
             </Card>
             {/* ── V9.1 Take-Home Settings ── */}
+            {/* TODO V9.x: Dynamic automatic take-home calculation (AZ single filer progressive estimate)
+                still needs implementation; current system uses manual/simple rate only. */}
             <Card title="Take-Home Pay Settings">
               <p className="text-xs text-slate-400 mb-3">
                 Simple mode uses your chosen take-home percentage. Manual mode uses your expected monthly net pay directly.
@@ -2578,14 +2718,44 @@ export default function App() {
               </div>
               {changeSummary.length > 0 && <div className="mt-2 text-sm rounded border border-slate-700 p-2">What Changed: {changeSummary.join(' • ')}</div>}
               <div className="mt-2 space-y-2">
-                {savedBudgets.map(b => (
-                  <div key={b.name} className="rounded border border-slate-700 p-2 flex justify-between">
-                    <div><div>{b.name}</div><div className="text-xs text-slate-400">{new Date(b.savedAt).toLocaleString()}</div></div>
-                    <div className="flex gap-2">
-                      <button className="text-blue-300" onClick={() => setCategories(b.categories)}>Load</button>
-                      <button className="text-amber-300" onClick={() => { const nn = window.prompt('Rename budget', b.name); if (!nn) return; setSavedBudgets(prev => prev.map(x => x.name === b.name ? { ...x, name: nn } : x)) }}>Rename</button>
-                      <button className="text-red-300" onClick={() => setSavedBudgets(prev => prev.filter(x => x.name !== b.name))}>Delete</button>
-                    </div>
+                {savedBudgets.map((b, idx) => (
+                  <div key={b.name} className="rounded border border-slate-700 p-2 flex justify-between items-center gap-2">
+                    {renamingBudgetName === b.name ? (
+                      <>
+                        <input
+                          className="flex-1 p-1 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                          value={renameBudgetValue}
+                          onChange={e => setRenameBudgetValue(e.target.value)}
+                          autoFocus
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              const newName = renameBudgetValue.trim()
+                              if (!newName) return
+                              setSavedBudgets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName } : x))
+                              setRenamingBudgetName(null)
+                            }
+                            if (e.key === 'Escape') setRenamingBudgetName(null)
+                          }}
+                        />
+                        <div className="flex gap-2 shrink-0">
+                          <button className="text-blue-300 hover:text-blue-200 text-sm" onClick={() => {
+                            const newName = renameBudgetValue.trim(); if (!newName) return
+                            setSavedBudgets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName } : x))
+                            setRenamingBudgetName(null)
+                          }}>Save</button>
+                          <button className="text-slate-400 hover:text-slate-300 text-sm" onClick={() => setRenamingBudgetName(null)}>Cancel</button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div><div>{b.name}</div><div className="text-xs text-slate-400">{new Date(b.savedAt).toLocaleString()}</div></div>
+                        <div className="flex gap-2 shrink-0">
+                          <button className="text-blue-300" onClick={() => setCategories(b.categories)}>Load</button>
+                          <button className="text-amber-300" onClick={() => { setRenamingBudgetName(b.name); setRenameBudgetValue(b.name) }}>Rename</button>
+                          <button className="text-red-300" onClick={() => setSavedBudgets(prev => prev.filter(x => x.name !== b.name))}>Delete</button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -3050,11 +3220,99 @@ export default function App() {
         {/* ── TRANSACTIONS ── */}
         {tab === 'Transactions' && (
           <section className="space-y-4 transition-all duration-300">
+            {/* V9.2.1 — CSV Import */}
+            <div className="flex items-center justify-between">
+              <div className="flex gap-2">
+                <button
+                  className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-600 transition-colors"
+                  onClick={() => { setCsvImportOpen(v => !v); setCsvError(''); setCsvPreviewRows([]) }}
+                >
+                  {csvImportOpen ? 'Close CSV Import' : '↑ Import CSV'}
+                </button>
+                <button className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" onClick={downloadSampleCsv}>
+                  Sample CSV
+                </button>
+              </div>
+              {csvImportedIds.size > 0 && (
+                <span className="text-xs text-green-400 bg-green-900/30 border border-green-700/40 px-2 py-0.5 rounded">
+                  {csvImportedIds.size} imported
+                </span>
+              )}
+            </div>
+            {csvImportOpen && (
+              <Card title="Import Transactions from CSV" noHover>
+                <p className="text-xs text-slate-400 mb-3">
+                  Upload a CSV with columns: <span className="text-slate-300 font-medium">Date, Merchant/Description, Amount</span> (required). Optional: Type, Category, Notes.
+                  Positive amounts = expense. Negative amounts = income.
+                </p>
+                <div className="flex gap-2 flex-wrap">
+                  <input
+                    ref={csvFileRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={e => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      setCsvFileName(file.name)
+                      const reader = new FileReader()
+                      reader.onload = ev => parseCsvForImport(ev.target?.result as string ?? '')
+                      reader.readAsText(file)
+                    }}
+                  />
+                  <button
+                    className="rounded-lg px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 transition-colors"
+                    onClick={() => csvFileRef.current?.click()}
+                  >
+                    Choose CSV File
+                  </button>
+                  {csvFileName && <span className="self-center text-xs text-slate-400">{csvFileName}</span>}
+                </div>
+                {csvError && <p className="mt-2 text-xs text-red-400">{csvError}</p>}
+                {csvPreviewRows.length > 0 && (
+                  <div className="mt-3">
+                    <p className="text-xs text-slate-400 mb-2">{csvPreviewRows.length} rows found · {csvPreviewRows.filter(r => r.isDup).length} possible duplicates</p>
+                    <div className="overflow-x-auto max-h-48 overflow-y-auto">
+                      <table className="w-full text-xs min-w-[500px]">
+                        <thead>
+                          <tr className="text-left text-slate-400 border-b border-slate-700">
+                            <th className="pb-1 pr-2">Date</th>
+                            <th className="pb-1 pr-2">Merchant</th>
+                            <th className="pb-1 pr-2 text-right">Amount</th>
+                            <th className="pb-1 pr-2">Type</th>
+                            <th className="pb-1 pr-2">Notes</th>
+                            <th className="pb-1" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {csvPreviewRows.map((r, i) => (
+                            <tr key={i} className={`border-b border-slate-800 ${r.isDup ? 'bg-amber-900/15' : ''}`}>
+                              <td className="py-1 pr-2 whitespace-nowrap">{r.date}</td>
+                              <td className="py-1 pr-2 max-w-[120px] truncate">{r.merchant}</td>
+                              <td className="py-1 pr-2 text-right">{currency(parseFloat(r.amount))}</td>
+                              <td className="py-1 pr-2">{TXN_TYPE_LABELS[r.type]}</td>
+                              <td className="py-1 pr-2 text-slate-500 max-w-[80px] truncate">{r.notes || '—'}</td>
+                              <td className="py-1">{r.isDup && <span className="text-amber-400 text-[10px]">dup?</span>}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <button
+                      className="mt-3 rounded-lg px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 transition-colors"
+                      onClick={importCsvRows}
+                    >
+                      Import {csvPreviewRows.length} Transactions
+                    </button>
+                  </div>
+                )}
+              </Card>
+            )}
             {/* ── V8.5 Review queue summary ── */}
             {transactions.length > 0 && (() => {
               const range = getPeriodDateRange(period)
               const periodSpend  = transactions
-                .filter(tx => tx.date >= range.start && tx.date <= range.end && (tx.type === 'expense' || tx.type === 'credit card payment'))
+                .filter(tx => tx.date >= range.start && tx.date <= range.end && tx.type === 'expense')
                 .reduce((s, tx) => s + tx.amount, 0)
               const rulesApplied = transactions.filter(tx => tx.appliedByRule).length
               return (
@@ -3232,6 +3490,28 @@ export default function App() {
                   </select>
                   <p className="text-[10px] text-slate-500 mt-0.5">Use Credit Card Payment when checking pays down a credit card.</p>
                 </div>
+                {/* V9.2.1 — Transfer / Credit Card Payment: show destination account */}
+                {(txnForm.type === 'transfer' || txnForm.type === 'credit card payment') && accounts.length > 1 && (
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">
+                      {txnForm.type === 'credit card payment' ? 'Credit Card Account' : 'Destination Account'}
+                      <span className="text-slate-600 ml-1">(optional)</span>
+                    </label>
+                    <select
+                      className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                      value={txnForm.toAccountId}
+                      onChange={e => setTxnForm(v => ({ ...v, toAccountId: e.target.value }))}
+                    >
+                      <option value="">— select account —</option>
+                      {accounts.filter(a => a.id !== txnForm.accountId).map(a => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      {txnForm.type === 'credit card payment' ? 'Which credit card is being paid off.' : 'Which account receives the funds.'}
+                    </p>
+                  </div>
+                )}
                 {/* Category */}
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Category <span className="text-slate-600">(optional)</span></label>
@@ -3511,7 +3791,7 @@ export default function App() {
                         }
                         const txTypeColor = tx.type === 'income' ? 'bg-green-900/50 text-green-300' : tx.type === 'transfer' ? 'bg-blue-900/50 text-blue-300' : tx.type === 'credit card payment' ? 'bg-purple-900/50 text-purple-300' : 'bg-slate-700 text-slate-300'
                         return (
-                          <tr key={tx.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedTxnId === tx.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
+                          <tr key={tx.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedTxnId === tx.id ? 'bg-blue-600/20' : csvImportedIds.has(tx.id) ? 'bg-green-900/10' : 'hover:bg-slate-800/40'}`}>
                             <td className="py-2 pr-3 text-slate-300 text-xs whitespace-nowrap">{tx.date}</td>
                             <td className="py-2 pr-3 text-slate-400 text-xs">{acct?.name ?? '—'}</td>
                             <td className="py-2 pr-3 font-medium">{tx.merchant}</td>
