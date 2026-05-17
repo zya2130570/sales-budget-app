@@ -1,7 +1,7 @@
 import React from 'react'
-import type { Transaction, Account, Category, TransactionRule, TransactionType, Period } from '../types'
+import type { Transaction, Account, Category, TransactionRule, Period } from '../types'
 import type { RecurringCandidate } from '../utils/recurring'
-import type { ManualRecurringItem, RecurringCadence, ForecastLineItem as _FI } from '../utils/forecastMath'
+import type {ForecastLineItem as _FI } from '../utils/forecastMath'
 import { currency } from '../utils/formatting'
 import { normalizeMerchant } from '../utils/merchantNormalization'
 import { txNeedsReview } from '../utils/transactionHelpers'
@@ -32,7 +32,7 @@ export interface TransactionsTabProps {
   filteredTxns: Transaction[]
   hasActiveFilters: boolean
   needsReviewTxnCount: number
-  reviewableTxns: Transaction[]
+  needsreviewTxncount: Transaction[]
   uncategorizedExpenseCount: number
   recurringCandidates: RecurringCandidate[]
   dismissedDupIds: Set<string>
