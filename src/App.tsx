@@ -47,11 +47,8 @@ import { parseCsv, detectColumns, generateSampleCsvString } from './utils/csv'
 // V10.1 — extracted helpers
 import { normalizeMerchant } from './utils/merchantNormalization'
 import { loadCategoryMemory, saveCategoryMemory } from './utils/categoryMemory'
-import type { CategoryMemory } from './utils/categoryMemory'
 import { resolveHint } from './utils/importHints'
-import type { HintResult } from './utils/importHints'
 import { detectRecurringPatterns } from './utils/recurring'
-import type { RecurringCandidate } from './utils/recurring'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
