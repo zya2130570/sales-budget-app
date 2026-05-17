@@ -88,25 +88,38 @@ const PAYMENT_PATTERNS = /payment|transfer|zelle|venmo|paypal|apple cash|e-payme
 // Cleans up raw bank-export merchant strings to friendly display names.
 // Pattern: strip trailing store numbers, normalize well-known brands.
 const MERCHANT_ALIASES: Array<[RegExp, string]> = [
-  [/^MCDONALDS?(\s|$)/i,       "McDonald's"],
-  [/^CHICK.FIL.A/i,             'Chick-fil-A'],
-  [/^CHIPOTLE/i,                'Chipotle'],
-  [/^AMZN\s*MKTPLACE/i,        'Amazon'],
-  [/^AMAZON(\s*(COM|MKTPLACE|PRIME))?/i, 'Amazon'],
-  [/^WHOLEFDS|WHOLE\s*FOODS/i, 'Whole Foods'],
-  [/^STARBUCKS|SBUX/i,         'Starbucks'],
-  [/^DUNKIN/i,                  "Dunkin'"],
-  [/^WALMART|WAL.MART/i,       'Walmart'],
-  [/^TARGET(\s|$)/i,            'Target'],
-  [/^COSTCO/i,                  'Costco'],
-  [/^NETFLIX/i,                 'Netflix'],
-  [/^SPOTIFY/i,                 'Spotify'],
-  [/^DOORDASH/i,                'DoorDash'],
-  [/^UBER\s*EATS/i,             'Uber Eats'],
-  [/^GRUBHUB/i,                 'Grubhub'],
-  [/^CHEVRON/i,                 'Chevron'],
-  [/^EXXON/i,                   'ExxonMobil'],
-  [/^SHELL(\s|$)/i,             'Shell'],
+  [/^MCDONALDS?(\s|$)/i,                  "McDonald's"],
+  [/^CHICK.FIL.A/i,                        'Chick-fil-A'],
+  [/^CHIPOTLE/i,                           'Chipotle'],
+  [/^AMZN\s*MKTPLACE/i,                   'Amazon'],
+  [/^AMAZON\s*(COM|MKTPLACE|PRIME|DIGITAL)?/i, 'Amazon'],
+  [/^WHOLEFDS|WHOLE\s*FOODS/i,            'Whole Foods'],
+  [/^STARBUCKS|SBUX/i,                    'Starbucks'],
+  [/^DUNKIN/i,                             "Dunkin'"],
+  [/^WALMART|WAL.MART/i,                  'Walmart'],
+  [/^TARGET(\s|$)/i,                       'Target'],
+  [/^COSTCO/i,                             'Costco'],
+  [/^NETFLIX(\s|$|\.)/i,                  'Netflix'],
+  [/^SPOTIFY(\s|$)/i,                     'Spotify'],
+  [/^APPLE\.?COM\/?BILL?/i,              'Apple'],
+  [/^APPLE(\s|$)/i,                        'Apple'],
+  [/^OPENAI/i,                             'OpenAI'],
+  [/^GOOGLE(\s*(ONE|STORAGE|PLAY|LLC))?/i,'Google'],
+  [/^DOORDASH/i,                           'DoorDash'],
+  [/^UBER\s*EATS/i,                        'Uber Eats'],
+  [/^UBER(\s|$)/i,                         'Uber'],
+  [/^GRUBHUB/i,                            'Grubhub'],
+  [/^CHEVRON/i,                            'Chevron'],
+  [/^EXXON/i,                              'ExxonMobil'],
+  [/^SHELL(\s|$)/i,                        'Shell'],
+  [/^VENMO\b/i,                            'Venmo'],
+  [/^PAYPAL\b/i,                           'PayPal'],
+  [/^HULU(\s|$)/i,                         'Hulu'],
+  [/^DISNEY\s*PLUS|DISNEY\+/i,            'Disney+'],
+  [/^YOUTUBE\s*PREMIUM/i,                  'YouTube Premium'],
+  [/^MICROSOFT(\s|$)/i,                    'Microsoft'],
+  [/^AMAZON\s*WEB|AWS/i,                  'AWS'],
+  [/^GITHUB(\s|$)/i,                       'GitHub'],
 ]
 function normalizeMerchant(raw: string): string {
   if (!raw) return raw
@@ -122,6 +135,71 @@ function normalizeMerchant(raw: string): string {
     return noNum.replace(/\b\w/g, c => c.toUpperCase()).toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
   }
   return noNum || stripped
+}
+
+// ── V9.7 Recurring detection ──────────────────────────────────────────────────
+type RecurringCandidate = {
+  merchantKey: string         // normalized, lowercased merchant name (group key)
+  displayName: string         // pretty display name
+  cadence: 'weekly' | 'bi-weekly' | 'monthly'
+  estimatedMonthlyAmount: number
+  lastDate: string
+  count: number
+  txnIds: string[]
+  confidence: 'high' | 'medium'
+}
+
+/** Detect transactions that repeat on a regular cadence per normalized merchant. */
+function detectRecurringPatterns(transactions: Transaction[]): RecurringCandidate[] {
+  // Group expenses (and income for payroll) by normalized merchant
+  const groups = new Map<string, Transaction[]>()
+  for (const tx of transactions) {
+    if (tx.type !== 'expense' && tx.type !== 'income') continue
+    const display = normalizeMerchant(tx.merchant)
+    const key     = display.toLowerCase()
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(tx)
+  }
+
+  const results: RecurringCandidate[] = []
+
+  for (const [key, txns] of groups.entries()) {
+    if (txns.length < 2) continue
+    const sorted = [...txns].sort((a, b) => a.date.localeCompare(b.date))
+
+    // Compute day-gaps between consecutive occurrences
+    const gaps: number[] = []
+    for (let i = 1; i < sorted.length; i++) {
+      const ms = new Date(sorted[i].date).getTime() - new Date(sorted[i - 1].date).getTime()
+      gaps.push(ms / 86_400_000)
+    }
+    const medianGap = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)]
+
+    let cadence: RecurringCandidate['cadence'] | null = null
+    if (medianGap >= 5  && medianGap <= 9)  cadence = 'weekly'
+    else if (medianGap >= 11 && medianGap <= 18) cadence = 'bi-weekly'
+    else if (medianGap >= 25 && medianGap <= 35) cadence = 'monthly'
+    if (!cadence) continue
+
+    // Amount consistency: skip if amounts vary more than 40%
+    const avg = sorted.reduce((s, t) => s + t.amount, 0) / sorted.length
+    const maxDev = Math.max(...sorted.map(t => Math.abs(t.amount - avg) / (avg || 1)))
+    if (maxDev > 0.4) continue
+
+    const monthlyAmt = cadence === 'weekly' ? avg * 4.33 : cadence === 'bi-weekly' ? avg * 2.17 : avg
+    results.push({
+      merchantKey: key,
+      displayName: normalizeMerchant(sorted[0].merchant),
+      cadence,
+      estimatedMonthlyAmount: monthlyAmt,
+      lastDate: sorted[sorted.length - 1].date,
+      count: sorted.length,
+      txnIds: sorted.map(t => t.id),
+      confidence: sorted.length >= 3 ? 'high' : 'medium',
+    })
+  }
+
+  return results.sort((a, b) => b.estimatedMonthlyAmount - a.estimatedMonthlyAmount)
 }
 
 // ── V9.5 Review classification ────────────────────────────────────────────────
@@ -578,6 +656,18 @@ export default function App() {
   const [txnCategoryFilter, setTxnCategoryFilter] = useState('')
   // V9.6.1 — Duplicate resolution: IDs the user has explicitly dismissed from dup review
   const [dismissedDupIds, setDismissedDupIds]   = useState<Set<string>>(new Set())
+  // V9.7 — Duplicate resolution: confirmed-as-intentional IDs (badge changes to "Kept Both")
+  const [confirmedDupIds, setConfirmedDupIds]   = useState<Set<string>>(new Set())
+  // V9.7 — Recurring detection state
+  const [recurringOpen, setRecurringOpen]         = useState(true)
+  const [confirmedRecurring, setConfirmedRecurring] = useState<Set<string>>(new Set()) // merchantKeys
+  const [dismissedRecurring, setDismissedRecurring] = useState<Set<string>>(new Set()) // merchantKeys
+  // V9.7 — Rule suggestion after category assign from Review Center
+  const [ruleSuggestion, setRuleSuggestion]       = useState<{
+    merchants: string[]; categoryId: string; txIds: string[]
+  } | null>(null)
+  // V9.7 — Shift-click multi-select in Review Center
+  const lastReviewSelectIdxRef = useRef<number>(-1)
 
   // V9.0.1 — Back to top
   const [showScrollTop, setShowScrollTop] = useState(false)
@@ -1046,11 +1136,29 @@ export default function App() {
   )
   const needsReviewTxnCount = reviewableTxns.length
 
+  // V9.7 — Recurring detection
+  const recurringCandidates = useMemo(
+    () => detectRecurringPatterns(transactions).filter(c => !dismissedRecurring.has(c.merchantKey)),
+    [transactions, dismissedRecurring]
+  )
+  const estimatedMonthlyRecurring = recurringCandidates
+    .filter(c => c.confidence === 'high' || confirmedRecurring.has(c.merchantKey))
+    .reduce((s, c) => s + c.estimatedMonthlyAmount, 0)
+
   const bulkAssign = () => {
     if (!bulkCategoryId || selectedTxnIds.size === 0) return
+    const affectedTxns = transactions.filter(tx => selectedTxnIds.has(tx.id) && tx.type === 'expense')
     setTxnWithHistory(prev => prev.map(tx =>
       selectedTxnIds.has(tx.id) ? { ...tx, categoryId: bulkCategoryId } : tx
     ))
+    // Offer rule creation for unique merchants without existing rules
+    const uniqueMerchants = [...new Set(affectedTxns.map(tx => normalizeMerchant(tx.merchant)))]
+      .filter(m => !rules.some(r => r.matchField === 'merchant' && r.categoryId === bulkCategoryId &&
+        r.matchText.split(',').some(t => t.trim().toLowerCase() === m.toLowerCase())
+      ))
+    if (uniqueMerchants.length > 0) {
+      setRuleSuggestion({ merchants: uniqueMerchants, categoryId: bulkCategoryId, txIds: [...selectedTxnIds] })
+    }
     setSelectedTxnIds(new Set())
     setBulkCategoryId('')
     showToast(`Assigned category to ${selectedTxnIds.size} transaction${selectedTxnIds.size !== 1 ? 's' : ''}.`)
@@ -3761,7 +3869,35 @@ txnMerchantRef.current?.focus()
                         <button onClick={() => setSelectedTxnIds(new Set())} className="text-xs text-slate-400 hover:text-slate-200">Clear</button>
                       </div>
                     )}
-                    {reviewableTxns.slice(0, 15).map(tx => {
+                    {/* Rule suggestion prompt */}
+                    {ruleSuggestion && (
+                      <div className="flex items-center gap-3 mb-2 p-2.5 rounded-lg bg-indigo-900/20 border border-indigo-700/30 text-xs">
+                        <span className="text-indigo-200 flex-1">
+                          {ruleSuggestion.merchants.length === 1
+                            ? `Auto-categorize "${ruleSuggestion.merchants[0]}" → ${categories.find(c => c.id === ruleSuggestion.categoryId)?.name} in future?`
+                            : `Create rules for ${ruleSuggestion.merchants.slice(0, 3).join(', ')}${ruleSuggestion.merchants.length > 3 ? ` +${ruleSuggestion.merchants.length - 3} more` : ''} → ${categories.find(c => c.id === ruleSuggestion.categoryId)?.name}?`
+                          }
+                        </span>
+                        <button
+                          className="text-indigo-300 hover:text-white bg-indigo-700/50 hover:bg-indigo-600/60 px-2 py-0.5 rounded transition-colors whitespace-nowrap"
+                          onClick={() => {
+                            ruleSuggestion.merchants.forEach(m => {
+                              const newRule: TransactionRule = {
+                                id: crypto.randomUUID(), name: m,
+                                matchText: m, matchField: 'merchant',
+                                categoryId: ruleSuggestion.categoryId,
+                                createdAt: new Date().toISOString(),
+                              }
+                              setRulesWithHistory(prev => [...prev, newRule])
+                            })
+                            showToast(`Created ${ruleSuggestion.merchants.length} rule${ruleSuggestion.merchants.length !== 1 ? 's' : ''}.`)
+                            setRuleSuggestion(null)
+                          }}
+                        >Yes, create</button>
+                        <button className="text-slate-400 hover:text-slate-200 px-1" onClick={() => setRuleSuggestion(null)}>Not now</button>
+                      </div>
+                    )}
+                    {reviewableTxns.slice(0, 15).map((tx, rowIdx) => {
                       const acct       = accounts.find(a => a.id === tx.accountId)
                       const cat        = categories.find(c => c.id === tx.categoryId)
                       const isSelected = selectedTxnIds.has(tx.id)
@@ -3771,29 +3907,49 @@ txnMerchantRef.current?.focus()
                         o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
                         o.amount === tx.amount && o.date === tx.date
                       )
+                      const isConfirmedDup = confirmedDupIds.has(tx.id)
                       return (
                         <div
                           key={tx.id}
-                          className={`rounded-lg border px-3 py-2.5 flex items-center gap-3 transition-colors ${
+                          className={`rounded-lg border px-3 py-2.5 flex items-center gap-3 transition-colors cursor-pointer ${
                             isSelected ? 'border-blue-500/60 bg-blue-900/15' : 'border-slate-700/50 bg-slate-800/40 hover:bg-slate-800/60'
                           }`}
+                          onClick={e => {
+                            // Don't toggle if clicking a button, select, or input
+                            if ((e.target as HTMLElement).closest('button,select,input')) return
+                            if (e.shiftKey && lastReviewSelectIdxRef.current >= 0) {
+                              const lo = Math.min(lastReviewSelectIdxRef.current, rowIdx)
+                              const hi = Math.max(lastReviewSelectIdxRef.current, rowIdx)
+                              setSelectedTxnIds(prev => {
+                                const next = new Set(prev)
+                                reviewableTxns.slice(lo, hi + 1).forEach(t => next.add(t.id))
+                                return next
+                              })
+                            } else {
+                              setSelectedTxnIds(prev => {
+                                const next = new Set(prev)
+                                next.has(tx.id) ? next.delete(tx.id) : next.add(tx.id)
+                                return next
+                              })
+                              lastReviewSelectIdxRef.current = rowIdx
+                            }
+                          }}
                         >
                           <input
                             type="checkbox"
                             checked={isSelected}
-                            onChange={e => setSelectedTxnIds(prev => {
-                              const next = new Set(prev)
-                              e.target.checked ? next.add(tx.id) : next.delete(tx.id)
-                              return next
-                            })}
+                            onChange={() => {/* handled by row onClick */}}
+                            onClick={e => e.stopPropagation()}
                             className="accent-blue-500 shrink-0"
                           />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-medium text-sm truncate">{normalizeMerchant(tx.merchant)}</span>
-                              {isDup && (
+                              {isConfirmedDup ? (
+                                <span className="text-[10px] bg-slate-700 text-slate-400 border border-slate-600/40 px-1.5 py-0.5 rounded shrink-0">Kept Both</span>
+                              ) : isDup ? (
                                 <span className="text-[10px] bg-amber-900/50 text-amber-300 border border-amber-700/40 px-1.5 py-0.5 rounded shrink-0">Duplicate?</span>
-                              )}
+                              ) : null}
                               {!tx.categoryId && tx.type === 'expense' && (
                                 <span className="text-[10px] bg-slate-700/70 text-slate-400 border border-slate-600/40 px-1.5 py-0.5 rounded shrink-0">No Category</span>
                               )}
@@ -3803,32 +3959,45 @@ txnMerchantRef.current?.focus()
                             </div>
                             <div className="text-xs text-slate-500 mt-0.5">{tx.date} · {acct?.name ?? '—'} · {TXN_TYPE_LABELS[tx.type]}</div>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
+                          <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
                             <span className={`text-sm font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-200'}`}>
                               {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : ''}{currency(tx.amount)}
                             </span>
-                            {/* Duplicate resolution actions (shown when dup is the primary or only review reason) */}
+                            {/* Duplicate resolution actions */}
                             {isDup && (
                               <div className="flex flex-col gap-1 min-w-0">
                                 <button
                                   className="text-[10px] text-slate-300 hover:text-white bg-slate-700 hover:bg-slate-600 px-2 py-0.5 rounded transition-colors whitespace-nowrap"
-                                  title="Mark as intentional — keeps both transactions and removes from Needs Review"
-                                  onClick={() => setDismissedDupIds(prev => new Set([...prev, tx.id]))}
+                                  onClick={() => {
+                                    setDismissedDupIds(prev => new Set([...prev, tx.id]))
+                                    setConfirmedDupIds(prev => new Set([...prev, tx.id]))
+                                  }}
                                 >Keep Both</button>
                                 <button
                                   className="text-[10px] text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/40 border border-red-700/30 px-2 py-0.5 rounded transition-colors whitespace-nowrap"
-                                  title="Delete this transaction — removes the duplicate"
                                   onClick={() => setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id))}
                                 >Delete</button>
                               </div>
                             )}
-                            {/* Category quick-assign (always shown for expenses, alongside or without dup buttons) */}
+                            {/* Category quick-assign with rule suggestion */}
                             {tx.type === 'expense' && (
                               <select
                                 value={cat?.id ?? ''}
-                                onChange={e => setTxnWithHistory(prev => prev.map(x =>
-                                  x.id === tx.id ? { ...x, categoryId: e.target.value || undefined } : x
-                                ))}
+                                onChange={e => {
+                                  const newCatId = e.target.value
+                                  if (!newCatId) return
+                                  setTxnWithHistory(prev => prev.map(x =>
+                                    x.id === tx.id ? { ...x, categoryId: newCatId } : x
+                                  ))
+                                  // Rule suggestion: offer to create rule if none exists for this merchant
+                                  const merchant = normalizeMerchant(tx.merchant)
+                                  const ruleExists = rules.some(r =>
+                                    r.matchField === 'merchant' &&
+                                    r.categoryId === newCatId &&
+                                    r.matchText.split(',').some(m => m.trim().toLowerCase() === merchant.toLowerCase())
+                                  )
+                                  if (!ruleExists) setRuleSuggestion({ merchants: [merchant], categoryId: newCatId, txIds: [tx.id] })
+                                }}
                                 className="text-xs px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none max-w-[110px]"
                               >
                                 <option value="">Assign…</option>
@@ -3844,6 +4013,93 @@ txnMerchantRef.current?.focus()
                         Showing 15 of {reviewableTxns.length} — use <button className="underline text-slate-400 hover:text-slate-200" onClick={() => setTxnFilter('needs-review')}>Needs Review filter</button> to see all.
                       </p>
                     )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── V9.7 Subscriptions & Recurring ── */}
+            {recurringCandidates.length > 0 && (
+              <div className="rounded-2xl border border-teal-700/30 bg-teal-950/10 overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between px-4 py-3 text-left"
+                  onClick={() => setRecurringOpen(v => !v)}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-teal-500/25 text-teal-300 text-xs font-bold">{recurringCandidates.length}</span>
+                    <span className="text-teal-300 font-semibold text-sm">Subscriptions &amp; Recurring</span>
+                    {estimatedMonthlyRecurring > 0 && (
+                      <span className="text-slate-500 text-xs">≈ {currency(estimatedMonthlyRecurring)}/mo</span>
+                    )}
+                  </div>
+                  <span className="text-slate-500 text-xs">{recurringOpen ? '▲' : '▼'}</span>
+                </button>
+                {recurringOpen && (
+                  <div className="border-t border-teal-700/20 px-4 pb-4 pt-3 space-y-2">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs min-w-[480px]">
+                        <thead>
+                          <tr className="text-left text-slate-400 border-b border-slate-700/60">
+                            <th className="pb-1.5 pr-3 font-medium">Merchant</th>
+                            <th className="pb-1.5 pr-3 font-medium">Cadence</th>
+                            <th className="pb-1.5 pr-3 font-medium text-right">Est. /mo</th>
+                            <th className="pb-1.5 pr-3 font-medium">Last seen</th>
+                            <th className="pb-1.5 pr-3 font-medium text-center">Seen</th>
+                            <th className="pb-1.5 font-medium">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {recurringCandidates.map(c => {
+                            const isConfirmed = confirmedRecurring.has(c.merchantKey)
+                            return (
+                              <tr key={c.merchantKey} className="border-b border-slate-800/60 hover:bg-teal-900/5">
+                                <td className="py-1.5 pr-3">
+                                  <span className="font-medium text-slate-200">{c.displayName}</span>
+                                  {isConfirmed && (
+                                    <span className="ml-1.5 text-[9px] bg-teal-900/50 text-teal-300 border border-teal-700/40 px-1 py-0.5 rounded">Confirmed</span>
+                                  )}
+                                  {c.confidence === 'high' && !isConfirmed && (
+                                    <span className="ml-1.5 text-[9px] bg-slate-700 text-slate-400 border border-slate-600/40 px-1 py-0.5 rounded">Suggested</span>
+                                  )}
+                                </td>
+                                <td className="py-1.5 pr-3 text-slate-400 capitalize">{c.cadence}</td>
+                                <td className="py-1.5 pr-3 text-right text-slate-300 font-medium">{currency(c.estimatedMonthlyAmount)}</td>
+                                <td className="py-1.5 pr-3 text-slate-500">{c.lastDate}</td>
+                                <td className="py-1.5 pr-3 text-center text-slate-400">{c.count}×</td>
+                                <td className="py-1.5">
+                                  <div className="flex gap-1.5">
+                                    {!isConfirmed ? (
+                                      <button
+                                        className="text-[10px] text-teal-400 hover:text-teal-300 bg-teal-900/30 hover:bg-teal-900/50 border border-teal-700/30 px-1.5 py-0.5 rounded transition-colors"
+                                        onClick={() => setConfirmedRecurring(prev => new Set([...prev, c.merchantKey]))}
+                                      >Confirm</button>
+                                    ) : (
+                                      <button
+                                        className="text-[10px] text-slate-400 hover:text-slate-200 bg-slate-700/50 px-1.5 py-0.5 rounded transition-colors"
+                                        onClick={() => setConfirmedRecurring(prev => { const n = new Set(prev); n.delete(c.merchantKey); return n })}
+                                      >Unconfirm</button>
+                                    )}
+                                    <button
+                                      className="text-[10px] text-slate-500 hover:text-slate-300 px-1.5 py-0.5 rounded transition-colors"
+                                      onClick={() => setDismissedRecurring(prev => new Set([...prev, c.merchantKey]))}
+                                    >Dismiss</button>
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                        {estimatedMonthlyRecurring > 0 && (
+                          <tfoot>
+                            <tr className="border-t border-slate-700/60">
+                              <td colSpan={2} className="pt-2 text-xs text-slate-400 font-medium">Est. monthly total (confirmed + high-confidence)</td>
+                              <td className="pt-2 text-right text-sm font-bold text-teal-300">{currency(estimatedMonthlyRecurring)}</td>
+                              <td colSpan={3} />
+                            </tr>
+                          </tfoot>
+                        )}
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
@@ -4357,9 +4613,11 @@ txnMerchantRef.current?.focus()
                           )
                         }
                         const txTypeColor = tx.type === 'income' ? 'bg-green-900/50 text-green-300' : tx.type === 'transfer' ? 'bg-blue-900/50 text-blue-300' : tx.type === 'credit card payment' ? 'bg-purple-900/50 text-purple-300' : 'bg-slate-700 text-slate-300'
-                        const txIsDup    = transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)
+                        const txIsDup      = transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)
+                        const txIsKeptDup  = confirmedDupIds.has(tx.id)
                         const txIsImported = !!tx.batchId
-                        const txReview   = txNeedsReview(tx, transactions, dismissedDupIds)
+                        const txReview     = txNeedsReview(tx, transactions, dismissedDupIds)
+                        const txRecurring  = recurringCandidates.find(c => c.txnIds.includes(tx.id))
                         return (
                           <tr key={tx.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedTxnId === tx.id ? 'bg-blue-600/20' : txReview ? 'bg-amber-950/10' : 'hover:bg-slate-800/40'}`}>
                             <td className="py-2 pr-3 text-slate-300 text-xs whitespace-nowrap">{tx.date}</td>
@@ -4369,8 +4627,13 @@ txnMerchantRef.current?.focus()
                               {txIsImported && (
                                 <span className="ml-1.5 text-[9px] text-blue-400 bg-blue-900/30 border border-blue-700/30 px-1 py-0.5 rounded">Imported</span>
                               )}
-                              {txIsDup && (
+                              {txIsKeptDup ? (
+                                <span className="ml-1.5 text-[9px] text-slate-400 bg-slate-700/60 border border-slate-600/40 px-1 py-0.5 rounded">Kept Both</span>
+                              ) : txIsDup ? (
                                 <span className="ml-1.5 text-[9px] text-amber-400 bg-amber-900/30 border border-amber-700/30 px-1 py-0.5 rounded">Duplicate?</span>
+                              ) : null}
+                              {txRecurring && (
+                                <span className="ml-1.5 text-[9px] text-teal-400 bg-teal-900/30 border border-teal-700/30 px-1 py-0.5 rounded capitalize">{txRecurring.cadence}</span>
                               )}
                             </td>
                             <td className="py-2 pr-3">
@@ -5603,7 +5866,11 @@ function CsvImportModal({
                               <td className="py-1 px-2 text-slate-300 whitespace-nowrap">{row.date ?? '—'}</td>
                               <td className="py-1 px-2 text-slate-200 max-w-[130px] truncate">
                                 {normalizeMerchant(rawMerchant) || '—'}
-                                {isPayment && <span className="ml-1 text-[9px] text-amber-400">transfer?</span>}
+                                {isPayment && (
+                                  <span className="ml-1 text-[9px] text-amber-400">
+                                    {effectiveAccount?.type === 'credit card' ? 'CC Payment?' : 'Transfer?'}
+                                  </span>
+                                )}
                               </td>
                               <td className="py-1 px-2 text-right text-slate-300 whitespace-nowrap">
                                 {row.amount != null ? `$${Math.abs(row.amount).toFixed(2)}` : '—'}
