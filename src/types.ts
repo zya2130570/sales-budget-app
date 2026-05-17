@@ -12,7 +12,19 @@ export type SavedTargetSet = { name: string; targets: Target[]; savedAt: string 
 export type AccountType = 'checking' | 'savings' | 'credit card' | 'investment' | 'cash' | 'roth ira' | 'retirement' | 'other'
 export type Account = { id: string; name: string; type: AccountType; balance: number; institution: string; createdAt: string }
 export type TransactionType = 'expense' | 'income' | 'transfer' | 'credit card payment'
-export type Transaction = { id: string; date: string; accountId: string; merchant: string; amount: number; type: TransactionType; categoryId?: string; notes?: string; appliedByRule?: string; createdAt: string }
+export type Transaction = {
+  id: string
+  date: string
+  accountId: string
+  toAccountId?: string
+  merchant: string
+  amount: number
+  type: TransactionType
+  categoryId?: string
+  notes?: string
+  appliedByRule?: string
+  createdAt: string
+}
 export type TransactionRule = { id: string; name: string; matchText: string; matchField: 'merchant' | 'notes'; categoryId: string; type?: TransactionType; createdAt: string }
 export type TakeHomeMode = 'simple' | 'manual'
 export type TakeHomeSettings = { mode: TakeHomeMode; simpleRate: number; manualMonthlyNet: number }
