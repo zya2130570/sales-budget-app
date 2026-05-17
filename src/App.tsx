@@ -457,6 +457,13 @@ export default function App() {
   const [scenario, setScenario] = useState<Record<ScenarioName, number>>(scenarioDefaults)
   const [savedBudgets, setSavedBudgets] = useState<SavedBudget[]>([])
   const [savedScenarios, setSavedScenarios] = useState<SavedScenarioSet[]>([])
+
+  // V9.13 — Scenario engine expansion
+  const [scenarioNotes, setScenarioNotes] = useState<Record<string, string>>({}) // keyed by savedScenario name
+  const [editingScenarioName, setEditingScenarioName] = useState<string | null>(null)
+  const [renameScenarioValue, setRenameScenarioValue] = useState('')
+  const [scenarioStressMode, setScenarioStressMode] = useState<'none' | 'commission-25' | 'commission-50' | 'extra-expense' | 'higher-bills'>('none')
+  const [showStressTest, setShowStressTest] = useState(false)
   const [targets, setTargets] = useState<Target[]>([])
   const [savedTargetSets, setSavedTargetSets] = useState<SavedTargetSet[]>([])
   const [targetSetName, setTargetSetName] = useState('')
@@ -888,6 +895,7 @@ export default function App() {
     const c = loadCategories(); if (c) setCategories(c)
     const b = loadSavedBudgets(); if (b) setSavedBudgets(b)
     const s = loadSavedScenarios(); if (s) setSavedScenarios(s)
+    try { const sn = localStorage.getItem('flow_scenario_notes'); if (sn) setScenarioNotes(JSON.parse(sn)) } catch { /* ignore */ }
     const t = loadTargets(); if (t) setTargets(t)
     const ts = loadSavedTargetSets(); if (ts) setSavedTargetSets(ts)
     const ac = loadAccounts(); if (ac) setAccounts(ac)
@@ -899,6 +907,10 @@ export default function App() {
   useEffect(() => saveCategories(categories), [categories])
   useEffect(() => saveSavedBudgets(savedBudgets), [savedBudgets])
   useEffect(() => saveSavedScenarios(savedScenarios), [savedScenarios])
+  // V9.13 — persist scenario notes
+  useEffect(() => {
+    try { localStorage.setItem('flow_scenario_notes', JSON.stringify(scenarioNotes)) } catch { /* ignore */ }
+  }, [scenarioNotes])
   useEffect(() => saveTargets(targets), [targets])
   useEffect(() => saveSavedTargetSets(savedTargetSets), [savedTargetSets])
   useEffect(() => saveAccounts(accounts), [accounts])
@@ -2654,7 +2666,6 @@ txnMerchantRef.current?.focus()
             >Delete</button>
           </div>
         }
-      >
         {isEditingTarget ? (
           <div
             className="space-y-3"
@@ -3439,14 +3450,32 @@ txnMerchantRef.current?.focus()
                 </p>
               )}
             </Card>
-            {/* V9.1 — Arizona take-home estimate */}
+            {/* V9.13 — Arizona take-home estimate: dynamic (grossSalary includes commission) */}
             {(() => {
-              const bd = estimateTaxBreakdown(adjustedSalary)
+              // Use total annual gross (salary + commission) so rate responds to GP changes
+              const bd = estimateTaxBreakdown(grossSalary)
+              const effectiveFedPct = bd.grossAnnual > 0 ? (bd.fedTax / bd.grossAnnual) * 100 : 0
+              // Effective withholding = 100% - take-home rate (never the same number)
+              const withholdingPct = (1 - bd.takeHomeRate) * 100
+              // Compact reference lines for common income levels
+              const refLevels = [40000, 60000, 80000].map(g => {
+                const r = estimateTaxBreakdown(g)
+                const fp = r.grossAnnual > 0 ? (r.fedTax / r.grossAnnual) * 100 : 0
+                return { g, fp }
+              })
               return (
                 <Card title="Estimated Take-Home (Arizona, Single Filer)">
-                  <p className="text-xs text-slate-400 mb-3">
-                    Take-home pay is estimated automatically using simplified 2025 federal, Arizona state, and FICA assumptions. This is an estimate — not certified tax advice.
-                  </p>
+                  {/* Dynamic compact reference description */}
+                  <div className="text-xs text-slate-500 mb-4 space-y-0.5">
+                    {refLevels.map(({ g, fp }) => (
+                      <div key={g}>
+                        At {currency(g)}: Federal ({fp.toFixed(1)}%) + AZ state (2.5%) + SS (6.2%) + Medicare (1.45%)
+                      </div>
+                    ))}
+                    <div className="text-slate-400 pt-0.5">
+                      Current: Federal ({effectiveFedPct.toFixed(1)}%) + AZ state (2.5%) + SS (6.2%) + Medicare (1.45%) · <span className="italic">Planning estimate only, not tax advice.</span>
+                    </div>
+                  </div>
                   <div className="grid md:grid-cols-2 gap-3 mb-3">
                     <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
                       <div className="text-xs text-slate-400 mb-1">Estimated Annual Gross</div>
@@ -3461,16 +3490,16 @@ txnMerchantRef.current?.focus()
                       <div className="text-lg font-bold text-slate-200">{currency(bd.takeHomeAnnual)}</div>
                     </div>
                     <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-1">Est. Effective Tax Rate</div>
-                      <div className="text-lg font-bold text-amber-400">{(bd.effectiveRate * 100).toFixed(1)}%</div>
+                      <div className="text-xs text-slate-400 mb-1">Est. Effective Withholding Rate</div>
+                      <div className="text-lg font-bold text-slate-300">{withholdingPct.toFixed(1)}%</div>
                     </div>
                   </div>
                   <div className="space-y-0.5">
-                    <Row l="Federal income tax (est.)" v={currency(bd.fedTax)} valueClass="text-slate-300" />
-                    <Row l="Arizona state tax @ 2.5%" v={currency(bd.azTax)} valueClass="text-slate-300" />
+                    <Row l={`Federal income tax (est. ${effectiveFedPct.toFixed(1)}%)`} v={currency(bd.fedTax)} valueClass="text-slate-300" />
+                    <Row l="Arizona state tax (2.5%)" v={currency(bd.azTax)} valueClass="text-slate-300" />
                     <Row l="Social Security (6.2%)" v={currency(bd.ssTax)} valueClass="text-slate-300" />
                     <Row l="Medicare (1.45%)" v={currency(bd.medicareTax)} valueClass="text-slate-300" />
-                    <Row l="Total estimated withholding" v={currency(bd.totalTax)} valueClass="text-amber-300" />
+                    <Row l="Total estimated withholding" v={currency(bd.totalTax)} valueClass="text-slate-300" />
                   </div>
                   <div className="mt-3 pt-3 border-t border-slate-700/60 grid md:grid-cols-3 gap-2">
                     <div className="text-center">
@@ -5940,7 +5969,8 @@ txnMerchantRef.current?.focus()
         {/* ── SCENARIOS ── */}
         {tab === 'Scenarios' && (
           <section className="space-y-4 transition-all duration-300">
-            <Card title="Scenario Set Manager">
+            {/* ── Scenario inputs ── */}
+            <Card title="Scenario Inputs">
               <div className="flex gap-2 mb-3">{periods.map(p => <Pill key={p} active={period === p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div>
               <div className="grid md:grid-cols-4 gap-2">
                 {(['Slow', 'Medium', 'Fast', 'Custom'] as ScenarioName[]).map(n => (
@@ -5950,43 +5980,204 @@ txnMerchantRef.current?.focus()
                   </div>
                 ))}
               </div>
-              <div className="grid md:grid-cols-3 gap-2 mt-3">
-                <input className="p-2 rounded bg-slate-800 border border-slate-600" placeholder="Scenario set name" value={scenarioTitle} onChange={e => setScenarioTitle(e.target.value)} />
-                <button className="rounded bg-blue-600" onClick={() => { const n = scenarioTitle.trim(); if (!n) return; const ex = savedScenarios.find(x => x.name.toLowerCase() === n.toLowerCase()); if (ex && !window.confirm('Overwrite existing set?')) return; setSavedScenarios([{ name: n, scenarios: scenario, period: period, savedAt: new Date().toISOString() }, ...savedScenarios.filter(x => x.name.toLowerCase() !== n.toLowerCase())]) }}>Save Scenario Set</button>
-                <div className="text-xs text-slate-400 self-center">Saved locally</div>
-              </div>
-              <div className="space-y-2 mt-2">
-                {savedScenarios.map(s => (
-                  <div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between">
-                    <div><div>{s.name}</div><div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div></div>
-                    <div className="flex gap-2">
-                      <button className="text-blue-300" onClick={() => { setScenario(s.scenarios); setPeriod(s.period) }}>Load</button>
-                      <button className="text-red-300" onClick={() => setSavedScenarios(prev => prev.filter(x => x.name !== s.name))}>Delete</button>
-                    </div>
+
+              {/* V9.13 — Stress test panel */}
+              <div className="mt-3 pt-3 border-t border-slate-700/60">
+                <button
+                  className="text-xs text-slate-400 hover:text-slate-200 flex items-center gap-1 transition-colors"
+                  onClick={() => setShowStressTest(v => !v)}
+                >
+                  <span>{showStressTest ? '▾' : '▸'}</span> Stress Test Options
+                </button>
+                {showStressTest && (
+                  <div className="mt-2 flex gap-2 flex-wrap">
+                    {([
+                      { key: 'none',            label: 'No stress test' },
+                      { key: 'commission-25',   label: '−25% commission' },
+                      { key: 'commission-50',   label: '−50% commission' },
+                      { key: 'extra-expense',   label: '+$1,000 expense' },
+                      { key: 'higher-bills',    label: '+$500 fixed bills' },
+                    ] as const).map(({ key, label }) => (
+                      <button
+                        key={key}
+                        className={`text-xs px-2.5 py-1 rounded transition-colors ${scenarioStressMode === key ? 'bg-orange-700 text-orange-100' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
+                        onClick={() => setScenarioStressMode(key)}
+                      >{label}</button>
+                    ))}
+                    {scenarioStressMode !== 'none' && (
+                      <span className="text-xs text-orange-300 self-center">Stress mode active — scenario cards show adjusted results</span>
+                    )}
                   </div>
-                ))}
+                )}
               </div>
+
+              {/* Save / Load */}
+              <div className="grid md:grid-cols-3 gap-2 mt-3">
+                <input className="p-2 rounded bg-slate-800 border border-slate-600" placeholder="Scenario set name" value={scenarioTitle} onChange={e => setScenarioTitle(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') { const n = scenarioTitle.trim(); if (!n) return; const ex = savedScenarios.find(x => x.name.toLowerCase() === n.toLowerCase()); if (ex && !window.confirm('Overwrite existing set?')) return; setSavedScenarios([{ name: n, scenarios: scenario, period: period, savedAt: new Date().toISOString() }, ...savedScenarios.filter(x => x.name.toLowerCase() !== n.toLowerCase())]); setScenarioTitle('') } }}
+                />
+                <button className="rounded bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm transition-colors" onClick={() => {
+                  const n = scenarioTitle.trim(); if (!n) return
+                  const ex = savedScenarios.find(x => x.name.toLowerCase() === n.toLowerCase())
+                  if (ex && !window.confirm('Overwrite existing set?')) return
+                  setSavedScenarios([{ name: n, scenarios: scenario, period: period, savedAt: new Date().toISOString() }, ...savedScenarios.filter(x => x.name.toLowerCase() !== n.toLowerCase())])
+                  setScenarioTitle('')
+                }}>Save Scenario Set</button>
+                <div className="text-xs text-slate-400 self-center">Saved locally · Enter to save</div>
+              </div>
+
+              {/* Saved scenario list with rename + duplicate + notes */}
+              {savedScenarios.length > 0 && (
+                <div className="space-y-2 mt-2">
+                  {savedScenarios.map(s => (
+                    <div key={s.name} className="rounded border border-slate-700 p-2.5 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          {editingScenarioName === s.name ? (
+                            <input
+                              className="px-1.5 py-0.5 text-sm rounded bg-slate-800 border border-blue-500 focus:outline-none text-slate-100 w-48"
+                              value={renameScenarioValue}
+                              onChange={e => setRenameScenarioValue(e.target.value)}
+                              autoFocus
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  const nn = renameScenarioValue.trim()
+                                  if (nn && nn !== s.name) {
+                                    setSavedScenarios(prev => prev.map(x => x.name === s.name ? { ...x, name: nn, savedAt: new Date().toISOString() } : x))
+                                    setScenarioNotes(prev => { const n = { ...prev }; if (n[s.name]) { n[nn] = n[s.name]; delete n[s.name] } return n })
+                                  }
+                                  setEditingScenarioName(null)
+                                }
+                                if (e.key === 'Escape') setEditingScenarioName(null)
+                              }}
+                              onBlur={() => setEditingScenarioName(null)}
+                            />
+                          ) : (
+                            <span className="font-medium text-slate-200 text-sm">{s.name}</span>
+                          )}
+                          <div className="text-[10px] text-slate-500 mt-0.5">{new Date(s.savedAt).toLocaleString()}</div>
+                        </div>
+                        <div className="flex gap-1.5 shrink-0 flex-wrap justify-end">
+                          <button className="text-blue-300 hover:text-blue-200 text-xs" onClick={() => { setScenario(s.scenarios); setPeriod(s.period) }}>Load</button>
+                          <button className="text-slate-400 hover:text-slate-200 text-xs" onClick={() => { setEditingScenarioName(s.name); setRenameScenarioValue(s.name) }}>Rename</button>
+                          <button className="text-slate-400 hover:text-slate-200 text-xs" onClick={() => {
+                            const dupeBase = s.name + ' (copy)'
+                            let dupeName = dupeBase
+                            let i = 2
+                            while (savedScenarios.find(x => x.name === dupeName)) { dupeName = `${dupeBase} ${i++}` }
+                            setSavedScenarios(prev => [{ ...s, name: dupeName, savedAt: new Date().toISOString() }, ...prev])
+                          }}>Duplicate</button>
+                          <button className="text-red-300 hover:text-red-200 text-xs" onClick={() => { setSavedScenarios(prev => prev.filter(x => x.name !== s.name)); setScenarioNotes(prev => { const n = { ...prev }; delete n[s.name]; return n }) }}>Delete</button>
+                        </div>
+                      </div>
+                      {/* Per-scenario notes */}
+                      <textarea
+                        className="w-full px-2 py-1.5 text-xs rounded bg-slate-800/60 border border-slate-700/40 focus:border-blue-500 focus:outline-none resize-none text-slate-400 placeholder:text-slate-600"
+                        rows={1}
+                        placeholder="Notes — What assumptions are you making?"
+                        value={scenarioNotes[s.name] ?? ''}
+                        onChange={e => setScenarioNotes(prev => ({ ...prev, [s.name]: e.target.value }))}
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
             </Card>
+
+            {/* ── Scenario comparison cards ── */}
             <div className="grid md:grid-cols-2 gap-3">
               {(['Slow', 'Medium', 'Fast', 'Custom'] as ScenarioName[]).map(n => {
-                const ii = income(scenario[n], adjustedSalary)
-                const rem = convertFromMonthly(ii.totalMonthly - monthlyBudget, period)
-                const tone = n === 'Slow' ? 'border-yellow-500/60 text-yellow-200' : n === 'Medium' ? 'border-blue-500/60 text-blue-200' : n === 'Fast' ? 'border-green-500/60 text-green-200' : 'border-slate-300/60 text-slate-100'
-                const b = n === 'Slow' ? '#facc15' : n === 'Medium' ? '#60a5fa' : n === 'Fast' ? '#4ade80' : '#cbd5e1'
+                // Apply stress test adjustments
+                let gpForScenario = scenario[n]
+                let extraMonthlyExpense = 0
+                if (scenarioStressMode === 'commission-25') gpForScenario = gpForScenario * 0.75
+                else if (scenarioStressMode === 'commission-50') gpForScenario = gpForScenario * 0.5
+                else if (scenarioStressMode === 'extra-expense') extraMonthlyExpense = 1000
+                else if (scenarioStressMode === 'higher-bills') extraMonthlyExpense = 500
+
+                const ii = income(gpForScenario, adjustedSalary)
+                const adjustedMonthlyBudget = monthlyBudget + extraMonthlyExpense
+                const rem = convertFromMonthly(ii.totalMonthly - adjustedMonthlyBudget, period)
+                const remMonthly = ii.totalMonthly - adjustedMonthlyBudget
+
+                const toneClass = n === 'Slow' ? 'border-yellow-500/60' : n === 'Medium' ? 'border-blue-500/60' : n === 'Fast' ? 'border-green-500/60' : 'border-slate-300/60'
+                const borderColor = n === 'Slow' ? '#facc15' : n === 'Medium' ? '#60a5fa' : n === 'Fast' ? '#4ade80' : '#cbd5e1'
+
+                // Plain-language scenario summary
+                const summary = (() => {
+                  if (rem < -500) return 'This scenario leaves you in the red — expenses exceed income.'
+                  if (rem < 0) return 'This scenario is slightly over budget. Something needs to flex.'
+                  if (rem < convertFromMonthly(200, period)) return 'Very little margin here. One unexpected expense could cause a shortfall.'
+                  if (savingsRate < 10) return 'Income covers expenses, but there is not much left for savings goals.'
+                  return rem >= convertFromMonthly(500, period)
+                    ? 'This scenario supports your active savings goals comfortably.'
+                    : 'This scenario is workable — savings goals stay on track with discipline.'
+                })()
+
+                // Confidence badge
+                const confidence: 'Stable' | 'Moderate' | 'Risky' = rem < 0 ? 'Risky' : rem < convertFromMonthly(200, period) ? 'Moderate' : 'Stable'
+                const confColor = confidence === 'Stable' ? 'bg-green-900/50 text-green-300 border-green-700/40' : confidence === 'Moderate' ? 'bg-yellow-900/50 text-yellow-300 border-yellow-700/40' : 'bg-red-900/50 text-red-300 border-red-700/40'
+
+                // Savings goal impact: months to complete each active goal under this scenario
+                const activeGoals = targets.filter(t => !t.completed && t.goalAmount > t.currentSaved)
+                const savingsAvailableMonthly = Math.max(0, remMonthly)
+                const goalImpacts = activeGoals.slice(0, 3).map(t => {
+                  const remaining = t.goalAmount - t.currentSaved
+                  if (savingsAvailableMonthly <= 0) return { name: t.name, months: null }
+                  const months = Math.ceil(remaining / savingsAvailableMonthly)
+                  return { name: t.name, months }
+                })
+
                 return (
-                  <Card key={n} title={`${n} Scenario`} className={tone} style={{ borderColor: b, borderWidth: 2 }}>
-                    <Row l="Monthly Gross Profit Input" v={currency(scenario[n])} />
-                    <Row l={`Converted Gross Profit (${labelPeriod(period)})`} v={currency(convertFromMonthly(scenario[n], period))} />
-                    <Row l="Commission" v={currency(convertFromMonthly(ii.cMonthly, period))} />
+                  <Card key={n} title={`${n} Scenario`} className={toneClass} style={{ borderColor, borderWidth: 2 }}>
+                    {/* Confidence badge + summary */}
+                    <div className="flex items-start gap-2 mb-3">
+                      <span className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${confColor}`}>{confidence}</span>
+                      <p className="text-xs text-slate-300 leading-relaxed">{summary}</p>
+                    </div>
+
+                    {scenarioStressMode !== 'none' && (
+                      <div className="mb-2 px-2 py-1 rounded bg-orange-900/20 border border-orange-500/20 text-[10px] text-orange-300">
+                        {scenarioStressMode === 'commission-25' && `GP adjusted to ${currency(gpForScenario)} (−25%)`}
+                        {scenarioStressMode === 'commission-50' && `GP adjusted to ${currency(gpForScenario)} (−50%)`}
+                        {scenarioStressMode === 'extra-expense' && `+$1,000/mo unexpected expense applied`}
+                        {scenarioStressMode === 'higher-bills' && `+$500/mo fixed bills applied`}
+                      </div>
+                    )}
+
+                    <Row l="Monthly Gross Profit" v={currency(gpForScenario)} />
+                    <Row l={`Gross Profit (${labelPeriod(period)})`} v={currency(convertFromMonthly(gpForScenario, period))} />
+                    <Row l="Commission (net)" v={currency(convertFromMonthly(ii.cMonthly, period))} />
                     <Row l="Base net income" v={currency(convertFromMonthly(ii.baseMonthly, period))} />
                     <Row l="Total net income" v={currency(convertFromMonthly(ii.totalMonthly, period))} />
-                    <Row l="Effective hourly rate" v={currency(ii.totalWeekly / HOURS_PER_WEEK) + ' /hr'} />
+                    <Row l="Effective hourly rate" v={`${currency(ii.totalWeekly / HOURS_PER_WEEK)} /hr`} />
+                    {extraMonthlyExpense > 0 && (
+                      <Row l="Adjusted budget (with stress)" v={currency(convertFromMonthly(adjustedMonthlyBudget, period))} valueClass="text-orange-300" />
+                    )}
                     <Row l="Remaining after budget" v={currency(rem)} valueClass={
                       rem >= 0 ? 'text-green-400'
                         : varianceTone(-rem, period) === 'neutral' ? 'text-slate-300'
                         : varianceTone(-rem, period) === 'warn' ? 'text-yellow-300'
                         : 'text-red-400'
                     } />
+
+                    {/* Savings goal impact */}
+                    {goalImpacts.length > 0 && (
+                      <div className="mt-3 pt-2 border-t border-slate-700/40">
+                        <p className="text-[10px] text-slate-500 mb-1.5 uppercase tracking-wide">Savings Goal Pace</p>
+                        {goalImpacts.map(({ name, months }) => (
+                          <div key={name} className="flex justify-between text-xs py-0.5">
+                            <span className="text-slate-400 truncate mr-2">{name}</span>
+                            <span className={months === null ? 'text-red-400' : months <= 12 ? 'text-green-400' : months <= 36 ? 'text-yellow-300' : 'text-slate-400'}>
+                              {months === null ? 'Not reachable' : months === 1 ? '1 month' : `${months} months`}
+                            </span>
+                          </div>
+                        ))}
+                        {savingsAvailableMonthly <= 0 && (
+                          <p className="text-[10px] text-red-400 mt-1">No surplus available — savings goals stall under this scenario.</p>
+                        )}
+                      </div>
+                    )}
                   </Card>
                 )
               })}
@@ -6534,7 +6725,7 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
 
 // ── Shared UI primitives ──────────────────────────────────────────────────────
 
-function Card({ title, children, className = '', style, headerAction, noHover = false }: { title: React.ReactNode; children: React.ReactNode; className?: string; style?: React.CSSProperties; headerAction?: React.ReactNode; noHover?: boolean }) {
+function Card({ title, children, className = '', style, headerAction, noHover = false }: { title: string; children: React.ReactNode; className?: string; style?: React.CSSProperties; headerAction?: React.ReactNode; noHover?: boolean }) {
   return (
     <div style={style} className={`rounded-2xl border border-slate-700 bg-slate-800/80 shadow-lg p-4 md:p-5 transition-all duration-200 ${noHover ? '' : 'hover:-translate-y-0.5'} ${className}`}>
       <div className="flex items-center justify-between mb-3">
