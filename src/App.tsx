@@ -745,8 +745,27 @@ export default function App() {
   const [pdfPreviewRows, setPdfPreviewRows]           = useState<PdfImportRow[]>([])
   const [pdfParseWarning, setPdfParseWarning]         = useState('')
 
-  // V9.5 — Transaction Review Center + smart filters
-  const [reviewOpen, setReviewOpen]             = useState(true)
+  // V9.14 — Soft-delete: recently deleted transactions (recoverable within session)
+  const [deletedTxns, setDeletedTxns]               = useState<Transaction[]>([])
+  const [showRecentlyDeleted, setShowRecentlyDeleted] = useState(false)
+
+  // Soft-delete helper: moves transaction to deletedTxns instead of permanent removal
+  const softDeleteTxn = (txId: string) => {
+    const tx = transactions.find(t => t.id === txId)
+    if (!tx) return
+    setTxnWithHistory(prev => prev.filter(t => t.id !== txId))
+    setDeletedTxns(prev => [{ ...tx }, ...prev.slice(0, 29)]) // keep last 30
+  }
+  const restoreDeletedTxn = (txId: string) => {
+    const tx = deletedTxns.find(t => t.id === txId)
+    if (!tx) return
+    setTxnWithHistory(prev => [tx, ...prev])
+    setDeletedTxns(prev => prev.filter(t => t.id !== txId))
+    showToast(`Restored "${tx.merchant}".`)
+  }
+  const permanentlyDeleteTxn = (txId: string) => {
+    setDeletedTxns(prev => prev.filter(t => t.id !== txId))
+  }
   const [selectedTxnIds, setSelectedTxnIds]     = useState<Set<string>>(new Set())
   const [bulkCategoryId, setBulkCategoryId]     = useState('')
   const [txnSearch, setTxnSearch]               = useState('')
@@ -1792,6 +1811,7 @@ export default function App() {
     toAccountId: txnForm.toAccountId || undefined,
     appliedByRule: matchedRuleId,
     createdAt: new Date().toISOString(),
+    source: 'manual' as const,
   },
   ...prev,
 ])
@@ -3450,30 +3470,29 @@ txnMerchantRef.current?.focus()
                 </p>
               )}
             </Card>
-            {/* V9.13 — Arizona take-home estimate: dynamic (grossSalary includes commission) */}
+            {/* V9.14 — Arizona take-home estimate: effective rates, 4 reference levels */}
             {(() => {
-              // Use total annual gross (salary + commission) so rate responds to GP changes
               const bd = estimateTaxBreakdown(grossSalary)
               const effectiveFedPct = bd.grossAnnual > 0 ? (bd.fedTax / bd.grossAnnual) * 100 : 0
-              // Effective withholding = 100% - take-home rate (never the same number)
               const withholdingPct = (1 - bd.takeHomeRate) * 100
-              // Compact reference lines for common income levels
-              const refLevels = [40000, 60000, 80000].map(g => {
+              // Reference lines for the 4 spec benchmark levels
+              const refLevels = [40000, 60000, 80000, 100000].map(g => {
                 const r = estimateTaxBreakdown(g)
                 const fp = r.grossAnnual > 0 ? (r.fedTax / r.grossAnnual) * 100 : 0
-                return { g, fp }
+                const total = fp + 2.5 + 6.2 + 1.45
+                return { g, fp, total }
               })
               return (
                 <Card title="Estimated Take-Home (Arizona, Single Filer)">
-                  {/* Dynamic compact reference description */}
                   <div className="text-xs text-slate-500 mb-4 space-y-0.5">
-                    {refLevels.map(({ g, fp }) => (
+                    {refLevels.map(({ g, fp, total }) => (
                       <div key={g}>
-                        At {currency(g)}: Federal ({fp.toFixed(1)}%) + AZ state (2.5%) + SS (6.2%) + Medicare (1.45%)
+                        At {currency(g)}: Federal ({fp.toFixed(2)}%) + AZ state (2.5%) + SS (6.2%) + Medicare (1.45%) = {total.toFixed(2)}%
                       </div>
                     ))}
-                    <div className="text-slate-400 pt-0.5">
-                      Current: Federal ({effectiveFedPct.toFixed(1)}%) + AZ state (2.5%) + SS (6.2%) + Medicare (1.45%) · <span className="italic">Planning estimate only, not tax advice.</span>
+                    <div className="text-slate-400 pt-1">
+                      Current estimate: Federal ({effectiveFedPct.toFixed(2)}%) + AZ state (2.5%) + SS (6.2%) + Medicare (1.45%) = {withholdingPct.toFixed(2)}% withheld → {(bd.takeHomeRate * 100).toFixed(2)}% take-home
+                      {' '}<span className="italic text-slate-500">Planning estimate only, not tax advice.</span>
                     </div>
                   </div>
                   <div className="grid md:grid-cols-2 gap-3 mb-3">
@@ -3495,7 +3514,7 @@ txnMerchantRef.current?.focus()
                     </div>
                   </div>
                   <div className="space-y-0.5">
-                    <Row l={`Federal income tax (est. ${effectiveFedPct.toFixed(1)}%)`} v={currency(bd.fedTax)} valueClass="text-slate-300" />
+                    <Row l={`Federal income tax (est. ${effectiveFedPct.toFixed(2)}%)`} v={currency(bd.fedTax)} valueClass="text-slate-300" />
                     <Row l="Arizona state tax (2.5%)" v={currency(bd.azTax)} valueClass="text-slate-300" />
                     <Row l="Social Security (6.2%)" v={currency(bd.ssTax)} valueClass="text-slate-300" />
                     <Row l="Medicare (1.45%)" v={currency(bd.medicareTax)} valueClass="text-slate-300" />
@@ -4718,7 +4737,7 @@ txnMerchantRef.current?.focus()
                                 >Keep Both</button>
                                 <button
                                   className="text-[10px] text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/40 border border-red-700/30 px-2 py-0.5 rounded transition-colors whitespace-nowrap"
-                                  onClick={() => setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id))}
+                                  onClick={() => softDeleteTxn(tx.id)}
                                 >Delete</button>
                               </div>
                             )}
@@ -5512,7 +5531,7 @@ txnMerchantRef.current?.focus()
                                 setTxnDupWarning(false)
                                 setTimeout(() => { inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select() }, 0)
                               }}>Edit</button>
-                              <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id))}>Delete</button>
+                              <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => softDeleteTxn(tx.id)}>Delete</button>
                             </td>
                           </tr>
                         )
@@ -5601,7 +5620,7 @@ txnMerchantRef.current?.focus()
                                   setTxnDupWarning(false)
                                   setTimeout(() => { inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select() }, 0)
                                 }}>Edit</button>
-                                <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id))}>Delete</button>
+                                <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => softDeleteTxn(tx.id)}>Delete</button>
                               </td>
                             </tr>
                           )
@@ -5681,24 +5700,68 @@ txnMerchantRef.current?.focus()
               </Card>
             )}
 
-            {/* ── V9.10 Data Integrity Status ── */}
+            {/* ── V9.14 Data Integrity Status ── */}
             {transactions.length > 0 && (
               <Card title="Data Integrity" noHover>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {[
-                    { label: 'Total Transactions', val: transactions.length, color: 'text-slate-200' },
-                    { label: 'Imported', val: transactions.filter(t => t.batchId).length, color: 'text-blue-300' },
-                    { label: 'Manual', val: transactions.filter(t => !t.batchId).length, color: 'text-slate-300' },
-                    { label: 'Needs Review', val: reviewableTxns.length, color: reviewableTxns.length > 0 ? 'text-amber-300' : 'text-green-400' },
-                    { label: 'Duplicate Candidates', val: transactions.filter(tx => transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)).length, color: 'text-amber-400' },
-                    { label: 'Import Batches', val: importBatches.length, color: 'text-slate-400' },
-                  ].map(({ label, val, color }) => (
-                    <div key={label} className="rounded-lg bg-slate-800/60 border border-slate-700/40 px-3 py-2">
-                      <div className="text-xs text-slate-500 mb-0.5">{label}</div>
-                      <div className={`text-lg font-bold ${color}`}>{val}</div>
-                    </div>
-                  ))}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {(() => {
+                    const importedCount = transactions.filter(t => t.batchId || t.importSource).length
+                    const manualCount   = transactions.filter(t => !t.batchId && !t.importSource).length
+                    const dupCandidates = transactions.filter(tx =>
+                      transactions.some(o => o.id !== tx.id &&
+                        o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
+                        o.amount === tx.amount && o.date === tx.date)
+                    ).length
+                    const lastBatch = importBatches.length > 0
+                      ? importBatches.reduce((a, b) => a.importedAt > b.importedAt ? a : b)
+                      : null
+                    return [
+                      { label: 'Total Transactions', val: transactions.length, sub: null, color: 'text-slate-200' },
+                      { label: 'Imported', val: importedCount, sub: lastBatch ? `Last: ${lastBatch.importedAt.slice(0, 10)}` : null, color: 'text-blue-300' },
+                      { label: 'Manual', val: manualCount, sub: null, color: 'text-slate-300' },
+                      { label: 'Needs Review', val: reviewableTxns.length, sub: null, color: reviewableTxns.length > 0 ? 'text-amber-300' : 'text-green-400' },
+                      { label: 'Dup. Candidates', val: dupCandidates, sub: null, color: dupCandidates > 0 ? 'text-amber-400' : 'text-slate-400' },
+                      { label: 'Import Batches', val: importBatches.length, sub: null, color: 'text-slate-400' },
+                      { label: 'Recently Deleted', val: deletedTxns.length, sub: deletedTxns.length > 0 ? 'Session only' : null, color: deletedTxns.length > 0 ? 'text-red-300' : 'text-slate-600' },
+                      { label: 'Uncategorized Expenses', val: transactions.filter(t => t.type === 'expense' && !t.categoryId).length, sub: null, color: 'text-slate-400' },
+                    ].map(({ label, val, sub, color }) => (
+                      <div key={label} className="rounded-lg bg-slate-800/60 border border-slate-700/40 px-3 py-2">
+                        <div className="text-xs text-slate-500 mb-0.5">{label}</div>
+                        <div className={`text-lg font-bold ${color}`}>{val}</div>
+                        {sub && <div className="text-[10px] text-slate-600 mt-0.5">{sub}</div>}
+                      </div>
+                    ))
+                  })()}
                 </div>
+                {deletedTxns.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-slate-700/60">
+                    <button
+                      className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+                      onClick={() => setShowRecentlyDeleted(v => !v)}
+                    >
+                      <span>Recently Deleted ({deletedTxns.length})</span>
+                      <span>{showRecentlyDeleted ? '▲' : '▼'}</span>
+                    </button>
+                    {showRecentlyDeleted && (
+                      <div className="mt-2 space-y-1">
+                        <p className="text-[10px] text-slate-600">Deleted this session only — not persisted after refresh.</p>
+                        {deletedTxns.map(tx => {
+                          const acct = accounts.find(a => a.id === tx.accountId)
+                          return (
+                            <div key={tx.id} className="flex items-center gap-2 text-xs py-1 border-b border-slate-800/60">
+                              <span className="text-slate-500 w-20 shrink-0">{tx.date}</span>
+                              <span className="flex-1 truncate text-slate-400">{tx.merchant}</span>
+                              <span className="text-slate-500">{acct?.name ?? '—'}</span>
+                              <span className="font-medium text-slate-300 w-16 text-right shrink-0">{currency(tx.amount)}</span>
+                              <button className="text-blue-400 hover:text-blue-300 shrink-0" onClick={() => restoreDeletedTxn(tx.id)}>Restore</button>
+                              <button className="text-red-500 hover:text-red-400 shrink-0" onClick={() => permanentlyDeleteTxn(tx.id)}>Remove</button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
               </Card>
             )}
 
