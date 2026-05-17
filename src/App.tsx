@@ -836,7 +836,55 @@ export default function App() {
   }, [accounts, computedAccountBalances])
 
   const reconciledCount    = accounts.filter(a => reconciliationData[a.id]?.isReconciled).length
-  const needsReviewCount   = accounts.length - reconciledCount
+
+  // V9.4 — Direct balance check per account.
+  // Computes tracked activity purely from transactions (no startingBalance dependency).
+  // CC:    trackedActivity = expenses charged to card − payments received  (positive = net debt)
+  // Other: trackedActivity = income − expenses + transfers_in − transfers_out − cc_payments_sent
+  // unexplained reacts to a.balance changes because it uses a.balance directly.
+  const balanceCheckData = useMemo((): Record<string, {
+    trackedActivity: number; unexplained: number; isMatched: boolean
+  }> => {
+    // Step 1: compute per-account tracked deltas
+    const deltas: Record<string, number> = {}
+    const add = (id: string | undefined, amt: number) => {
+      if (!id) return; deltas[id] = (deltas[id] ?? 0) + amt
+    }
+    const isCC = (id: string) => accounts.find(a => a.id === id)?.type === 'credit card'
+    for (const tx of transactions) {
+      if (tx.type === 'expense') {
+        isCC(tx.accountId)
+          ? add(tx.accountId, tx.amount)   // CC charge adds to tracked debt
+          : add(tx.accountId, -tx.amount)  // other: money out
+      } else if (tx.type === 'income') {
+        add(tx.accountId, tx.amount)
+      } else if (tx.type === 'transfer') {
+        add(tx.accountId, -tx.amount)
+        add(tx.toAccountId, tx.amount)
+      } else if (tx.type === 'credit card payment') {
+        add(tx.accountId, -tx.amount)   // checking: money sent
+        add(tx.toAccountId, -tx.amount) // CC: payment reduces tracked debt
+      }
+    }
+    // Step 2: per-account derived values
+    const result: Record<string, { trackedActivity: number; unexplained: number; isMatched: boolean }> = {}
+    for (const acct of accounts) {
+      const trackedActivity = deltas[acct.id] ?? 0
+      // For CC: compare |balance| (debt owed) vs tracked net charge activity
+      // For other: compare balance vs tracked net delta
+      const currentAmt = acct.type === 'credit card' ? Math.abs(acct.balance) : acct.balance
+      const unexplained = currentAmt - trackedActivity
+      result[acct.id] = {
+        trackedActivity,
+        unexplained,
+        isMatched: Math.abs(unexplained) <= 0.02,
+      }
+    }
+    return result
+  }, [accounts, transactions])
+
+  // needsReviewCount: accounts whose balance isn't explained by tracked transactions
+  const needsReviewCount = accounts.filter(a => !balanceCheckData[a.id]?.isMatched).length
 
   // ── V8.6.3 Uncategorized expense count ──────────────────────────────────────
   // Single source of truth: expense transactions with no budget category assigned.
@@ -1637,7 +1685,10 @@ txnMerchantRef.current?.focus()
     setTxnWithHistory(prev => [...newTxns, ...prev])
     closeCsvImport()
     if (newTxns[0]) flashHighlight(newTxns[0].id, setHighlightedTxnId, highlightTxnTimerRef)
-    showUndoableToast(`Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''}.`, undoTxn)
+    const dupMsg = csvImportPreview.duplicateCount > 0
+      ? ` Skipped ${csvImportPreview.duplicateCount} duplicate${csvImportPreview.duplicateCount !== 1 ? 's' : ''}.`
+      : ''
+    showUndoableToast(`Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''}.${dupMsg}`, undoTxn)
   }
   const downloadSampleCsv = () => {
     const text = generateSampleCsvString()
@@ -3340,30 +3391,32 @@ txnMerchantRef.current?.focus()
                             </td>
                             {/* Tracked Activity — net transaction effect on this account */}
                             <td className="py-2 pr-4 text-right text-slate-400 text-xs">
-                              {recon && Math.abs(recon.txnImpact) > 0.005 ? (
-                                a.type === 'credit card'
-                                  ? `${currency(Math.abs(recon.txnImpact))} tracked`
-                                  : `${recon.txnImpact >= 0 ? '+' : '−'}${currency(Math.abs(recon.txnImpact))}`
-                              ) : <span className="text-slate-600">—</span>}
+                              {(() => {
+                                const bc = balanceCheckData[a.id]
+                                if (!bc || Math.abs(bc.trackedActivity) < 0.005) return <span className="text-slate-600">—</span>
+                                return a.type === 'credit card'
+                                  ? `${currency(Math.abs(bc.trackedActivity))} tracked`
+                                  : `${bc.trackedActivity >= 0 ? '+' : '−'}${currency(Math.abs(bc.trackedActivity))}`
+                              })()}
                             </td>
                             {/* Unexplained — plain-language gap between current balance and tracked activity */}
                             <td className="py-2 pr-4 text-xs">
-                              {recon ? (
-                                Math.abs(recon.difference) <= 0.02 ? (
-                                  <span className="text-green-400 font-medium">Looks matched.</span>
-                                ) : (
-                                  <span className={`font-medium ${Math.abs(recon.difference) > 100 ? 'text-red-400' : 'text-amber-300'}`}>
-                                    {a.type === 'credit card'
-                                      ? recon.difference > 0
-                                        ? `${currency(recon.difference)} of card debt is not explained yet.`
-                                        : `Tracked activity is ${currency(Math.abs(recon.difference))} higher than your current card balance.`
-                                      : recon.difference > 0
-                                        ? `${currency(recon.difference)} not explained by tracked transactions yet.`
-                                        : `Tracked transactions are ${currency(Math.abs(recon.difference))} higher than current balance.`
-                                    }
-                                  </span>
-                                )
-                              ) : null}
+                              {(() => {
+                                const bc = balanceCheckData[a.id]
+                                if (!bc) return null
+                                if (bc.isMatched) return <span className="text-green-400 font-medium">Looks matched.</span>
+                                const amt = Math.abs(bc.unexplained)
+                                const big = amt > 100
+                                const cls = `font-medium ${big ? 'text-red-400' : 'text-amber-300'}`
+                                if (a.type === 'credit card') {
+                                  return bc.unexplained > 0
+                                    ? <span className={cls}>{currency(amt)} of card debt is not explained yet.</span>
+                                    : <span className={cls}>Tracked activity is {currency(amt)} higher than current card balance.</span>
+                                }
+                                return bc.unexplained > 0
+                                  ? <span className={cls}>{currency(amt)} not explained by tracked transactions yet.</span>
+                                  : <span className={cls}>Tracked transactions are {currency(amt)} higher than current balance.</span>
+                              })()}
                             </td>
                             {/* Institution */}
                             <td className="py-2 pr-4 text-slate-400 text-xs">
@@ -4931,6 +4984,13 @@ function CsvImportModal({
 }: CsvImportModalProps) {
   const [dragOver, setDragOver] = useState(false)
 
+  // ESC key closes modal
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel() }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  }, [onCancel])
+
   const defaultAccount = accounts[0]
   const accountNote = accounts.length === 0
     ? 'No accounts set up yet — add an account first so imports can be assigned correctly.'
@@ -4939,8 +4999,13 @@ function CsvImportModal({
       : `Imports are assigned to the first account (${defaultAccount.name}) by default. Account-specific import handling will be expanded in a future update.`
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-8 px-4 pb-8 bg-black/70 overflow-y-auto">
-      <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col">
+    // Backdrop: click outside the panel to close
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center pt-8 px-4 pb-8 bg-black/70 overflow-y-auto"
+      onMouseDown={e => { if (e.target === e.currentTarget) onCancel() }}
+    >
+      {/* Panel: stop propagation so clicks inside don't close */}
+      <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col" onMouseDown={e => e.stopPropagation()}>
         <div className="flex items-center justify-between p-5 border-b border-slate-700">
           <div>
             <h2 className="text-lg font-semibold text-slate-100">Import CSV</h2>
@@ -5007,11 +5072,40 @@ function CsvImportModal({
                 <p className="text-xs text-red-300">No importable rows found - all rows are duplicates or invalid. Check your CSV format.</p>
               )}
               {preview.readyCount > 0 && (
-                <p className="text-xs text-slate-400">
-                  Duplicate detection, rule matching, and type inference applied.
-                  Click <span className="font-medium text-slate-300">Import Transactions</span> to commit, or{' '}
-                  <button onClick={onResetPreview} className="underline text-blue-400 hover:text-blue-300">choose a different file</button>.
-                </p>
+                <>
+                  <p className="text-xs text-slate-400">
+                    Duplicate detection, rule matching, and type inference applied.
+                    Click <span className="font-medium text-slate-300">Import Transactions</span> to commit, or{' '}
+                    <button onClick={onResetPreview} className="underline text-blue-400 hover:text-blue-300">choose a different file</button>.
+                  </p>
+                  {/* Row preview table */}
+                  <div className="overflow-y-auto max-h-56 rounded-lg border border-slate-700/60">
+                    <table className="w-full text-xs">
+                      <thead className="sticky top-0 bg-slate-800 z-10">
+                        <tr className="text-left text-slate-400 border-b border-slate-700">
+                          <th className="py-1.5 px-2 font-medium">Date</th>
+                          <th className="py-1.5 px-2 font-medium">Merchant</th>
+                          <th className="py-1.5 px-2 font-medium text-right">Amount</th>
+                          <th className="py-1.5 px-2 font-medium">Type</th>
+                          <th className="py-1.5 px-2 font-medium" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(preview.importRows as Array<{ date?: string; merchant?: string; description?: string; amount?: number; type?: string }>).map((row, i) => (
+                          <tr key={i} className="border-b border-slate-800 hover:bg-slate-800/40">
+                            <td className="py-1 px-2 text-slate-300 whitespace-nowrap">{row.date ?? '—'}</td>
+                            <td className="py-1 px-2 text-slate-200 max-w-[140px] truncate">{row.merchant ?? row.description ?? '—'}</td>
+                            <td className="py-1 px-2 text-right text-slate-300 whitespace-nowrap">{row.amount != null ? `$${Math.abs(row.amount).toFixed(2)}` : '—'}</td>
+                            <td className="py-1 px-2 text-slate-400">{row.type ?? '—'}</td>
+                            <td className="py-1 px-2">
+                              <span className="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold bg-green-900/60 text-green-300 border border-green-700/40">New</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
               )}
             </div>
           )}
