@@ -728,6 +728,11 @@ export default function App() {
   const [uncatOpen, setUncatOpen]                     = useState(true)
   // V9.11 — Delete all duplicates confirmation
   const [deleteDupsConfirm, setDeleteDupsConfirm]     = useState(false)
+  // V9.12 — Goal priority + pause state
+  const [goalPriorities, setGoalPriorities]           = useState<Record<string, 'high' | 'medium' | 'low'>>({})
+  const [pausedGoals, setPausedGoals]                 = useState<Set<string>>(new Set())
+  // V9.12 — Delete filtered transactions confirmation
+  const [deleteFilteredConfirm, setDeleteFilteredConfirm] = useState(false)
   // V9.9 — PDF import state (parallel to CSV flow)
   const [csvImportIsPdf, setCsvImportIsPdf]           = useState(false)
   const [pdfPreviewRows, setPdfPreviewRows]           = useState<PdfImportRow[]>([])
@@ -1089,7 +1094,8 @@ export default function App() {
   })()
 
   // ── V7.3 Dashboard Status Engine ───────────────────────────────────────────
-  const activeTargets = targets.filter(t => !t.completed && (t.goalAmount <= 0 || t.currentSaved < t.goalAmount))
+  const activeTargets = targets.filter(t => !t.completed && (t.goalAmount <= 0 || t.currentSaved < t.goalAmount) && !pausedGoals.has(t.id))
+  const pausedTargets = targets.filter(t => pausedGoals.has(t.id))
 
   // ── V9.2 Account Balance Engine ─────────────────────────────────────────────
   // Computes transaction-adjusted balances by applying all transactions on top of
@@ -2520,6 +2526,43 @@ txnMerchantRef.current?.focus()
   const fullyFundedTargets = targets.filter(t => !t.completed && t.goalAmount > 0 && t.currentSaved >= t.goalAmount)
   const completedTargets = targets.filter(t => t.completed)
 
+  // V9.12 — Filtered transactions (shared between results summary + table + delete action)
+  const filteredTxns = useMemo(() =>
+    [...transactions]
+      .filter(tx => {
+        if (txnFilter === 'uncategorized') { if (!(tx.type === 'expense' && !tx.categoryId)) return false }
+        else if (txnFilter === 'needs-review') { if (!txNeedsReview(tx, transactions, dismissedDupIds)) return false }
+        else if (txnFilter !== 'all') { if (tx.type !== txnFilter) return false }
+        if (txnSearch) {
+          const q = txnSearch.toLowerCase()
+          if (!tx.merchant.toLowerCase().includes(q) && !(tx.notes ?? '').toLowerCase().includes(q)) return false
+        }
+        if (txnAccountFilter && tx.accountId !== txnAccountFilter) return false
+        if (txnCategoryFilter === '__none__' && tx.categoryId) return false
+        if (txnCategoryFilter && txnCategoryFilter !== '__none__' && tx.categoryId !== txnCategoryFilter) return false
+        return true
+      })
+      .sort((a, b) => b.date.localeCompare(a.date)),
+    [transactions, txnFilter, txnSearch, txnAccountFilter, txnCategoryFilter, dismissedDupIds]
+  )
+  const hasActiveFilters = txnFilter !== 'all' || !!txnSearch || !!txnAccountFilter || !!txnCategoryFilter
+
+  // V9.12 — Goal planning summary
+  const goalPlanSummary = useMemo(() => {
+    const active   = targets.filter(t => !t.completed && t.goalAmount > t.currentSaved && !pausedGoals.has(t.id))
+    const totalGoal = active.reduce((s, t) => s + t.goalAmount, 0)
+    const totalSaved = active.reduce((s, t) => s + t.currentSaved, 0)
+    const weeklyRequired = active.reduce((s, t) => {
+      const req = requiredForTarget(t); return s + (req?.weekly ?? 0)
+    }, 0)
+    return {
+      activeCount: active.length,
+      pausedCount: targets.filter(t => pausedGoals.has(t.id)).length,
+      fundedCount: targets.filter(t => !t.completed && t.goalAmount > 0 && t.currentSaved >= t.goalAmount).length,
+      totalGoal, totalSaved, remaining: totalGoal - totalSaved, weeklyRequired,
+    }
+  }, [targets, pausedGoals])
+
   const renderTargetCard = (t: Target) => {
     const req = requiredForTarget(t)
     const progressPct = t.goalAmount > 0 ? Math.min(100, (t.currentSaved / t.goalAmount) * 100) : 0
@@ -2533,6 +2576,9 @@ txnMerchantRef.current?.focus()
       else next.add(t.id)
       return next
     })
+
+    const isPaused = pausedGoals.has(t.id)
+    const priority = goalPriorities[t.id] ?? null
 
     const statusBadge =
       status === 'Complete' || status === 'Ahead'
@@ -2551,17 +2597,40 @@ txnMerchantRef.current?.focus()
     return (
       <Card
         key={t.id}
-        title={isEditingTarget ? `Editing: ${t.name}` : t.name}
-        className={highlightedTargetId === t.id ? 'ring-2 ring-blue-500/40 ring-inset transition-shadow duration-300' : undefined}
+        title={
+          <span className="flex items-center gap-1.5 flex-wrap">
+            {isEditingTarget ? `Editing: ${t.name}` : t.name}
+            {isPaused && <span className="text-[9px] bg-slate-600 text-slate-300 border border-slate-500/40 px-1.5 py-0.5 rounded font-semibold">Paused</span>}
+            {priority === 'high'   && <span className="text-[9px] bg-red-900/40 text-red-300 border border-red-700/30 px-1.5 py-0.5 rounded font-semibold">High</span>}
+            {priority === 'medium' && <span className="text-[9px] bg-amber-900/40 text-amber-300 border border-amber-700/30 px-1.5 py-0.5 rounded font-semibold">Medium</span>}
+            {priority === 'low'    && <span className="text-[9px] bg-slate-700 text-slate-400 border border-slate-600/40 px-1.5 py-0.5 rounded font-semibold">Low</span>}
+          </span>
+        }
+        className={highlightedTargetId === t.id ? 'ring-2 ring-blue-500/40 ring-inset transition-shadow duration-300' : isPaused ? 'opacity-60' : undefined}
         headerAction={
-          <div className="flex gap-2">
+          <div className="flex gap-1.5 flex-wrap justify-end">
+            {/* Priority selector */}
+            <select
+              value={priority ?? ''}
+              onChange={e => setGoalPriorities(prev => ({ ...prev, [t.id]: e.target.value as 'high' | 'medium' | 'low' }))}
+              className="text-xs px-1.5 py-0.5 rounded bg-slate-700 border border-slate-600 text-slate-300 focus:outline-none"
+              title="Set goal priority"
+            >
+              <option value="">Priority</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
+            {/* Pause / Resume */}
+            <button
+              className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
+              onClick={() => setPausedGoals(prev => { const n = new Set(prev); isPaused ? n.delete(t.id) : n.add(t.id); return n })}
+            >{isPaused ? 'Resume' : 'Pause'}</button>
             {isEditingTarget ? (
               <button
                 className="text-xs text-slate-300 hover:text-slate-100 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
                 onClick={() => cancelEditTarget(t.id)}
-              >
-                Cancel
-              </button>
+              >Cancel</button>
             ) : (
               <button
                 className="text-xs text-blue-400 hover:text-blue-300 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
@@ -2577,19 +2646,14 @@ txnMerchantRef.current?.focus()
                   })
                   setTimeout(() => { editGoalAmountRef.current?.focus(); editGoalAmountRef.current?.select() }, 0)
                 }}
-              >
-                Edit
-              </button>
+              >Edit</button>
             )}
             <button
               className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
               onClick={() => setTargetsWithHistory(prev => prev.filter(x => x.id !== t.id))}
-            >
-              Delete
-            </button>
+            >Delete</button>
           </div>
         }
-      >
         {isEditingTarget ? (
           <div
             className="space-y-3"
@@ -5170,6 +5234,37 @@ txnMerchantRef.current?.focus()
                     )
                   })}
                 </div>
+               {/* V9.12 — Filter results summary + delete action */}
+               {(hasActiveFilters || transactions.length > 0) && (
+                 <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                   <span className="text-xs text-slate-500">
+                     {hasActiveFilters
+                       ? `Results: ${filteredTxns.length} of ${transactions.length} transaction${transactions.length !== 1 ? 's' : ''}`
+                       : `Showing all ${transactions.length} transaction${transactions.length !== 1 ? 's' : ''}`
+                     }
+                   </span>
+                   {hasActiveFilters && filteredTxns.length > 0 && (
+                     deleteFilteredConfirm ? (
+                       <div className="flex items-center gap-2 text-xs text-red-300">
+                         <span>Delete {filteredTxns.length} filtered transaction{filteredTxns.length !== 1 ? 's' : ''}?</span>
+                         <button className="bg-red-700/60 hover:bg-red-600/60 border border-red-600/40 px-2 py-0.5 rounded text-red-200"
+                           onClick={() => {
+                             const ids = new Set(filteredTxns.map(t => t.id))
+                             setTxnWithHistory(prev => prev.filter(t => !ids.has(t.id)))
+                             setDeleteFilteredConfirm(false)
+                             showUndoableToast(`Deleted ${ids.size} transaction${ids.size !== 1 ? 's' : ''}.`, undoTxn)
+                           }}>Delete</button>
+                         <button className="text-slate-400 hover:text-slate-200" onClick={() => setDeleteFilteredConfirm(false)}>Cancel</button>
+                       </div>
+                     ) : (
+                       <button
+                         className="text-[10px] text-red-400/60 hover:text-red-400 bg-slate-700/40 hover:bg-red-900/20 border border-slate-600/20 hover:border-red-700/30 px-2 py-0.5 rounded transition-colors"
+                         onClick={() => setDeleteFilteredConfirm(true)}
+                       >Delete {filteredTxns.length} filtered result{filteredTxns.length !== 1 ? 's' : ''}…</button>
+                     )
+                   )}
+                 </div>
+               )}
                <div className="overflow-x-auto -mx-1 px-1">
                   <table className="w-full text-sm min-w-[640px]">
                     <thead>
@@ -5185,26 +5280,7 @@ txnMerchantRef.current?.focus()
                       </tr>
                     </thead>
                     <tbody>
-                      {[...transactions]
-                        .filter(tx => {
-                          // type/review filter
-                          if (txnFilter === 'uncategorized') { if (!(tx.type === 'expense' && !tx.categoryId)) return false }
-                          else if (txnFilter === 'needs-review') { if (!txNeedsReview(tx, transactions, dismissedDupIds)) return false }
-                          else if (txnFilter !== 'all') { if (tx.type !== txnFilter) return false }
-                          // search
-                          if (txnSearch) {
-                            const q = txnSearch.toLowerCase()
-                            if (!tx.merchant.toLowerCase().includes(q) && !(tx.notes ?? '').toLowerCase().includes(q)) return false
-                          }
-                          // account filter
-                          if (txnAccountFilter && tx.accountId !== txnAccountFilter) return false
-                          // category filter
-                          if (txnCategoryFilter === '__none__' && tx.categoryId) return false
-                          if (txnCategoryFilter && txnCategoryFilter !== '__none__' && tx.categoryId !== txnCategoryFilter) return false
-                          return true
-                        })
-                        .sort((a, b) => b.date.localeCompare(a.date))
-                        .map(tx => {
+                      {filteredTxns.map(tx => {
                         const acct = accounts.find(a => a.id === tx.accountId)
                         const cat  = categories.find(c => c.id === tx.categoryId)
                         const isInlineEdit = inlineTxnEditId === tx.id
@@ -6221,6 +6297,31 @@ txnMerchantRef.current?.focus()
               </div>
             </Card>
 
+            {/* V9.12 — Goal Planning Summary */}
+            {targets.length > 0 && (
+              <div className="rounded-2xl border border-blue-700/20 bg-blue-950/10 px-4 py-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">Savings Plan Summary</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                  {[
+                    { label: 'Total Goal', val: currency(goalPlanSummary.totalGoal), color: 'text-slate-200' },
+                    { label: 'Total Saved', val: currency(goalPlanSummary.totalSaved), color: 'text-green-400' },
+                    { label: 'Remaining', val: currency(goalPlanSummary.remaining), color: goalPlanSummary.remaining > 0 ? 'text-amber-300' : 'text-green-400' },
+                    { label: 'Required / Week', val: goalPlanSummary.weeklyRequired > 0 ? currency(goalPlanSummary.weeklyRequired) : '—', color: 'text-blue-300' },
+                  ].map(({ label, val, color }) => (
+                    <div key={label} className="rounded-lg bg-slate-800/60 border border-slate-700/40 px-3 py-2">
+                      <div className="text-[10px] text-slate-500 mb-0.5">{label}</div>
+                      <div className={`text-base font-bold ${color}`}>{val}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex gap-3 text-xs text-slate-500">
+                  <span><span className="text-slate-300 font-medium">{goalPlanSummary.activeCount}</span> active</span>
+                  {goalPlanSummary.pausedCount > 0 && <span><span className="text-slate-400 font-medium">{goalPlanSummary.pausedCount}</span> paused</span>}
+                  {goalPlanSummary.fundedCount > 0 && <span><span className="text-green-400 font-medium">{goalPlanSummary.fundedCount}</span> fully funded</span>}
+                </div>
+              </div>
+            )}
+
             {/* Active Targets */}
             <section className="space-y-3">
               <h3 className="text-base font-semibold text-slate-200">Active Savings Goals ({activeTargets.length})</h3>
@@ -6235,6 +6336,16 @@ txnMerchantRef.current?.focus()
                 </div>
               )}
             </section>
+
+            {/* V9.12 — Paused Targets */}
+            {pausedTargets.length > 0 && (
+              <section className="space-y-3">
+                <h3 className="text-base font-semibold text-slate-400">Paused Savings Goals ({pausedTargets.length})</h3>
+                <div className="grid md:grid-cols-2 gap-3">
+                  {pausedTargets.map(t => renderTargetCard(t))}
+                </div>
+              </section>
+            )}
 
             {/* Fully Funded Targets */}
             <section className="space-y-3">
