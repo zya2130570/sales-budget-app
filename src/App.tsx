@@ -721,6 +721,13 @@ export default function App() {
   const [csvColumnMapping, setCsvColumnMapping]       = useState<Record<string, string> | null>(null)
   // V9.10 — Batch deletion confirmation
   const [batchToDelete, setBatchToDelete]             = useState<string | null>(null)
+  // V9.11 — Budget evolution state
+  const [categoryRollovers, setCategoryRollovers]     = useState<Record<string, boolean>>({})
+  const [budgetFilter, setBudgetFilter]               = useState<'all' | 'over-budget' | 'no-activity'>('all')
+  // V9.11 — Uncategorized expenses collapsible (default open)
+  const [uncatOpen, setUncatOpen]                     = useState(true)
+  // V9.11 — Delete all duplicates confirmation
+  const [deleteDupsConfirm, setDeleteDupsConfirm]     = useState(false)
   // V9.9 — PDF import state (parallel to CSV flow)
   const [csvImportIsPdf, setCsvImportIsPdf]           = useState(false)
   const [pdfPreviewRows, setPdfPreviewRows]           = useState<PdfImportRow[]>([])
@@ -1036,6 +1043,26 @@ export default function App() {
 
   // Any actuals present = transactions OR manual entries
   const hasAnyActual = categories.some(c => effectiveCatActual(c.id) !== null)
+
+  // V9.11 — Per-category status label
+  const catStatus = (catId: string, planned: number): 'Over Budget' | 'Near Limit' | 'On Track' | 'Under Budget' | 'No Activity' => {
+    const eff = effectiveCatActual(catId)
+    if (eff === null) return 'No Activity'
+    const actual = eff.total
+    if (actual > planned)                         return 'Over Budget'
+    if (planned > 0 && actual / planned >= 0.8)   return 'Near Limit'
+    if (planned > 0 && actual / planned < 0.3)    return 'Under Budget'
+    return 'On Track'
+  }
+
+  // V9.11 — Budget health summary
+  const budgetHealth = useMemo(() => {
+    const overBudget   = categories.filter(c => { const e = effectiveCatActual(c.id); return e !== null && e.total > convertFromMonthly(c.amount, period) })
+    const noActivity   = categories.filter(c => effectiveCatActual(c.id) === null)
+    const totalPlanned = categories.reduce((s, c) => s + convertFromMonthly(c.amount, period), 0)
+    const totalActual  = categories.reduce((s, c) => { const e = effectiveCatActual(c.id); return s + (e?.total ?? 0) }, 0)
+    return { overBudget, noActivity, totalPlanned, totalActual, remaining: totalPlanned - totalActual }
+  }, [categories, period, effectiveCatActual])
 
   // Variance total (actual - planned); positive = overspend
   const variancePeriodTotal = hasAnyActual ? actualPeriodTotal - plannedPeriodTotal : 0
@@ -3434,6 +3461,42 @@ txnMerchantRef.current?.focus()
                 <Metric title="Remaining" value={currency(selectedPeriodRemaining)} tone={remainingTone} glow={selectedPeriodRemaining < 0} />
                 <Metric title="Budget status" value={statusLabel} tone={statusTone} glow={selectedPeriodRemaining < 0} />
               </div>
+
+              {/* V9.11 — Budget Health summary + review actions */}
+              {categories.length > 0 && (
+                <div className="mt-4 pt-3 border-t border-slate-700/60">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Budget Health</span>
+                    <div className="flex gap-1.5">
+                      <button
+                        className={`text-[10px] px-2 py-0.5 rounded transition-colors ${budgetFilter === 'all' ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
+                        onClick={() => setBudgetFilter('all')}
+                      >All</button>
+                      <button
+                        className={`text-[10px] px-2 py-0.5 rounded transition-colors ${budgetFilter === 'over-budget' ? 'bg-red-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
+                        onClick={() => setBudgetFilter(v => v === 'over-budget' ? 'all' : 'over-budget')}
+                      >Over Budget {budgetHealth.overBudget.length > 0 && `(${budgetHealth.overBudget.length})`}</button>
+                      <button
+                        className={`text-[10px] px-2 py-0.5 rounded transition-colors ${budgetFilter === 'no-activity' ? 'bg-slate-500 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
+                        onClick={() => setBudgetFilter(v => v === 'no-activity' ? 'all' : 'no-activity')}
+                      >No Activity {budgetHealth.noActivity.length > 0 && `(${budgetHealth.noActivity.length})`}</button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    {[
+                      { label: 'Total Planned', val: currency(budgetHealth.totalPlanned), color: 'text-slate-200' },
+                      { label: 'Total Actual', val: hasAnyActual ? currency(budgetHealth.totalActual) : '—', color: 'text-slate-200' },
+                      { label: 'Remaining', val: hasAnyActual ? currency(budgetHealth.remaining) : '—', color: budgetHealth.remaining >= 0 ? 'text-green-400' : 'text-red-400' },
+                      { label: 'Over Budget', val: String(budgetHealth.overBudget.length), color: budgetHealth.overBudget.length > 0 ? 'text-red-400' : 'text-green-400' },
+                    ].map(({ label, val, color }) => (
+                      <div key={label} className="rounded-lg bg-slate-800/60 border border-slate-700/40 px-2.5 py-2">
+                        <div className="text-[10px] text-slate-500 mb-0.5">{label}</div>
+                        <div className={`text-base font-bold ${color}`}>{val}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {/* ── Plan vs Actual summary — always visible ── */}
               <div className="mt-3 pt-3 border-t border-slate-700/60">
                 <div className="flex items-center justify-between mb-2">
@@ -3715,11 +3778,19 @@ txnMerchantRef.current?.focus()
                       </span>
                     </th>
                     <th className="pb-1.5 pr-2">Variance</th>
+                    <th className="pb-1.5 pr-2 hidden md:table-cell">Status</th>
                     <th className="pb-1.5" />
                   </tr>
                 </thead>
                 <tbody>
-                  {top.map(c => {
+                  {top.filter(c => {
+                    if (budgetFilter === 'over-budget') {
+                      const e = effectiveCatActual(c.id)
+                      return e !== null && e.total > convertFromMonthly(c.amount, period)
+                    }
+                    if (budgetFilter === 'no-activity') return effectiveCatActual(c.id) === null
+                    return true
+                  }).map(c => {
                     const planned     = convertFromMonthly(c.amount, period)
                     const eff         = effectiveCatActual(c.id)
                     const rawActual   = actuals[c.id]
@@ -3958,6 +4029,18 @@ txnMerchantRef.current?.focus()
                                 ? `Under by ${currency(Math.abs(variance))}`
                                 : `Over by ${currency(variance)}`}
                         </td>
+                        {/* V9.11 — Status badge */}
+                        <td className="py-1.5 pr-2 hidden md:table-cell">
+                          {(() => {
+                            const st  = catStatus(c.id, planned)
+                            const cls = st === 'Over Budget'  ? 'text-red-400 bg-red-900/30 border-red-700/30'
+                              : st === 'Near Limit'   ? 'text-amber-300 bg-amber-900/30 border-amber-700/30'
+                              : st === 'On Track'     ? 'text-green-400 bg-green-900/30 border-green-700/30'
+                              : st === 'Under Budget' ? 'text-blue-300 bg-blue-900/20 border-blue-700/20'
+                              : 'text-slate-600 bg-slate-800/40 border-slate-700/20'
+                            return <span className={`text-[9px] border px-1.5 py-0.5 rounded font-medium ${cls}`}>{st}</span>
+                          })()}
+                        </td>
                         <td className="py-1.5 space-x-2 whitespace-nowrap">
                           <button className="text-blue-300 hover:text-blue-200" onClick={() => {
                             setInlineCatEditId(c.id)
@@ -3968,10 +4051,15 @@ txnMerchantRef.current?.focus()
                               actual: actuals[c.id] ?? '',
                               actualAtStart: actuals[c.id] ?? '',
                             })
-                            // Focus the amount field (per spec: Weekly Planned is focused/selected)
                             setTimeout(() => { inlineCatAmountRef.current?.focus(); inlineCatAmountRef.current?.select() }, 0)
                           }}>Edit</button>
                           <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
+                          {/* V9.11 — Rollover toggle */}
+                          <button
+                            title={categoryRollovers[c.id] ? 'Rollover enabled — unused budget carries forward' : 'Enable rollover for this category'}
+                            className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${categoryRollovers[c.id] ? 'text-teal-300 bg-teal-900/30 border-teal-700/30' : 'text-slate-600 border-slate-700/30 hover:text-slate-400'}`}
+                            onClick={() => setCategoryRollovers(prev => ({ ...prev, [c.id]: !prev[c.id] }))}
+                          >{categoryRollovers[c.id] ? 'Rollover ✓' : 'Rollover'}</button>
                         </td>
                       </tr>
                     )
@@ -4360,11 +4448,40 @@ txnMerchantRef.current?.focus()
                         onClick={e => { e.stopPropagation(); setSelectedTxnIds(new Set()) }}
                       >Unselect all ({selectedTxnIds.size})</button>
                     )}
+                  {/* V9.11 — Delete All Duplicates */}
+                  {reviewableTxns.some(tx => transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date) && !confirmedDupIds.has(tx.id)) && (
+                    <button
+                      className="text-[10px] text-red-400/70 hover:text-red-400 bg-slate-700/40 hover:bg-red-900/20 border border-slate-600/30 hover:border-red-700/30 px-1.5 py-0.5 rounded transition-colors"
+                      onClick={e => { e.stopPropagation(); setDeleteDupsConfirm(true) }}
+                    >Delete all unresolved duplicates</button>
+                  )}
                   </div>
                   <span className="text-slate-500 text-xs">{reviewOpen ? '▲' : '▼'}</span>
                 </button>
                 {reviewOpen && (
                   <div className="border-t border-amber-700/20 px-4 pb-4 pt-3 space-y-2">
+                    {/* V9.11 — Delete all duplicates confirmation */}
+                    {deleteDupsConfirm && (() => {
+                      const dupTxns = reviewableTxns.filter(tx =>
+                        transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date) &&
+                        !confirmedDupIds.has(tx.id)
+                      )
+                      return (
+                        <div className="mb-2 rounded-lg bg-red-900/20 border border-red-700/40 px-3 py-2.5 text-xs text-red-300 flex items-center justify-between gap-3">
+                          <span>Delete {dupTxns.length} unresolved duplicate transaction{dupTxns.length !== 1 ? 's' : ''}? This is undoable.</span>
+                          <div className="flex gap-2 shrink-0">
+                            <button className="text-red-400 hover:text-red-200 bg-red-900/40 border border-red-700/50 px-2 py-0.5 rounded"
+                              onClick={() => {
+                                const idsToDelete = new Set(dupTxns.map(t => t.id))
+                                setTxnWithHistory(prev => prev.filter(tx => !idsToDelete.has(tx.id)))
+                                setDeleteDupsConfirm(false)
+                                showToast(`Deleted ${dupTxns.length} duplicate transaction${dupTxns.length !== 1 ? 's' : ''}.`)
+                              }}>Delete</button>
+                            <button className="text-slate-400 hover:text-slate-200" onClick={() => setDeleteDupsConfirm(false)}>Cancel</button>
+                          </div>
+                        </div>
+                      )
+                    })()}
                     {/* Bulk action bar */}
                     {selectedTxnIds.size > 0 && (
                       <div className="flex items-center gap-2 mb-3 p-2 rounded-lg bg-blue-900/20 border border-blue-700/30">
@@ -4991,7 +5108,7 @@ txnMerchantRef.current?.focus()
                   className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-700/20 transition-colors"
                   onClick={() => setTxnListOpen(v => !v)}
                 >
-                  <span className="text-sm font-semibold text-slate-200">Transactions ({transactions.length})</span>
+                  <span className="text-lg font-semibold">Transactions ({transactions.length})</span>
                   <span className="text-slate-500 text-xs">{txnListOpen ? '▲' : '▼'}</span>
                 </button>
                 {txnListOpen && (
@@ -5309,26 +5426,35 @@ txnMerchantRef.current?.focus()
               </div>
             )}
 
-            {/* ── V8.5.1 Uncategorized Expenses ── only expense transactions need budget categories */}
+            {/* ── V8.5.1 Uncategorized Expenses ── */}
             {uncategorizedExpenseCount > 0 && (
-              <Card title={`Uncategorized Expenses (${uncategorizedExpenseCount})`}>
-                <p className="text-xs text-slate-400 mb-3">
-                  Only expenses need budget categories. Transfers, income, and credit card payments do not count toward Budget Actuals.
-                </p>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left text-slate-400 border-b border-slate-700">
-                        <th className="pb-1.5 pr-3 font-medium">Date</th>
-                        <th className="pb-1.5 pr-3 font-medium">Account</th>
-                        <th className="pb-1.5 pr-3 font-medium">Merchant</th>
-                        <th className="pb-1.5 pr-3 font-medium">Type</th>
-                        <th className="pb-1.5 pr-3 font-medium text-right">Amount</th>
-                        <th className="pb-1.5 pr-3 font-medium">Quick Assign</th>
-                        <th className="pb-1.5" />
-                      </tr>
-                    </thead>
-                    <tbody>
+              <div className="rounded-2xl border border-amber-600/20 bg-slate-800/20 overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between px-4 py-3.5 text-left hover:bg-slate-700/20 transition-colors"
+                  onClick={() => setUncatOpen(v => !v)}
+                >
+                  <span className="text-lg font-semibold">Uncategorized Expenses ({uncategorizedExpenseCount})</span>
+                  <span className="text-slate-500 text-xs">{uncatOpen ? '▲' : '▼'}</span>
+                </button>
+                {uncatOpen && (
+                  <div className="px-4 pb-4">
+                    <p className="text-xs text-slate-400 mb-3">
+                      Only expenses need budget categories. Transfers, income, and credit card payments do not count toward Budget Actuals.
+                    </p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-slate-400 border-b border-slate-700">
+                          <th className="pb-1.5 pr-3 font-medium">Date</th>
+                          <th className="pb-1.5 pr-3 font-medium">Account</th>
+                          <th className="pb-1.5 pr-3 font-medium">Merchant</th>
+                          <th className="pb-1.5 pr-3 font-medium">Type</th>
+                          <th className="pb-1.5 pr-3 font-medium text-right">Amount</th>
+                          <th className="pb-1.5 pr-3 font-medium">Quick Assign</th>
+                          <th className="pb-1.5" />
+                        </tr>
+                      </thead>
+                      <tbody>
                       {[...transactions]
                         .filter(tx => !tx.categoryId && tx.type === 'expense')
                         .sort((a, b) => b.date.localeCompare(a.date))
@@ -5377,7 +5503,9 @@ txnMerchantRef.current?.focus()
                     </tbody>
                   </table>
                 </div>
-              </Card>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* ── V9.10 Import History (upgraded) ── */}
