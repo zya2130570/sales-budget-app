@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule } from './types'
+import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule, ImportBatch } from './types'
 
 import { currency, labelPeriod, formatDate } from './utils/formatting'
 import {
@@ -48,6 +48,41 @@ import { parseCsv, detectColumns, generateSampleCsvString } from './utils/csv'
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
   type === 'transfer' || type === 'credit card payment'
+
+// ── V9.6 Apple Card & payment helpers ────────────────────────────────────────
+/** True if CSV headers look like an Apple Card export. */
+const detectAppleCard = (headerLine: string): boolean => {
+  const h = headerLine.toLowerCase()
+  return h.includes('merchant') && (h.includes('amount (usd)') || h.includes('transaction date'))
+}
+
+/** Normalize Apple Card CSV header row so detectColumns() maps correctly. */
+function normalizeAppleCardHeaders(csvText: string): string {
+  const lines = csvText.split('\n')
+  if (!lines.length) return csvText
+  lines[0] = lines[0]
+    .replace(/Transaction Date/gi, 'Date')
+    .replace(/Amount \(USD\)/gi, 'Amount')
+    .replace(/Clearing Date/gi, 'ClearingDate')   // prevent accidental date mapping
+    .replace(/Purchased By/gi, 'PurchasedBy')      // prevent mapping to merchant
+  return lines.join('\n')
+}
+
+/** Extract category hints keyed by "date|merchant|absAmount" from raw parsed rows. */
+function extractCategoryHints(rows: Array<Record<string, string>>): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const row of rows) {
+    const cat      = (row['Category'] ?? row['category'] ?? '').trim()
+    const merchant = (row['Merchant'] ?? row['merchant'] ?? row['Description'] ?? '').trim()
+    const date     = (row['Date'] ?? row['date'] ?? row['Transaction Date'] ?? '').trim()
+    const amt      = Math.abs(parseFloat((row['Amount'] ?? row['amount'] ?? '0').replace(/[^0-9.-]/g, '')) || 0).toFixed(2)
+    if (cat && merchant && date) map[`${date}|${merchant.toLowerCase()}|${amt}`] = cat
+  }
+  return map
+}
+
+/** Payment/transfer merchant patterns that should be flagged for review rather than categorized. */
+const PAYMENT_PATTERNS = /payment|transfer|zelle|venmo|paypal|apple cash|e-payment|gsbank|discover e|online transfer/i
 
 // ── V9.5 Merchant normalization ───────────────────────────────────────────────
 // Cleans up raw bank-export merchant strings to friendly display names.
@@ -521,6 +556,16 @@ export default function App() {
   const [csvImportLoading, setCsvImportLoading] = useState(false)
   const [csvImportError, setCsvImportError]     = useState('')
   const csvFileInputRef                         = useRef<HTMLInputElement>(null)
+
+  // V9.6 — Account-aware CSV import upgrade
+  const [csvImportAccountId, setCsvImportAccountId]   = useState('')
+  const [csvImportMonth, setCsvImportMonth]           = useState(() => {
+    const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [csvIsAppleCard, setCsvIsAppleCard]           = useState(false)
+  const [csvCategoryHints, setCsvCategoryHints]       = useState<Record<string, string>>({})
+  const [importBatches, setImportBatches]             = useState<ImportBatch[]>([])
+  const [csvShowHistory, setCsvShowHistory]           = useState(false)
 
   // V9.5 — Transaction Review Center + smart filters
   const [reviewOpen, setReviewOpen]             = useState(true)
@@ -1730,32 +1775,45 @@ txnMerchantRef.current?.focus()
     setCsvImportOpen(true)
     setCsvImportPreview(null)
     setCsvImportError('')
+    setCsvCategoryHints({})
+    setCsvIsAppleCard(false)
   }
   const closeCsvImport = () => {
     setCsvImportOpen(false)
     setCsvImportPreview(null)
     setCsvImportError('')
+    setCsvCategoryHints({})
+    setCsvIsAppleCard(false)
   }
   const processCsvText = (text: string) => {
     setCsvImportLoading(true)
     setCsvImportError('')
     try {
-      const parsed = parseCsv(text)
-      if (parsed.errorMessage) {
-        setCsvImportError(parsed.errorMessage)
-        return
-      }
+      // Detect and normalize Apple Card format before parsing
+      const firstLine = text.split('\n')[0] ?? ''
+      const isApple   = detectAppleCard(firstLine)
+      setCsvIsAppleCard(isApple)
+      const processedText = isApple ? normalizeAppleCardHeaders(text) : text
+
+      const parsed = parseCsv(processedText)
+      if (parsed.errorMessage) { setCsvImportError(parsed.errorMessage); return }
       if (parsed.rows.length === 0) {
         setCsvImportError('No rows found. Make sure the CSV has a header row and at least one data row.')
         return
       }
+      // Extract category hints from raw rows (Apple Card Category column etc.)
+      setCsvCategoryHints(extractCategoryHints(parsed.rows))
+
       const mapping = detectColumns(parsed.headers)
+      // Account-aware duplicate detection: only compare against the selected account's transactions
+      const effectiveAccountId = csvImportAccountId || accounts[0]?.id ?? ''
+      const existingForAccount = transactions.filter(tx => tx.accountId === effectiveAccountId)
       const preview = runImportPipeline({
         rows: parsed.rows,
         mapping,
-        existing: transactions,
+        existing: existingForAccount,
         rules,
-        defaultAccountId: accounts[0]?.id ?? '',
+        defaultAccountId: effectiveAccountId,
       })
       setCsvImportPreview(preview)
     } catch {
@@ -1788,21 +1846,49 @@ txnMerchantRef.current?.focus()
   }
   const commitCsvImport = () => {
     if (!csvImportPreview) return
+    const effectiveAccountId = csvImportAccountId || accounts[0]?.id ?? ''
     const batchId = crypto.randomUUID().slice(0, 8)
-    const newTxns = buildImportedTransactions(
+    let newTxns = buildImportedTransactions(
       csvImportPreview.importRows,
-      accounts[0]?.id ?? '',
+      effectiveAccountId,
       batchId,
       false,
     )
+    // Apply category hints and payment/transfer detection
+    newTxns = newTxns.map(tx => {
+      const amtKey = `${tx.date}|${tx.merchant.toLowerCase()}|${tx.amount.toFixed(2)}`
+      const hint   = csvCategoryHints[amtKey] ?? ''
+      // Try to match hint to an existing budget category
+      const matchedCat = hint ? categories.find(c => c.name.toLowerCase() === hint.toLowerCase()) : undefined
+      // Flag payment-like merchants as credit card payment or needs-review (don't auto-categorize)
+      const isPayment = PAYMENT_PATTERNS.test(tx.merchant)
+      return {
+        ...tx,
+        ...(hint ? { importedCategoryHint: hint } : {}),
+        ...(matchedCat && !isPayment ? { categoryId: matchedCat.id } : {}),
+        ...(isPayment && tx.type === 'expense' ? { type: 'credit card payment' as TransactionType } : {}),
+        batchId,
+      }
+    })
     if (newTxns.length === 0) { closeCsvImport(); return }
     setTxnWithHistory(prev => [...newTxns, ...prev])
+    // Record the import batch for history
+    const acct = accounts.find(a => a.id === effectiveAccountId)
+    const batch: ImportBatch = {
+      id: batchId,
+      accountId: effectiveAccountId,
+      accountName: acct?.name ?? 'Unknown Account',
+      importMonth: csvImportMonth,
+      importedCount: newTxns.length,
+      skippedCount: csvImportPreview.duplicateCount ?? 0,
+      createdAt: new Date().toISOString(),
+    }
+    setImportBatches(prev => [batch, ...prev.slice(0, 49)])  // keep last 50
     closeCsvImport()
     if (newTxns[0]) flashHighlight(newTxns[0].id, setHighlightedTxnId, highlightTxnTimerRef)
-    const dupMsg = csvImportPreview.duplicateCount > 0
-      ? ` Skipped ${csvImportPreview.duplicateCount} duplicate${csvImportPreview.duplicateCount !== 1 ? 's' : ''}.`
-      : ''
-    showUndoableToast(`Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''}.${dupMsg}`, undoTxn)
+    const skipped = csvImportPreview.duplicateCount ?? 0
+    const dupNote = skipped > 0 ? ` Skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''}.` : ''
+    showUndoableToast(`Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''} to ${acct?.name ?? 'account'}.${dupNote}`, undoTxn)
   }
   const downloadSampleCsv = () => {
     const text = generateSampleCsvString()
@@ -4252,7 +4338,7 @@ txnMerchantRef.current?.focus()
                         }
                         const txTypeColor = tx.type === 'income' ? 'bg-green-900/50 text-green-300' : tx.type === 'transfer' ? 'bg-blue-900/50 text-blue-300' : tx.type === 'credit card payment' ? 'bg-purple-900/50 text-purple-300' : 'bg-slate-700 text-slate-300'
                         const txIsDup    = transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)
-                        const txIsImported = !!(tx as Transaction & { batchId?: string }).batchId
+                        const txIsImported = !!tx.batchId
                         const txReview   = txNeedsReview(tx, transactions)
                         return (
                           <tr key={tx.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedTxnId === tx.id ? 'bg-blue-600/20' : txReview ? 'bg-amber-950/10' : 'hover:bg-slate-800/40'}`}>
@@ -4376,6 +4462,49 @@ txnMerchantRef.current?.focus()
                     </tbody>
                   </table>
                 </div>
+              </Card>
+            )}
+
+            {/* ── V9.6 Import History ── */}
+            {importBatches.length > 0 && (
+              <Card noHover>
+                <button
+                  className="w-full flex items-center justify-between text-left"
+                  onClick={() => setCsvShowHistory(v => !v)}
+                >
+                  <span className="text-sm font-medium text-slate-300">Import History ({importBatches.length})</span>
+                  <span className="text-slate-500 text-xs">{csvShowHistory ? '▲' : '▼'}</span>
+                </button>
+                {csvShowHistory && (
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full text-xs min-w-[480px]">
+                      <thead>
+                        <tr className="text-left text-slate-400 border-b border-slate-700">
+                          <th className="pb-1.5 pr-3 font-medium">Account</th>
+                          <th className="pb-1.5 pr-3 font-medium">Month</th>
+                          <th className="pb-1.5 pr-3 font-medium text-right">Imported</th>
+                          <th className="pb-1.5 pr-3 font-medium text-right">Skipped</th>
+                          <th className="pb-1.5 font-medium">Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importBatches.map(b => (
+                          <tr key={b.id} className="border-b border-slate-800">
+                            <td className="py-1.5 pr-3 text-slate-300">{b.accountName}</td>
+                            <td className="py-1.5 pr-3 text-slate-400">{b.importMonth}</td>
+                            <td className="py-1.5 pr-3 text-right text-green-400 font-medium">{b.importedCount}</td>
+                            <td className="py-1.5 pr-3 text-right text-amber-400">{b.skippedCount > 0 ? b.skippedCount : '—'}</td>
+                            <td className="py-1.5 text-slate-500">{new Date(b.createdAt).toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <button
+                      className="mt-2 text-xs text-slate-500 hover:text-red-400 transition-colors"
+                      onClick={() => setImportBatches([])}
+                    >Clear history</button>
+                  </div>
+                )}
               </Card>
             )}
 
@@ -5054,6 +5183,13 @@ txnMerchantRef.current?.focus()
           loading={csvImportLoading}
           error={csvImportError}
           accounts={accounts}
+          categories={categories}
+          importAccountId={csvImportAccountId}
+          importMonth={csvImportMonth}
+          isAppleCard={csvIsAppleCard}
+          categoryHints={csvCategoryHints}
+          onImportAccountChange={id => { setCsvImportAccountId(id); setCsvImportPreview(null); setCsvCategoryHints({}) }}
+          onImportMonthChange={setCsvImportMonth}
           onFileSelect={handleCsvFileSelect}
           onDrop={handleCsvDrop}
           onCommit={commitCsvImport}
@@ -5246,13 +5382,20 @@ function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; va
   )
 }
 
-// ── V9.0 CSV Import Modal ─────────────────────────────────────────────────────
+// ── V9.6 CSV Import Modal ─────────────────────────────────────────────────────
 
 interface CsvImportModalProps {
   preview: ImportPipelineResult | null
   loading: boolean
   error: string
   accounts: Account[]
+  categories: Category[]
+  importAccountId: string
+  importMonth: string
+  isAppleCard: boolean
+  categoryHints: Record<string, string>
+  onImportAccountChange: (id: string) => void
+  onImportMonthChange: (month: string) => void
   onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void
   onDrop: (e: React.DragEvent<HTMLDivElement>) => void
   onCommit: () => void
@@ -5264,7 +5407,9 @@ interface CsvImportModalProps {
 }
 
 function CsvImportModal({
-  preview, loading, error, accounts,
+  preview, loading, error, accounts, categories,
+  importAccountId, importMonth, isAppleCard, categoryHints,
+  onImportAccountChange, onImportMonthChange,
   onFileSelect, onDrop,
   onCommit, onCancel, onDownloadSample, onUseSampleData, fileInputRef, onResetPreview,
 }: CsvImportModalProps) {
@@ -5277,34 +5422,76 @@ function CsvImportModal({
     return () => document.removeEventListener('keydown', handleKey)
   }, [onCancel])
 
-  const defaultAccount = accounts[0]
-  const accountNote = accounts.length === 0
-    ? 'No accounts set up yet — add an account first so imports can be assigned correctly.'
-    : accounts.length === 1
-      ? `Transactions will be assigned to: ${defaultAccount.name}. Account-specific import handling will be expanded in a future update.`
-      : `Imports are assigned to the first account (${defaultAccount.name}) by default. Account-specific import handling will be expanded in a future update.`
+  const effectiveAccount = accounts.find(a => a.id === importAccountId) ?? accounts[0]
+  const noAccounts = accounts.length === 0
 
   return (
-    // Backdrop: click outside the panel to close
+    // Backdrop: click outside panel to close
     <div
       className="fixed inset-0 z-50 flex items-start justify-center pt-8 px-4 pb-8 bg-black/70 overflow-y-auto"
       onMouseDown={e => { if (e.target === e.currentTarget) onCancel() }}
     >
-      {/* Panel: stop propagation so clicks inside don't close */}
+      {/* Panel */}
       <div className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl flex flex-col" onMouseDown={e => e.stopPropagation()}>
+        {/* Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-700">
           <div>
-            <h2 className="text-lg font-semibold text-slate-100">Import CSV</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-slate-100">Import CSV</h2>
+              {isAppleCard && (
+                <span className="text-[10px] bg-slate-700 text-slate-300 border border-slate-600 px-1.5 py-0.5 rounded font-medium">Apple Card detected</span>
+              )}
+            </div>
             <p className="text-xs text-slate-400 mt-0.5">Import transactions from a bank or financial export.</p>
           </div>
-          <button onClick={onCancel} className="text-slate-400 hover:text-slate-200 text-xl leading-none px-2">x</button>
+          <button onClick={onCancel} className="text-slate-400 hover:text-slate-200 text-xl leading-none px-2">×</button>
         </div>
 
         <div className="p-5 space-y-4 flex-1 overflow-y-auto">
-          <div className="rounded-lg border border-slate-700/60 bg-slate-800/60 px-3 py-2.5 text-xs text-slate-400">
-            <span className="text-slate-300 font-medium">Account: </span>{accountNote}
+          {/* V9.6 — Account + Month selectors */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Import to Account <span className="text-red-400">*</span></label>
+              {noAccounts ? (
+                <p className="text-xs text-amber-300 bg-amber-900/20 border border-amber-700/30 rounded px-2 py-1.5">Add an account first before importing.</p>
+              ) : (
+                <select
+                  value={importAccountId || accounts[0]?.id ?? ''}
+                  onChange={e => onImportAccountChange(e.target.value)}
+                  className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                >
+                  {accounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.name} ({a.type})</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Import Month</label>
+              <input
+                type="month"
+                value={importMonth}
+                onChange={e => onImportMonthChange(e.target.value)}
+                className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+              />
+            </div>
           </div>
 
+          {effectiveAccount && (
+            <div className="rounded-lg border border-slate-700/60 bg-slate-800/40 px-3 py-2 text-xs text-slate-400 flex items-center gap-2">
+              <span>Importing to:</span>
+              <span className="text-slate-200 font-medium">{effectiveAccount.name}</span>
+              <span className="text-slate-600">·</span>
+              <span>{effectiveAccount.type}</span>
+              {effectiveAccount.type === 'credit card' && (
+                <span className="ml-auto text-[10px] bg-purple-900/40 text-purple-300 border border-purple-700/30 px-1.5 py-0.5 rounded">
+                  CC amount rules apply
+                </span>
+              )}
+            </div>
+          )}
+
+          {/* Drop zone (only shown before preview) */}
           {!preview && !loading && (
             <div
               className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${dragOver ? 'border-blue-500 bg-blue-900/20' : 'border-slate-600 hover:border-slate-500 bg-slate-800/50'}`}
@@ -5313,15 +5500,17 @@ function CsvImportModal({
               onDrop={e => { setDragOver(false); onDrop(e) }}
               onClick={() => fileInputRef.current?.click()}
             >
-              <div className="text-4xl mb-3">&#128196;</div>
+              <div className="text-4xl mb-3">📄</div>
               <p className="text-slate-200 font-medium mb-1">Drop a CSV file here</p>
               <p className="text-slate-400 text-sm mb-4">or click to browse</p>
-              <p className="text-slate-500 text-xs">Supported headers: date, merchant/description, amount, type, notes</p>
+              <p className="text-slate-500 text-xs">
+                Apple Card CSV auto-detected. Standard headers: date, merchant, amount, type, notes.
+              </p>
               <input type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={onFileSelect} ref={fileInputRef} />
             </div>
           )}
 
-          {loading && <div className="text-center py-8 text-slate-400">Parsing CSV...</div>}
+          {loading && <div className="text-center py-8 text-slate-400">Parsing CSV…</div>}
 
           {error && (
             <div className="rounded-lg border border-red-700/50 bg-red-900/20 px-4 py-3 text-sm text-red-300">{error}</div>
@@ -5330,13 +5519,14 @@ function CsvImportModal({
           {!preview && !loading && (
             <div className="flex gap-3 flex-wrap text-xs">
               <button onClick={onDownloadSample} className="text-blue-400 hover:text-blue-300 underline underline-offset-2">Download sample CSV</button>
-              <span className="text-slate-600">.</span>
-              <button onClick={onUseSampleData} className="text-blue-400 hover:text-blue-300 underline underline-offset-2">Preview sample data without a file</button>
+              <span className="text-slate-600">·</span>
+              <button onClick={onUseSampleData} className="text-blue-400 hover:text-blue-300 underline underline-offset-2">Preview sample data</button>
             </div>
           )}
 
           {preview && !loading && (
             <div className="space-y-3">
+              {/* Summary counts */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
                   <div className="text-xs text-slate-400 mb-0.5">Ready</div>
@@ -5351,43 +5541,66 @@ function CsvImportModal({
                   <div className={`text-xl font-bold ${preview.invalidCount > 0 ? 'text-red-400' : 'text-slate-400'}`}>{preview.invalidCount}</div>
                 </div>
               </div>
+
               {preview.duplicateCount > 0 && (
-                <p className="text-xs text-amber-300/80">Duplicates are excluded by default. Click Import to bring in only the {preview.readyCount} ready row{preview.readyCount !== 1 ? 's' : ''}.</p>
+                <p className="text-xs text-amber-300/80">
+                  Duplicates compared against {effectiveAccount?.name ?? 'selected account'} only. Matching transactions on other accounts are not flagged.
+                </p>
               )}
               {preview.readyCount === 0 && (
-                <p className="text-xs text-red-300">No importable rows found - all rows are duplicates or invalid. Check your CSV format.</p>
+                <p className="text-xs text-red-300">No importable rows — all are duplicates or invalid. Check your CSV format.</p>
               )}
+
               {preview.readyCount > 0 && (
                 <>
                   <p className="text-xs text-slate-400">
-                    Duplicate detection, rule matching, and type inference applied.
-                    Click <span className="font-medium text-slate-300">Import Transactions</span> to commit, or{' '}
+                    Rule matching, type inference, and category hints applied. Click{' '}
+                    <span className="font-medium text-slate-300">Import Transactions</span> to commit, or{' '}
                     <button onClick={onResetPreview} className="underline text-blue-400 hover:text-blue-300">choose a different file</button>.
                   </p>
-                  {/* Row preview table */}
-                  <div className="overflow-y-auto max-h-56 rounded-lg border border-slate-700/60">
+
+                  {/* Upgraded preview table */}
+                  <div className="overflow-y-auto max-h-64 rounded-lg border border-slate-700/60">
                     <table className="w-full text-xs">
                       <thead className="sticky top-0 bg-slate-800 z-10">
                         <tr className="text-left text-slate-400 border-b border-slate-700">
-                          <th className="py-1.5 px-2 font-medium">Date</th>
+                          <th className="py-1.5 px-2 font-medium whitespace-nowrap">Date</th>
                           <th className="py-1.5 px-2 font-medium">Merchant</th>
-                          <th className="py-1.5 px-2 font-medium text-right">Amount</th>
-                          <th className="py-1.5 px-2 font-medium">Type</th>
+                          <th className="py-1.5 px-2 font-medium text-right whitespace-nowrap">Amount</th>
+                          <th className="py-1.5 px-2 font-medium">Cat. Hint</th>
                           <th className="py-1.5 px-2 font-medium" />
                         </tr>
                       </thead>
                       <tbody>
-                        {(preview.importRows as Array<{ date?: string; merchant?: string; description?: string; amount?: number; type?: string }>).map((row, i) => (
-                          <tr key={i} className="border-b border-slate-800 hover:bg-slate-800/40">
-                            <td className="py-1 px-2 text-slate-300 whitespace-nowrap">{row.date ?? '—'}</td>
-                            <td className="py-1 px-2 text-slate-200 max-w-[140px] truncate">{row.merchant ?? row.description ?? '—'}</td>
-                            <td className="py-1 px-2 text-right text-slate-300 whitespace-nowrap">{row.amount != null ? `$${Math.abs(row.amount).toFixed(2)}` : '—'}</td>
-                            <td className="py-1 px-2 text-slate-400">{row.type ?? '—'}</td>
-                            <td className="py-1 px-2">
-                              <span className="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold bg-green-900/60 text-green-300 border border-green-700/40">New</span>
-                            </td>
-                          </tr>
-                        ))}
+                        {(preview.importRows as Array<{ date?: string; merchant?: string; description?: string; amount?: number; type?: string }>).map((row, i) => {
+                          const rawMerchant = row.merchant ?? row.description ?? ''
+                          const amtKey      = `${row.date ?? ''}|${rawMerchant.toLowerCase()}|${Math.abs(row.amount ?? 0).toFixed(2)}`
+                          const hint        = categoryHints[amtKey] ?? ''
+                          const matchedCat  = hint ? categories.find(c => c.name.toLowerCase() === hint.toLowerCase()) : undefined
+                          const isPayment   = /payment|transfer|zelle|venmo|paypal/i.test(rawMerchant)
+                          return (
+                            <tr key={i} className={`border-b border-slate-800 ${isPayment ? 'bg-amber-950/10' : 'hover:bg-slate-800/40'}`}>
+                              <td className="py-1 px-2 text-slate-300 whitespace-nowrap">{row.date ?? '—'}</td>
+                              <td className="py-1 px-2 text-slate-200 max-w-[130px] truncate">
+                                {normalizeMerchant(rawMerchant) || '—'}
+                                {isPayment && <span className="ml-1 text-[9px] text-amber-400">transfer?</span>}
+                              </td>
+                              <td className="py-1 px-2 text-right text-slate-300 whitespace-nowrap">
+                                {row.amount != null ? `$${Math.abs(row.amount).toFixed(2)}` : '—'}
+                              </td>
+                              <td className="py-1 px-2">
+                                {matchedCat ? (
+                                  <span className="text-[9px] bg-blue-900/40 text-blue-300 border border-blue-700/30 px-1 py-0.5 rounded">{matchedCat.name}</span>
+                                ) : hint ? (
+                                  <span className="text-[9px] text-slate-500">{hint}</span>
+                                ) : null}
+                              </td>
+                              <td className="py-1 px-2">
+                                <span className="inline-block rounded px-1.5 py-0.5 text-[10px] font-semibold bg-green-900/60 text-green-300 border border-green-700/40">New</span>
+                              </td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -5397,18 +5610,19 @@ function CsvImportModal({
           )}
         </div>
 
+        {/* Footer */}
         <div className="flex items-center justify-between gap-3 p-5 border-t border-slate-700 flex-wrap">
           <div className="flex gap-2">
             <button onClick={onCancel} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-2 text-sm transition-colors">Cancel</button>
             {preview && (
               <button onClick={onResetPreview} className="rounded-lg bg-slate-800 hover:bg-slate-700 px-4 py-2 text-sm text-slate-400 transition-colors border border-slate-700">
-                Choose different file
+                Different file
               </button>
             )}
           </div>
-          {preview && preview.readyCount > 0 && (
+          {preview && preview.readyCount > 0 && !noAccounts && (
             <button onClick={onCommit} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-5 py-2 text-sm font-medium transition-colors">
-              Import {preview.readyCount} transaction{preview.readyCount !== 1 ? 's' : ''}
+              Import {preview.readyCount} transaction{preview.readyCount !== 1 ? 's' : ''} → {effectiveAccount?.name ?? 'account'}
             </button>
           )}
         </div>
