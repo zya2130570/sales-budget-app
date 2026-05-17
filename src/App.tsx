@@ -53,7 +53,7 @@ import { detectRecurringPatterns } from './utils/recurring'
 import { getPeriodDateRange } from './utils/calculations'
 import { varianceTone, catStatus } from './utils/budgetMath'
 import {
-  computeNetWorth, computeBalanceCheckData, computeReconciliationData, RECON_THRESHOLD,
+  computeNetWorth, computeBalanceCheckData, computeReconciliationData,
 } from './utils/accountMath'
 import type { BalanceCheckEntry, ReconciliationEntry } from './utils/accountMath'
 import {
