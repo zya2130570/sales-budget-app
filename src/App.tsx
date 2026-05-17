@@ -3248,18 +3248,18 @@ txnMerchantRef.current?.focus()
                     <div className={`text-lg font-bold ${netWorthSummary.netWorth >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{currency(netWorthSummary.netWorth)}</div>
                   </div>
                 </div>
-                {/* V9.3 — Needs Review / Reconciled count */}
+                {/* V9.3.4 — Balance check notice */}
                 {needsReviewCount > 0 && (
                   <div className="mb-3 flex items-center gap-2 text-xs text-amber-300">
                     <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
-                    {needsReviewCount} account{needsReviewCount !== 1 ? 's need' : ' needs'} review — actual balance doesn&apos;t match expected from transactions.
+                    {needsReviewCount} account{needsReviewCount !== 1 ? 's have' : ' has'} unexplained activity — tracked transactions don&apos;t fully account for the current balance.
                   </div>
                 )}
-                {/* V9.3.2 — Reconciliation helper text */}
+                {/* V9.3.4 — Balance check helper text */}
                 <p className="text-xs text-slate-500 mb-3">
-                  <span className="text-slate-400 font-medium">Current Card Balance / Actual Balance</span> = what you manually entered.{' '}
-                  <span className="text-slate-400 font-medium">Calculated Card Balance / Expected Balance</span> = starting balance adjusted for tracked transactions.{' '}
-                  Reconcile accepts the current balance as the new baseline.
+                  <span className="text-slate-400 font-medium">Current Balance</span> = what you entered for this account.{' '}
+                  <span className="text-slate-400 font-medium">Tracked Activity</span> = net effect of all logged transactions.{' '}
+                  <span className="text-slate-400 font-medium">Unexplained</span> = the gap — may reflect unlogged history, transfers not yet entered, or a partial transaction import.
                 </p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -3268,8 +3268,8 @@ txnMerchantRef.current?.focus()
                         <th className="pb-1.5 pr-4 font-medium">Name</th>
                         <th className="pb-1.5 pr-4 font-medium">Type</th>
                         <th className="pb-1.5 pr-4 font-medium text-right">Current Balance</th>
-                        <th className="pb-1.5 pr-4 font-medium text-right">Calculated Balance</th>
-                        <th className="pb-1.5 pr-4 font-medium">Status</th>
+                        <th className="pb-1.5 pr-4 font-medium text-right">Tracked Activity</th>
+                        <th className="pb-1.5 pr-4 font-medium">Unexplained</th>
                         <th className="pb-1.5 pr-4 font-medium">Institution</th>
                         <th className="pb-1.5" />
                       </tr>
@@ -3338,39 +3338,28 @@ txnMerchantRef.current?.focus()
                                   : a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)
                               }
                             </td>
-                            {/* Calculated Balance (transaction-adjusted) */}
+                            {/* Tracked Activity — net transaction effect on this account */}
                             <td className="py-2 pr-4 text-right text-slate-400 text-xs">
-                              {recon ? (
-                                <>
-                                  {a.type === 'credit card'
-                                    ? (recon.expectedBalance === 0 ? 'Paid Off' : `${currency(Math.abs(recon.expectedBalance))} owed`)
-                                    : recon.expectedBalance < 0 ? `−${currency(Math.abs(recon.expectedBalance))}` : currency(recon.expectedBalance)
-                                  }
-                                  {Math.abs(recon.txnImpact) > 0.005 && (
-                                    <div className="text-[10px] text-slate-500">
-                                      {a.type === 'credit card'
-                                        ? `Tracked card activity: ${currency(Math.abs(recon.txnImpact))}`
-                                        : `${recon.txnImpact > 0 ? '+' : '−'}${currency(Math.abs(recon.txnImpact))} transaction impact`
-                                      }
-                                    </div>
-                                  )}
-                                </>
-                              ) : '—'}
+                              {recon && Math.abs(recon.txnImpact) > 0.005 ? (
+                                a.type === 'credit card'
+                                  ? `${currency(Math.abs(recon.txnImpact))} tracked`
+                                  : `${recon.txnImpact >= 0 ? '+' : '−'}${currency(Math.abs(recon.txnImpact))}`
+                              ) : <span className="text-slate-600">—</span>}
                             </td>
-                            {/* Reconciliation status */}
+                            {/* Unexplained — plain-language gap between current balance and tracked activity */}
                             <td className="py-2 pr-4 text-xs">
                               {recon ? (
-                                recon.isReconciled ? (
-                                  <span className="text-green-400 font-medium">Reconciled</span>
+                                Math.abs(recon.difference) <= 0.02 ? (
+                                  <span className="text-green-400 font-medium">Looks matched.</span>
                                 ) : (
                                   <span className={`font-medium ${Math.abs(recon.difference) > 100 ? 'text-red-400' : 'text-amber-300'}`}>
                                     {a.type === 'credit card'
                                       ? recon.difference > 0
-                                        ? `Tracked activity suggests you owe ${currency(recon.difference)} more.`
-                                        : `Tracked activity suggests you owe ${currency(Math.abs(recon.difference))} less.`
+                                        ? `${currency(recon.difference)} of card debt is not explained yet.`
+                                        : `Tracked activity is ${currency(Math.abs(recon.difference))} higher than your current card balance.`
                                       : recon.difference > 0
-                                        ? `Actual is ${currency(recon.difference)} higher than expected`
-                                        : `Actual is ${currency(Math.abs(recon.difference))} lower than expected`
+                                        ? `${currency(recon.difference)} not explained by tracked transactions yet.`
+                                        : `Tracked transactions are ${currency(Math.abs(recon.difference))} higher than current balance.`
                                     }
                                   </span>
                                 )
@@ -3402,22 +3391,14 @@ txnMerchantRef.current?.focus()
                               ) : (
                                 <>
                                   <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => startInlineAccountEdit(a)}>Edit</button>
-                                  {recon && (
-                                    <span>
-                                      <button
-                                        className={`text-xs ${recon.isReconciled ? 'text-slate-500 hover:text-slate-300' : 'text-amber-400 hover:text-amber-300'}`}
-                                        onClick={() => reconcileAccount(a.id)}
-                                        title={recon.isReconciled ? 'Already reconciled — click to re-reconcile with current balance' : 'Accept actual balance as the new baseline'}
-                                      >
-                                        Reconcile
-                                      </button>
-                                      {(a as Account & { lastReconciledAt?: string }).lastReconciledAt && (
-                                        <span className="ml-1.5 text-[10px] text-slate-600">
-                                          Last: {formatDate((a as Account & { lastReconciledAt?: string }).lastReconciledAt)}
-                                        </span>
-                                      )}
-                                    </span>
-                                  )}
+                                  <button
+                                    disabled
+                                    className="text-xs text-slate-600 cursor-not-allowed"
+                                    title="Full reconciliation coming after account-aware CSV import"
+                                    onClick={() => reconcileAccount(a.id)}
+                                  >
+                                    Reconcile
+                                  </button>
                                   <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => {
                                     setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))
                                     showUndoableToast(`Deleted "${a.name}".`, undoAccount)
