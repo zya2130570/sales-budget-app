@@ -1226,6 +1226,7 @@ txnSubmittingRef.current = true
 
 resetTxnFormAfterAdd()
 txnMerchantRef.current?.focus()
+  }
   const saveInlineTxnEdit = () => {
     if (!inlineTxnEditId) return
     const merchant = inlineTxnEditForm.merchant.trim()
@@ -4517,6 +4518,11 @@ txnMerchantRef.current?.focus()
               {targetFormHint && (
                 <p className="mt-2 text-sm text-amber-300">{targetFormHint}</p>
               )}
+              {editTargetHint && (
+  <p className="text-xs text-yellow-300 mt-1">
+    {editTargetHint}
+  </p>
+)}
             </Card>
 
             {/* Target Undo / Redo / Clear row */}
