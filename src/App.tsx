@@ -1203,12 +1203,28 @@ export default function App() {
       }
     }
 
-   setTxnWithHistory(prev => [
-    // Set blur guard BEFORE moving focus so Amount's onBlur skips its format-back
-    txnSubmittingRef.current = true
-    resetTxnFormAfterAdd()
-    txnMerchantRef.current?.focus()
-  }
+ setTxnWithHistory(prev => [
+  {
+    id: crypto.randomUUID(),
+    date: txnForm.date,
+    accountId: resolvedAccountId,
+    merchant,
+    amount,
+    type: txnForm.type,
+    categoryId: autoCategoryId || undefined,
+    notes: txnForm.notes.trim() || undefined,
+    toAccountId: txnForm.toAccountId || undefined,
+    appliedByRule: matchedRuleId,
+    createdAt: new Date().toISOString(),
+  },
+  ...prev,
+])
+
+// Set blur guard BEFORE moving focus so Amount's onBlur skips format-back
+txnSubmittingRef.current = true
+
+resetTxnFormAfterAdd()
+txnMerchantRef.current?.focus()
   const saveInlineTxnEdit = () => {
     if (!inlineTxnEditId) return
     const merchant = inlineTxnEditForm.merchant.trim()
