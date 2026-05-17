@@ -223,6 +223,7 @@ export default function App() {
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [showTargetSuggestions, setShowTargetSuggestions] = useState(false)
   const [targetSuggestionIndex, setTargetSuggestionIndex] = useState(-1)
+  const [editTargetHint, setEditTargetHint] = useState('') 
   const [budgetFormHint, setBudgetFormHint] = useState('')
   const [targetFormHint, setTargetFormHint] = useState('')
   const [budgetHistory, setBudgetHistory] = useState<BudgetSnapshot[]>([])
