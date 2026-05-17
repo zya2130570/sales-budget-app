@@ -49,6 +49,18 @@ import { normalizeMerchant } from './utils/merchantNormalization'
 import { loadCategoryMemory, saveCategoryMemory } from './utils/categoryMemory'
 import { resolveHint } from './utils/importHints'
 import { detectRecurringPatterns } from './utils/recurring'
+// V10.2 — extracted calculation helpers
+import { getPeriodDateRange } from './utils/calculations'
+import { varianceTone, catStatus } from './utils/budgetMath'
+import {
+  computeNetWorth, computeBalanceCheckData, computeReconciliationData, RECON_THRESHOLD,
+} from './utils/accountMath'
+import type { BalanceCheckEntry, ReconciliationEntry } from './utils/accountMath'
+import {
+  cadenceMult,
+  projectManualItems, projectRecurringCandidates,
+} from './utils/forecastMath'
+import type { RecurringCadence, ManualRecurringItem, ForecastLineItem } from './utils/forecastMath'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -147,16 +159,9 @@ function parsePdfText(raw: string): { rows: PdfImportRow[]; warning: string } {
 }
 
 // ── V9.7 Recurring detection ──────────────────────────────────────────────────
-// V9.8 — Manual recurring items (user-entered, not auto-detected)
-type RecurringCadence = 'weekly' | 'bi-weekly' | 'monthly' | 'yearly'
-type ManualRecurringItem = {
-  id: string; name: string; amount: number; cadence: RecurringCadence
-  nextDueDate: string; type: 'expense' | 'income'
-}
-// V9.8 — Cash flow forecast line item
-type ForecastItem = {
-  date: string; name: string; amount: number; type: 'expense' | 'income'; source: 'detected' | 'manual'
-}
+// RecurringCadence, ManualRecurringItem, ForecastLineItem types imported from forecastMath.ts
+// ForecastItem alias for backward compatibility within this file
+type ForecastItem = ForecastLineItem
 
 // ── V9.5 Review classification ────────────────────────────────────────────────
 function txNeedsReview(tx: Transaction, allTxns: Transaction[], dismissedDupIds?: Set<string>): boolean {
@@ -242,35 +247,6 @@ const tabTips: Record<Tab, string> = {
 // ── V8.4 Period date-range helper ────────────────────────────────────────────
 // Returns the [start, end] date strings (YYYY-MM-DD) for the current calendar
 // window of the selected period. Used to filter transactions into actuals.
-function getPeriodDateRange(period: Period): { start: string; end: string } {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const fmt = (d: Date) => d.toISOString().slice(0, 10)
-  if (period === 'monthly') {
-    return {
-      start: fmt(new Date(today.getFullYear(), today.getMonth(), 1)),
-      end:   fmt(new Date(today.getFullYear(), today.getMonth() + 1, 0)),
-    }
-  }
-  if (period === 'yearly') {
-    return {
-      start: fmt(new Date(today.getFullYear(), 0, 1)),
-      end:   fmt(new Date(today.getFullYear(), 11, 31)),
-    }
-  }
-  if (period === 'weekly') {
-    const sun = new Date(today)
-    sun.setDate(today.getDate() - today.getDay())
-    const sat = new Date(sun)
-    sat.setDate(sun.getDate() + 6)
-    return { start: fmt(sun), end: fmt(sat) }
-  }
-  // bi-weekly: trailing 14-day window ending today
-  const start = new Date(today)
-  start.setDate(today.getDate() - 13)
-  return { start: fmt(start), end: fmt(today) }
-}
-
 // ── V8.4.2 Sample generator data pools ───────────────────────────────────────
 // Typed merchant pools — ensures type always matches merchant context
 const EXPENSE_MERCHANTS  = ['Target', 'Walmart', "Fry's", 'Shell', 'Chevron', 'Costco', 'Amazon', 'Starbucks', 'Chipotle', 'Uber', 'Best Buy', 'CVS', "McDonald's", 'Walgreens', 'Apple', 'Lyft']
@@ -942,13 +918,7 @@ export default function App() {
   // Budget health: catStatus(), budgetHealth useMemo
   // Rollover: categoryRollovers state (flag stored, calc TBD)
   // ══════════════════════════════════════════════════════════════════════════════
-  const varianceTone = (overspendAmt: number, p: Period): 'good' | 'neutral' | 'warn' | 'danger' => {
-    const threshold = p === 'weekly' ? 50 : p === 'bi-weekly' ? 100 : p === 'monthly' ? 216 : 2600
-    if (overspendAmt <= 0) return 'good'
-    if (overspendAmt <= threshold) return 'neutral'
-    if (overspendAmt <= threshold * 2) return 'warn'
-    return 'danger'
-  }
+  // varianceTone imported from utils/budgetMath
 
   // Planned total for the selected period (sum of all categories)
   const plannedPeriodTotal = convertFromMonthly(monthlyBudget, period)
@@ -994,16 +964,7 @@ export default function App() {
   // Any actuals present = transactions OR manual entries
   const hasAnyActual = categories.some(c => effectiveCatActual(c.id) !== null)
 
-  // V9.11 — Per-category status label
-  const catStatus = (catId: string, planned: number): 'Over Budget' | 'Near Limit' | 'On Track' | 'Under Budget' | 'No Activity' => {
-    const eff = effectiveCatActual(catId)
-    if (eff === null) return 'No Activity'
-    const actual = eff.total
-    if (actual > planned)                         return 'Over Budget'
-    if (planned > 0 && actual / planned >= 0.8)   return 'Near Limit'
-    if (planned > 0 && actual / planned < 0.3)    return 'Under Budget'
-    return 'On Track'
-  }
+  // catStatus imported from utils/budgetMath — signature: catStatus(actual: number | null, planned: number)
 
   // V9.11 — Budget health summary
   const budgetHealth = useMemo(() => {
@@ -1012,6 +973,7 @@ export default function App() {
     const totalPlanned = categories.reduce((s, c) => s + convertFromMonthly(c.amount, period), 0)
     const totalActual  = categories.reduce((s, c) => { const e = effectiveCatActual(c.id); return s + (e?.total ?? 0) }, 0)
     return { overBudget, noActivity, totalPlanned, totalActual, remaining: totalPlanned - totalActual }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categories, period, effectiveCatActual])
 
   // Variance total (actual - planned); positive = overspend
@@ -1080,124 +1042,23 @@ export default function App() {
     return result
   }, [accounts, transactions])
 
-  // V9.2/V9.3.1 — Net worth summary helpers
-  // Debt uses raw account.balance (user-entered baseline), not computed balance,
-  // because credit card debt is what the user actually owes — the manual baseline.
-  // Cash and investments use computed balances to reflect transaction activity.
-  const netWorthSummary = useMemo(() => {
-    let totalCash = 0, totalDebt = 0, totalInvestments = 0
-    for (const acct of accounts) {
-      const computedBal = computedAccountBalances[acct.id] ?? acct.balance
-      if (acct.type === 'credit card') {
-        // Debt = absolute value of negative balance (manual entry is source of truth for card debt)
-        totalDebt += Math.abs(Math.min(0, acct.balance))
-      } else if (acct.type === 'investment' || acct.type === 'roth ira' || acct.type === 'retirement') {
-        totalInvestments += Math.max(0, computedBal)
-      } else {
-        totalCash += computedBal
-      }
-    }
-    const netWorth = totalCash + totalInvestments - totalDebt
-    return { totalCash, totalDebt, totalInvestments, netWorth }
-  }, [accounts, computedAccountBalances])
+  // V9.2/V9.3.1 — Net worth summary (computeNetWorth extracted to utils/accountMath)
+  const netWorthSummary = useMemo(
+    () => computeNetWorth(accounts, computedAccountBalances),
+    [accounts, computedAccountBalances]
+  )
 
-  // V9.3 — Reconciliation engine
-  // For each account:
-  //   startingBalance = account.startingBalance ?? account.balance (the manual baseline)
-  //   txnImpact       = computedAccountBalances[id] - startingBalance
-  //   expectedBalance = startingBalance + txnImpact  (== computedAccountBalances[id])
-  //   actualBalance   = account.balance (user-entered)
-  //   difference      = actualBalance - expectedBalance
-  // A difference of 0 (or ±RECON_THRESHOLD) = "Reconciled"
-  const RECON_THRESHOLD = 0.02 // cents-level floating point tolerance
-  const reconciliationData = useMemo((): Record<string, {
-    startingBalance: number; txnImpact: number; expectedBalance: number;
-    actualBalance: number; difference: number; isReconciled: boolean;
-  }> => {
-    const result: Record<string, { startingBalance: number; txnImpact: number; expectedBalance: number; actualBalance: number; difference: number; isReconciled: boolean }> = {}
-    for (const acct of accounts) {
-      // startingBalance: use stored field if present; otherwise the current balance is the baseline
-      const startingBalance = (acct as Account & { startingBalance?: number }).startingBalance ?? acct.balance
-      const expectedBalance = computedAccountBalances[acct.id] ?? acct.balance
-      const txnImpact       = expectedBalance - startingBalance
-      const actualBalance   = acct.balance
-      const difference      = actualBalance - expectedBalance
-      result[acct.id] = {
-        startingBalance,
-        txnImpact,
-        expectedBalance,
-        actualBalance,
-        difference,
-        isReconciled: Math.abs(difference) <= RECON_THRESHOLD,
-      }
-    }
-    return result
-  }, [accounts, computedAccountBalances])
+  // V9.3 — Reconciliation (computeReconciliationData extracted to utils/accountMath)
+  const reconciliationData = useMemo(
+    (): Record<string, ReconciliationEntry> => computeReconciliationData(accounts, computedAccountBalances),
+    [accounts, computedAccountBalances]
+  )
 
-  // V9.4 — Direct balance check per account.
-  // Computes tracked activity purely from transactions (no startingBalance dependency).
-  // CC:    trackedActivity = expenses charged to card − payments received  (positive = net debt)
-  // Other: trackedActivity = income − expenses + transfers_in − transfers_out − cc_payments_sent
-  // unexplained reacts to a.balance changes because it uses a.balance directly.
-  const balanceCheckData = useMemo((): Record<string, {
-    trackedActivity: number; unexplained: number; isMatched: boolean
-  }> => {
-    // Build a fast type lookup to avoid repeated .find() calls
-    const typeOf: Record<string, AccountType> = {}
-    for (const acct of accounts) typeOf[acct.id] = acct.type
-
-    // Per-account tracked delta:
-    // CC accounts:    ONLY expenses charged to that CC + CC payments targeting that CC.
-    //                 Transfers are intentionally excluded — a transfer destination being
-    //                 a CC is a data-entry error and must not inflate tracked debt.
-    // Other accounts: income/expenses on that account + transfer flows (not CC).
-    const deltas: Record<string, number> = {}
-    const add = (id: string | undefined, amt: number) => {
-      if (!id) return; deltas[id] = (deltas[id] ?? 0) + amt
-    }
-
-    for (const tx of transactions) {
-      const srcType = typeOf[tx.accountId]
-      const dstType = tx.toAccountId ? typeOf[tx.toAccountId] : undefined
-
-      if (tx.type === 'expense') {
-        if (srcType === 'credit card') {
-          add(tx.accountId, tx.amount)    // CC charge: increases tracked debt
-        } else {
-          add(tx.accountId, -tx.amount)   // Other account: decreases balance
-        }
-      } else if (tx.type === 'income') {
-        if (srcType !== 'credit card') {  // Income doesn't apply to CC accounts
-          add(tx.accountId, tx.amount)
-        }
-      } else if (tx.type === 'transfer') {
-        // Transfers only affect non-CC accounts — never touch CC tracked activity
-        if (srcType !== 'credit card') add(tx.accountId, -tx.amount)
-        if (tx.toAccountId && dstType !== 'credit card') add(tx.toAccountId, tx.amount)
-      } else if (tx.type === 'credit card payment') {
-        // Source (checking/cash): money out — only if not a CC itself
-        if (srcType !== 'credit card') add(tx.accountId, -tx.amount)
-        // Destination CC: payment reduces tracked debt — only if actually a CC
-        if (tx.toAccountId && dstType === 'credit card') add(tx.toAccountId, -tx.amount)
-      }
-    }
-
-    // Build per-account results
-    const result: Record<string, { trackedActivity: number; unexplained: number; isMatched: boolean }> = {}
-    for (const acct of accounts) {
-      const trackedActivity = deltas[acct.id] ?? 0
-      // CC: compare absolute debt owed vs net tracked charges (charges − payments)
-      // Other: compare actual balance vs net tracked delta
-      const currentAmt = acct.type === 'credit card' ? Math.abs(acct.balance) : acct.balance
-      const unexplained = currentAmt - trackedActivity
-      result[acct.id] = {
-        trackedActivity,
-        unexplained,
-        isMatched: Math.abs(unexplained) <= 0.02,
-      }
-    }
-    return result
-  }, [accounts, transactions])
+  // V9.4 — Balance check (computeBalanceCheckData extracted to utils/accountMath)
+  const balanceCheckData = useMemo(
+    (): Record<string, BalanceCheckEntry> => computeBalanceCheckData(accounts, transactions),
+    [accounts, transactions]
+  )
 
   // needsReviewCount: accounts whose balance isn't explained by tracked transactions
   const needsReviewCount = accounts.filter(a => {
@@ -1233,9 +1094,7 @@ export default function App() {
     () => detectRecurringPatterns(transactions).filter(c => !dismissedRecurring.has(c.merchantKey)),
     [transactions, dismissedRecurring]
   )
-  // Per-cadence monthly multiplier (how many occurrences per month)
-  const cadenceMult = (c: RecurringCadence | 'weekly' | 'bi-weekly' | 'monthly'): number =>
-    c === 'weekly' ? 4.33 : c === 'bi-weekly' ? 2.17 : c === 'yearly' ? 1 / 12 : 1
+  // cadenceMult imported from utils/forecastMath
   const manualMonthlyExpenses = manualRecurringItems
     .filter(i => i.type === 'expense')
     .reduce((s, i) => s + i.amount * cadenceMult(i.cadence), 0)
@@ -1243,7 +1102,7 @@ export default function App() {
     .filter(c => c.confidence === 'high' || confirmedRecurring.has(c.merchantKey))
     .reduce((s, c) => s + c.estimatedMonthlyAmount, 0) + manualMonthlyExpenses
 
-  // V9.8 — Cash Flow Forecast
+  // V9.8 — Cash Flow Forecast (projection helpers extracted to utils/forecastMath)
   const cashFlowForecast = useMemo(() => {
     const today    = new Date()
     const todayStr = today.toISOString().slice(0, 10)
@@ -1251,47 +1110,32 @@ export default function App() {
     const endStr   = end.toISOString().slice(0, 10)
     const startingCash = netWorthSummary.totalCash
 
-    const items: ForecastItem[] = []
+    // Project recurring items using extracted pure helpers
+    const confirmedCandidates = recurringCandidates.filter(
+      rc => rc.confidence === 'high' || confirmedRecurring.has(rc.merchantKey)
+    )
+    const items: ForecastItem[] = [
+      ...projectManualItems(manualRecurringItems, todayStr, end),
+      ...projectRecurringCandidates(confirmedCandidates, todayStr, end),
+    ].sort((a, b) => a.date.localeCompare(b.date))
 
-    // Project manual recurring items into the window
-    for (const item of manualRecurringItems) {
-      const step = item.cadence === 'weekly' ? 7 : item.cadence === 'bi-weekly' ? 14 : item.cadence === 'yearly' ? 365 : 30
-      let next = new Date(item.nextDueDate + 'T00:00:00')
-      for (let guard = 0; next <= end && guard < 60; guard++, next = new Date(next.getTime() + step * 86_400_000)) {
-        const ds = next.toISOString().slice(0, 10)
-        if (ds >= todayStr) items.push({ date: ds, name: item.name, amount: item.amount, type: item.type, source: 'manual' })
-      }
-    }
-
-    // Project detected/confirmed recurring candidates
-    for (const c of recurringCandidates.filter(rc => rc.confidence === 'high' || confirmedRecurring.has(rc.merchantKey))) {
-      const step = c.cadence === 'weekly' ? 7 : c.cadence === 'bi-weekly' ? 14 : 30
-      const perOccurrence = c.estimatedMonthlyAmount / cadenceMult(c.cadence)
-      let next = new Date(new Date(c.lastDate + 'T00:00:00').getTime() + step * 86_400_000)
-      for (let guard = 0; next <= end && guard < 60; guard++, next = new Date(next.getTime() + step * 86_400_000)) {
-        const ds = next.toISOString().slice(0, 10)
-        if (ds >= todayStr) items.push({ date: ds, name: c.displayName, amount: perOccurrence, type: 'expense', source: 'detected' })
-      }
-    }
-
-    items.sort((a, b) => a.date.localeCompare(b.date))
     // Inject income-tab take-home estimate when no manual income items exist
-    const hasManualIncome = manualRecurringItems.some(i => i.type === 'income')
-    const hasDetectedIncome = recurringCandidates.some(c => (c.confidence === 'high' || confirmedRecurring.has(c.merchantKey)))
+    const hasManualIncome    = manualRecurringItems.some(i => i.type === 'income')
+    const hasDetectedIncome  = confirmedCandidates.length > 0
     if (!hasManualIncome && !hasDetectedIncome && inc.totalMonthly > 0) {
       const estimatedIncome = inc.totalMonthly * (forecastPeriod / 30)
       const daysLabel = forecastPeriod === 7 ? '~1 week' : forecastPeriod === 14 ? '~2 weeks' : forecastPeriod === 30 ? '~1 month' : '~2 months'
       items.unshift({ date: todayStr, name: `Est. take-home (${daysLabel})`, amount: Math.round(estimatedIncome * 100) / 100, type: 'income', source: 'manual' })
     }
+
     const totalIncome   = items.filter(i => i.type === 'income').reduce((s, i) => s + i.amount, 0)
     const totalExpenses = items.filter(i => i.type === 'expense').reduce((s, i) => s + i.amount, 0)
     const projectedEnd  = startingCash + totalIncome - totalExpenses
     const safeToSpend   = Math.max(0, projectedEnd - 250)
     const status: 'comfortable' | 'tight' | 'risk' =
       projectedEnd < 0 ? 'risk' : projectedEnd < 250 ? 'tight' : 'comfortable'
-
     return { items, startingCash, totalIncome, totalExpenses, projectedEnd, safeToSpend, status, todayStr, endStr }
-  }, [forecastPeriod, netWorthSummary.totalCash, manualRecurringItems, recurringCandidates, confirmedRecurring, cadenceMult, inc.totalMonthly])
+  }, [forecastPeriod, netWorthSummary.totalCash, manualRecurringItems, recurringCandidates, confirmedRecurring, inc.totalMonthly])
 
   // ══════════════════════════════════════════════════════════════════════════════
   // V10 ARCHITECTURE — MONTHLY REVIEW ENGINE
@@ -4108,7 +3952,7 @@ txnMerchantRef.current?.focus()
                         {/* V9.11 — Status badge */}
                         <td className="py-1.5 pr-2 hidden md:table-cell">
                           {(() => {
-                            const st  = catStatus(c.id, planned)
+                            const st  = catStatus(effectiveCatActual(c.id)?.total ?? null, planned)
                             const cls = st === 'Over Budget'  ? 'text-red-400 bg-red-900/30 border-red-700/30'
                               : st === 'Near Limit'   ? 'text-amber-300 bg-amber-900/30 border-amber-700/30'
                               : st === 'On Track'     ? 'text-green-400 bg-green-900/30 border-green-700/30'
