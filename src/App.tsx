@@ -1806,7 +1806,7 @@ txnMerchantRef.current?.focus()
 
       const mapping = detectColumns(parsed.headers)
       // Account-aware duplicate detection: only compare against the selected account's transactions
-      const effectiveAccountId = csvImportAccountId || accounts[0]?.id ?? ''
+      const effectiveAccountId = (csvImportAccountId || accounts[0]?.id) ?? ''
       const existingForAccount = transactions.filter(tx => tx.accountId === effectiveAccountId)
       const preview = runImportPipeline({
         rows: parsed.rows,
@@ -1846,7 +1846,7 @@ txnMerchantRef.current?.focus()
   }
   const commitCsvImport = () => {
     if (!csvImportPreview) return
-    const effectiveAccountId = csvImportAccountId || accounts[0]?.id ?? ''
+    const effectiveAccountId = (csvImportAccountId || accounts[0]?.id) ?? ''
     const batchId = crypto.randomUUID().slice(0, 8)
     let newTxns = buildImportedTransactions(
       csvImportPreview.importRows,
@@ -4467,7 +4467,7 @@ txnMerchantRef.current?.focus()
 
             {/* ── V9.6 Import History ── */}
             {importBatches.length > 0 && (
-              <Card noHover>
+              <Card title="Import History" noHover>
                 <button
                   className="w-full flex items-center justify-between text-left"
                   onClick={() => setCsvShowHistory(v => !v)}
@@ -5456,7 +5456,7 @@ function CsvImportModal({
                 <p className="text-xs text-amber-300 bg-amber-900/20 border border-amber-700/30 rounded px-2 py-1.5">Add an account first before importing.</p>
               ) : (
                 <select
-                  value={importAccountId || accounts[0]?.id ?? ''}
+                  value={(importAccountId || accounts[0]?.id) ?? ''}
                   onChange={e => onImportAccountChange(e.target.value)}
                   className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
                 >
