@@ -2665,7 +2665,7 @@ txnMerchantRef.current?.focus()
               onClick={() => setTargetsWithHistory(prev => prev.filter(x => x.id !== t.id))}
             >Delete</button>
           </div>
-        }
+        }>
         {isEditingTarget ? (
           <div
             className="space-y-3"
