@@ -5707,8 +5707,8 @@ txnMerchantRef.current?.focus()
               <Card title="Data Integrity" noHover>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {(() => {
-                    const importedCount = transactions.filter(t => t.batchId || t.importBatchId).length
-                    const manualCount   = transactions.filter(t => !t.batchId && !t.importBatchId).length
+                    const importedCount = transactions.filter(t => t.batchId || t.batchId).length
+                    const manualCount   = transactions.filter(t => !t.batchId && !t.batchId).length
                     const dupCandidates = transactions.filter(tx =>
                       transactions.some(o => o.id !== tx.id &&
                         o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
