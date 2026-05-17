@@ -1744,8 +1744,6 @@ txnMerchantRef.current?.focus()
     setTimeout(() => targetNameRef.current?.focus(), 0)
   }
 
-  const [editTargetHint, setEditTargetHint] = useState('')
-
   const saveEditTarget = (targetId: string) => {
     const name = editTargetForm.name.trim()
     const goalAmount = Number(editTargetForm.goalAmount) || 0
