@@ -7025,7 +7025,7 @@ interface CsvImportModalProps {
 }
 
 function CsvImportModal({
-  preview, loading, error, accounts, categories,
+  preview, loading, error, accounts,
   importAccountId, importMonth, isAppleCard, categoryHints,
   hintRules, hintCategories, hintMemory,
   isPdf, pdfRows, pdfWarning,
