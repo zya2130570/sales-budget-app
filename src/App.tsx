@@ -2198,37 +2198,7 @@ export default function App() {
   }
 
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
-export function estimateTaxBreakdown(annualGross: number) {
-  // Rough effective-rate model
-  // Includes federal + FICA + light state estimate
 
-  let effectiveRate = 0.82
-
-  if (annualGross <= 50000) {
-    effectiveRate = 0.83
-  } else if (annualGross <= 80000) {
-    effectiveRate = 0.79
-  } else if (annualGross <= 120000) {
-    effectiveRate = 0.75
-  } else if (annualGross <= 200000) {
-    effectiveRate = 0.71
-  } else {
-    effectiveRate = 0.68
-  }
-
-  const netAnnual = annualGross * effectiveRate
-  const totalTaxes = annualGross - netAnnual
-
-  return {
-    effectiveRate,
-    federal: totalTaxes * 0.55,
-    fica: totalTaxes * 0.35,
-    state: totalTaxes * 0.10,
-    total: totalTaxes,
-    netAnnual,
-    netMonthly: netAnnual / 12,
-  }
-}
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
       <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
