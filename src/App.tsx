@@ -131,9 +131,9 @@ function parsePdfText(raw: string): { rows: PdfImportRow[]; warning: string } {
   while ((m = patB.exec(text)) !== null) addRow(m[3], m[2], m[1])
 
   const warning = rows.length === 0
-    ? 'No transactions detected. This PDF may be image-based or use an unsupported format. Try a CSV export or an "accessible" PDF export from your bank.'
+    ? 'PDF statement parsing is still experimental. This file could not be parsed automatically yet. Try a CSV export or an "accessible" PDF export from your bank.'
     : rows.length < 3
-    ? `Only ${rows.length} transaction${rows.length > 1 ? 's' : ''} detected — this PDF may be partially readable. Review carefully.`
+    ? `PDF statement parsing is still experimental. Only ${rows.length} transaction${rows.length > 1 ? 's' : ''} detected — review carefully before importing.`
     : ''
 
   return { rows, warning }
@@ -746,10 +746,15 @@ export default function App() {
   const [forecastPeriod, setForecastPeriod]             = useState<7 | 14 | 30 | 60>(30)
   // V9.9 — Monthly Review
   const [reviewMonth, setReviewMonth]     = useState(() => {
+    try { const s = localStorage.getItem('flow_review_month'); if (s) return s } catch { /* ignore */ }
     const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
   })
-  const [monthlyNotes, setMonthlyNotes]   = useState<Record<string, string>>({})
-  const [reviewedMonths, setReviewedMonths] = useState<Record<string, string>>({})
+  const [monthlyNotes, setMonthlyNotes]   = useState<Record<string, string>>(() => {
+    try { const s = localStorage.getItem('flow_monthly_notes'); return s ? JSON.parse(s) : {} } catch { return {} }
+  })
+  const [reviewedMonths, setReviewedMonths] = useState<Record<string, string>>(() => {
+    try { const s = localStorage.getItem('flow_reviewed_months'); return s ? JSON.parse(s) : {} } catch { return {} }
+  })
   // V9.7 — Rule suggestion after category assign from Review Center
   const [ruleSuggestion, setRuleSuggestion]       = useState<{
     merchants: string[]; categoryId: string; txIds: string[]
@@ -882,6 +887,10 @@ export default function App() {
   useEffect(() => saveAccounts(accounts), [accounts])
   useEffect(() => saveTransactions(transactions), [transactions])
  useEffect(() => saveTransactionRules(rules), [rules])
+  // V9.9.1 — Monthly Review persistence
+  useEffect(() => { try { localStorage.setItem('flow_review_month', reviewMonth) } catch { /* ignore */ } }, [reviewMonth])
+  useEffect(() => { try { localStorage.setItem('flow_monthly_notes', JSON.stringify(monthlyNotes)) } catch { /* ignore */ } }, [monthlyNotes])
+  useEffect(() => { try { localStorage.setItem('flow_reviewed_months', JSON.stringify(reviewedMonths)) } catch { /* ignore */ } }, [reviewedMonths])
 
   // V9.0.1 — Back-to-top: show button once user scrolls down 400px
   useEffect(() => {
@@ -1209,10 +1218,9 @@ export default function App() {
 
   // needsReviewCount: accounts whose balance isn't explained by tracked transactions
   const needsReviewCount = accounts.filter(a => {
+    if (a.type !== 'credit card') return false  // non-CC never shows unexplained without baseline
     const bc = balanceCheckData[a.id]
-    if (!bc || bc.isMatched) return false
-    if (a.type === 'credit card') return true  // CC always shows unexplained
-    return transactions.some(t => t.accountId === a.id && t.batchId)  // non-CC only if imported
+    return bc ? !bc.isMatched : false
   }).length
 
   // ── V8.6.3 Uncategorized expense count ──────────────────────────────────────
@@ -4198,7 +4206,7 @@ txnMerchantRef.current?.focus()
                               {(() => {
                                 const bc = balanceCheckData[a.id]
                                 if (!bc) return null
-                                // CC: unexplained = debt owed minus tracked charges — meaningful without a baseline
+                                // CC: comparing |balance| vs tracked charges is meaningful without a baseline
                                 if (a.type === 'credit card') {
                                   if (bc.isMatched) return <span className="text-green-400 font-medium">Looks matched.</span>
                                   const amt = Math.abs(bc.unexplained)
@@ -4207,19 +4215,9 @@ txnMerchantRef.current?.focus()
                                     ? <span className={cls}>{currency(amt)} of card debt is not explained yet.</span>
                                     : <span className={cls}>Tracked activity is {currency(amt)} higher than current card balance.</span>
                                 }
-                                // Non-CC: without a known starting balance, the "unexplained" comparison
-                                // between current balance and tracked delta is misleading.
-                                // Only show if account has been imported (has a batchId on a transaction).
-                                const hasImportedTxns = transactions.some(t => t.accountId === a.id && t.batchId)
-                                if (!hasImportedTxns) {
-                                  return <span className="text-slate-600 text-[10px]">Baseline not set yet</span>
-                                }
-                                if (bc.isMatched) return <span className="text-green-400 font-medium">Looks matched.</span>
-                                const amt = Math.abs(bc.unexplained)
-                                const cls = `font-medium ${amt > 100 ? 'text-red-400' : 'text-amber-300'}`
-                                return bc.unexplained > 0
-                                  ? <span className={cls}>{currency(amt)} not explained by tracked transactions.</span>
-                                  : <span className={cls}>Tracked transactions are {currency(amt)} higher than current balance.</span>
+                                // Non-CC: unexplained requires a known starting balance — we don't have one yet.
+                                // Showing current balance minus tracked delta produces misleading numbers.
+                                return <span className="text-slate-600 text-[10px]">Baseline not set yet</span>
                               })()}
                             </td>
                             {/* Institution */}
@@ -6492,8 +6490,8 @@ function CsvImportModal({
           {/* PDF parse failure */}
           {isPdf && !loading && pdfRows.length === 0 && !error && (
             <div className="rounded-lg border border-amber-700/40 bg-amber-900/15 px-4 py-4 text-sm text-amber-300 text-center space-y-2">
-              <p className="font-medium">This PDF could not be parsed automatically.</p>
-              <p className="text-xs text-amber-400/80">{pdfWarning || 'The PDF may be image-based or use an unsupported format.'}</p>
+              <p className="font-medium">PDF statement parsing is still experimental.</p>
+              <p className="text-xs text-amber-400/80">{pdfWarning || 'This file could not be parsed automatically yet.'}</p>
               <p className="text-xs text-slate-400 mt-1">Try a CSV export or an "Accessible PDF" export from your bank. Chase: Accounts → Statements → Accessible PDF.</p>
               <button onClick={onResetPreview} className="text-xs text-blue-400 hover:text-blue-300 underline mt-1">Try a different file</button>
             </div>
