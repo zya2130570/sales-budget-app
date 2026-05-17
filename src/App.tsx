@@ -125,9 +125,11 @@ function normalizeMerchant(raw: string): string {
 }
 
 // ── V9.5 Review classification ────────────────────────────────────────────────
-function txNeedsReview(tx: Transaction, allTxns: Transaction[]): boolean {
+function txNeedsReview(tx: Transaction, allTxns: Transaction[], dismissedDupIds?: Set<string>): boolean {
   // Uncategorized expense
   if (tx.type === 'expense' && !tx.categoryId) return true
+  // Skip dup check if user explicitly resolved this transaction's duplicate flag
+  if (dismissedDupIds?.has(tx.id)) return false
   // Possible duplicate: identical merchant + amount + date signature elsewhere
   if (allTxns.some(o =>
     o.id !== tx.id &&
@@ -574,6 +576,8 @@ export default function App() {
   const [txnSearch, setTxnSearch]               = useState('')
   const [txnAccountFilter, setTxnAccountFilter] = useState('')
   const [txnCategoryFilter, setTxnCategoryFilter] = useState('')
+  // V9.6.1 — Duplicate resolution: IDs the user has explicitly dismissed from dup review
+  const [dismissedDupIds, setDismissedDupIds]   = useState<Set<string>>(new Set())
 
   // V9.0.1 — Back to top
   const [showScrollTop, setShowScrollTop] = useState(false)
@@ -1036,9 +1040,9 @@ export default function App() {
   // V9.5 — Review Center data
   const reviewableTxns = useMemo(() =>
     [...transactions]
-      .filter(tx => txNeedsReview(tx, transactions))
+      .filter(tx => txNeedsReview(tx, transactions, dismissedDupIds))
       .sort((a, b) => b.date.localeCompare(a.date)),
-    [transactions]
+    [transactions, dismissedDupIds]
   )
   const needsReviewTxnCount = reviewableTxns.length
 
@@ -3803,13 +3807,29 @@ txnMerchantRef.current?.focus()
                             <span className={`text-sm font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-200'}`}>
                               {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : ''}{currency(tx.amount)}
                             </span>
+                            {/* Duplicate resolution actions (shown when dup is the primary or only review reason) */}
+                            {isDup && (
+                              <div className="flex flex-col gap-1 min-w-0">
+                                <button
+                                  className="text-[10px] text-slate-300 hover:text-white bg-slate-700 hover:bg-slate-600 px-2 py-0.5 rounded transition-colors whitespace-nowrap"
+                                  title="Mark as intentional — keeps both transactions and removes from Needs Review"
+                                  onClick={() => setDismissedDupIds(prev => new Set([...prev, tx.id]))}
+                                >Keep Both</button>
+                                <button
+                                  className="text-[10px] text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/40 border border-red-700/30 px-2 py-0.5 rounded transition-colors whitespace-nowrap"
+                                  title="Delete this transaction — removes the duplicate"
+                                  onClick={() => setTxnWithHistory(prev => prev.filter(x => x.id !== tx.id))}
+                                >Delete</button>
+                              </div>
+                            )}
+                            {/* Category quick-assign (always shown for expenses, alongside or without dup buttons) */}
                             {tx.type === 'expense' && (
                               <select
                                 value={cat?.id ?? ''}
                                 onChange={e => setTxnWithHistory(prev => prev.map(x =>
                                   x.id === tx.id ? { ...x, categoryId: e.target.value || undefined } : x
                                 ))}
-                                className="text-xs px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none max-w-[120px]"
+                                className="text-xs px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none max-w-[110px]"
                               >
                                 <option value="">Assign…</option>
                                 {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -4166,7 +4186,7 @@ txnMerchantRef.current?.focus()
                         .filter(tx => {
                           // type/review filter
                           if (txnFilter === 'uncategorized') { if (!(tx.type === 'expense' && !tx.categoryId)) return false }
-                          else if (txnFilter === 'needs-review') { if (!txNeedsReview(tx, transactions)) return false }
+                          else if (txnFilter === 'needs-review') { if (!txNeedsReview(tx, transactions, dismissedDupIds)) return false }
                           else if (txnFilter !== 'all') { if (tx.type !== txnFilter) return false }
                           // search
                           if (txnSearch) {
@@ -4339,7 +4359,7 @@ txnMerchantRef.current?.focus()
                         const txTypeColor = tx.type === 'income' ? 'bg-green-900/50 text-green-300' : tx.type === 'transfer' ? 'bg-blue-900/50 text-blue-300' : tx.type === 'credit card payment' ? 'bg-purple-900/50 text-purple-300' : 'bg-slate-700 text-slate-300'
                         const txIsDup    = transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)
                         const txIsImported = !!tx.batchId
-                        const txReview   = txNeedsReview(tx, transactions)
+                        const txReview   = txNeedsReview(tx, transactions, dismissedDupIds)
                         return (
                           <tr key={tx.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedTxnId === tx.id ? 'bg-blue-600/20' : txReview ? 'bg-amber-950/10' : 'hover:bg-slate-800/40'}`}>
                             <td className="py-2 pr-3 text-slate-300 text-xs whitespace-nowrap">{tx.date}</td>
