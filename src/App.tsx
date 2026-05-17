@@ -2654,6 +2654,7 @@ txnMerchantRef.current?.focus()
             >Delete</button>
           </div>
         }
+      >
         {isEditingTarget ? (
           <div
             className="space-y-3"
