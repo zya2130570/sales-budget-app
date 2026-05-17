@@ -226,22 +226,12 @@ export function NeedsReviewSection({
                       checked={isSelected}
                       onChange={e => {
                         e.stopPropagation()
-                        if (e.shiftKey && lastReviewSelectIdxRef.current >= 0) {
-                          const lo = Math.min(lastReviewSelectIdxRef.current, rowIdx)
-                          const hi = Math.max(lastReviewSelectIdxRef.current, rowIdx)
-                          setSelectedTxnIds(prev => {
-                            const next = new Set(prev)
-                            reviewableTxns.slice(lo, hi + 1).forEach(t => next.add(t.id))
-                            return next
-                          })
-                        } else {
-                          setSelectedTxnIds(prev => {
-                            const next = new Set(prev)
-                            e.target.checked ? next.add(tx.id) : next.delete(tx.id)
-                            return next
-                          })
-                          lastReviewSelectIdxRef.current = rowIdx
-                        }
+                        setSelectedTxnIds(prev => {
+                          const next = new Set(prev)
+                          e.target.checked ? next.add(tx.id) : next.delete(tx.id)
+                          return next
+                        })
+                        lastReviewSelectIdxRef.current = rowIdx
                       }}
                       className="accent-blue-500 shrink-0"
                     />
