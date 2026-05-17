@@ -29,6 +29,8 @@ export type Transaction = {
 }
 
 // V9.6 — Import batch record (tracks each CSV import session)
+// V9.10 — extended with importSource and preset
+export type ImportPreset = 'auto' | 'apple-card' | 'generic-csv' | 'chase-pdf-experimental'
 export type ImportBatch = {
   id: string
   accountId: string
@@ -37,6 +39,8 @@ export type ImportBatch = {
   importedCount: number
   skippedCount: number
   createdAt: string
+  importSource: string      // V9.10 — 'csv' | 'pdf' | etc.
+  preset: ImportPreset      // V9.10 — which preset was used
 }
 export type TransactionRule = { id: string; name: string; matchText: string; matchField: 'merchant' | 'notes'; categoryId: string; type?: TransactionType; createdAt: string }
 export type TakeHomeMode = 'simple' | 'manual'
