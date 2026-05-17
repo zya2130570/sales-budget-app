@@ -2148,7 +2148,7 @@ txnMerchantRef.current?.focus()
       const text = ev.target?.result
       if (typeof text !== 'string') { setCsvImportError('Could not read PDF.'); setCsvImportLoading(false); return }
       const { rows, warning } = parsePdfText(text)
-      const effectiveAccountId = csvImportAccountId || accounts[0]?.id ?? ''
+      const effectiveAccountId = csvImportAccountId || (accounts[0]?.id ?? '')
       const existingForAccount = transactions.filter(tx => tx.accountId === effectiveAccountId)
       // Mark duplicate rows
       const marked = rows.map(r => ({
@@ -2169,7 +2169,7 @@ txnMerchantRef.current?.focus()
   const commitPdfImport = () => {
     const readyRows = pdfPreviewRows.filter(r => !r.isDup)
     if (readyRows.length === 0) { closeCsvImport(); return }
-    const effectiveAccountId = csvImportAccountId || accounts[0]?.id ?? ''
+    const effectiveAccountId = csvImportAccountId || (accounts[0]?.id ?? '')
     const batchId = crypto.randomUUID().slice(0, 8)
     const newTxns: Transaction[] = readyRows.map(r => ({
       id: crypto.randomUUID(),
