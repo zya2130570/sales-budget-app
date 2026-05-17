@@ -835,8 +835,6 @@ export default function App() {
     return result
   }, [accounts, computedAccountBalances])
 
-  const reconciledCount    = accounts.filter(a => reconciliationData[a.id]?.isReconciled).length
-
   // V9.4 — Direct balance check per account.
   // Computes tracked activity purely from transactions (no startingBalance dependency).
   // CC:    trackedActivity = expenses charged to card − payments received  (positive = net debt)
@@ -3327,7 +3325,6 @@ txnMerchantRef.current?.focus()
                     </thead>
                     <tbody>
                       {accounts.map(a => {
-                        const recon  = reconciliationData[a.id]
                         const isEdit = inlineAccountEditId === a.id
                         return (
                           <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${
