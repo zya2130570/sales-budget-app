@@ -1,7 +1,7 @@
 import React from 'react'
 import type { Transaction, Account, Category, TransactionRule, TransactionType, Period } from '../types'
 import type { RecurringCandidate } from '../utils/recurring'
-import type { ManualRecurringItem, RecurringCadence, ForecastLineItem as _FI } from '../utils/forecastMath'
+import type { ForecastLineItem as _FI } from '../utils/forecastMath'
 import { currency } from '../utils/formatting'
 import { normalizeMerchant } from '../utils/merchantNormalization'
 import { txNeedsReview } from '../utils/transactionHelpers'
@@ -17,7 +17,7 @@ import type { ImportHistorySectionProps } from './ImportHistorySection'
 // ── Inline edit form shape ────────────────────────────────────────────────────
 export type InlineTxnEditForm = {
   date: string; accountId: string; merchant: string; amount: string
-  type: string; categoryId: string; notes: string; toAccountId: string
+  type: TransactionType; categoryId: string; notes: string; toAccountId: string
 }
 
 export interface TransactionsTabProps {
@@ -39,7 +39,7 @@ export interface TransactionsTabProps {
   highlightedTxnId: string | null
   // Filter state
   txnFilter: string
-  setTxnFilter: React.Dispatch<React.SetStateAction<string>>
+  setTxnFilter: (value: string) => void
   txnSearch: string
   setTxnSearch: React.Dispatch<React.SetStateAction<string>>
   txnAccountFilter: string
