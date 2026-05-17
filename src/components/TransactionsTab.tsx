@@ -1,7 +1,7 @@
 import React from 'react'
-import type { Transaction, Account, Category, TransactionRule, Period } from '../types'
+import type { Transaction, Account, Category, TransactionRule, TransactionType, Period } from '../types'
 import type { RecurringCandidate } from '../utils/recurring'
-import type {ForecastLineItem as _FI } from '../utils/forecastMath'
+import type { ManualRecurringItem, RecurringCadence, ForecastLineItem as _FI } from '../utils/forecastMath'
 import { currency } from '../utils/formatting'
 import { normalizeMerchant } from '../utils/merchantNormalization'
 import { txNeedsReview } from '../utils/transactionHelpers'
@@ -15,12 +15,11 @@ import { ImportHistorySection } from './ImportHistorySection'
 import type { ImportHistorySectionProps } from './ImportHistorySection'
 
 // ── Inline edit form shape ────────────────────────────────────────────────────
-import type { TransactionType } from '../types'
-// ...and:
 export type InlineTxnEditForm = {
   date: string; accountId: string; merchant: string; amount: string
-  type: TransactionType; categoryId: string; notes: string; toAccountId: string
+  type: string; categoryId: string; notes: string; toAccountId: string
 }
+
 export interface TransactionsTabProps {
   // Core data
   transactions: Transaction[]
@@ -32,7 +31,7 @@ export interface TransactionsTabProps {
   filteredTxns: Transaction[]
   hasActiveFilters: boolean
   needsReviewTxnCount: number
-  needsreviewTxncount: Transaction[]
+  reviewableTxns: Transaction[]
   uncategorizedExpenseCount: number
   recurringCandidates: RecurringCandidate[]
   dismissedDupIds: Set<string>
@@ -40,7 +39,7 @@ export interface TransactionsTabProps {
   highlightedTxnId: string | null
   // Filter state
   txnFilter: string
-  setTxnFilter: (value: string) => void 
+  setTxnFilter: React.Dispatch<React.SetStateAction<string>>
   txnSearch: string
   setTxnSearch: React.Dispatch<React.SetStateAction<string>>
   txnAccountFilter: string
@@ -91,7 +90,7 @@ const TXN_TYPES: TransactionType[] = ['expense', 'income', 'transfer', 'credit c
 export function TransactionsTab({
   transactions, accounts, categories,
   period,
-  filteredTxns, hasActiveFilters, needsReviewTxnCount, reviewableTxns,
+  filteredTxns, hasActiveFilters, needsReviewTxnCount,
   uncategorizedExpenseCount, recurringCandidates,
   dismissedDupIds, confirmedDupIds, highlightedTxnId,
   txnFilter, setTxnFilter, txnSearch, setTxnSearch,
