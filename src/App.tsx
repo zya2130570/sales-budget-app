@@ -3700,7 +3700,7 @@ txnMerchantRef.current?.focus()
                           />
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-medium text-sm truncate">{tx.merchant}</span>
+                              <span className="font-medium text-sm truncate">{normalizeMerchant(tx.merchant)}</span>
                               {isDup && (
                                 <span className="text-[10px] bg-amber-900/50 text-amber-300 border border-amber-700/40 px-1.5 py-0.5 rounded shrink-0">Duplicate?</span>
                               )}
@@ -4259,7 +4259,7 @@ txnMerchantRef.current?.focus()
                             <td className="py-2 pr-3 text-slate-300 text-xs whitespace-nowrap">{tx.date}</td>
                             <td className="py-2 pr-3 text-slate-400 text-xs">{acct?.name ?? '—'}</td>
                             <td className="py-2 pr-3 font-medium">
-                              {tx.merchant}
+                              {normalizeMerchant(tx.merchant)}
                               {txIsImported && (
                                 <span className="ml-1.5 text-[9px] text-blue-400 bg-blue-900/30 border border-blue-700/30 px-1 py-0.5 rounded">Imported</span>
                               )}
@@ -4338,7 +4338,7 @@ txnMerchantRef.current?.focus()
                             <tr key={tx.id} className="border-b border-slate-800 hover:bg-amber-900/10 transition-colors">
                               <td className="py-2 pr-3 text-slate-300 text-xs whitespace-nowrap">{tx.date}</td>
                               <td className="py-2 pr-3 text-slate-400 text-xs">{acct?.name ?? '—'}</td>
-                              <td className="py-2 pr-3 font-medium">{tx.merchant}</td>
+                              <td className="py-2 pr-3 font-medium">{normalizeMerchant(tx.merchant)}</td>
                               <td className="py-2 pr-3">
                                 <span className={`text-xs px-1.5 py-0.5 rounded ${txTypeColor}`}>{TXN_TYPE_LABELS[tx.type]}</span>
                               </td>
