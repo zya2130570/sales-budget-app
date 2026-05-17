@@ -2654,7 +2654,6 @@ txnMerchantRef.current?.focus()
             >Delete</button>
           </div>
         }
-      >
         {isEditingTarget ? (
           <div
             className="space-y-3"
@@ -6534,7 +6533,7 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
 
 // ── Shared UI primitives ──────────────────────────────────────────────────────
 
-function Card({ title, children, className = '', style, headerAction, noHover = false }: { title: string; children: React.ReactNode; className?: string; style?: React.CSSProperties; headerAction?: React.ReactNode; noHover?: boolean }) {
+function Card({ title, children, className = '', style, headerAction, noHover = false }: { title: React.ReactNode; children: React.ReactNode; className?: string; style?: React.CSSProperties; headerAction?: React.ReactNode; noHover?: boolean }) {
   return (
     <div style={style} className={`rounded-2xl border border-slate-700 bg-slate-800/80 shadow-lg p-4 md:p-5 transition-all duration-200 ${noHover ? '' : 'hover:-translate-y-0.5'} ${className}`}>
       <div className="flex items-center justify-between mb-3">
