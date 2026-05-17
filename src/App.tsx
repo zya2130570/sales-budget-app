@@ -3257,9 +3257,9 @@ txnMerchantRef.current?.focus()
                 )}
                 {/* V9.3.2 — Reconciliation helper text */}
                 <p className="text-xs text-slate-500 mb-3">
-                  <span className="text-slate-400 font-medium">Expected Balance</span> = starting balance plus tracked transaction impact.{' '}
-                  <span className="text-slate-400 font-medium">Actual Balance</span> is the balance you entered.{' '}
-                  Reconcile accepts the current actual balance as the new baseline.
+                  <span className="text-slate-400 font-medium">Current Card Balance / Actual Balance</span> = what you manually entered.{' '}
+                  <span className="text-slate-400 font-medium">Calculated Card Balance / Expected Balance</span> = starting balance adjusted for tracked transactions.{' '}
+                  Reconcile accepts the current balance as the new baseline.
                 </p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -3267,8 +3267,8 @@ txnMerchantRef.current?.focus()
                       <tr className="text-left text-slate-400 border-b border-slate-700">
                         <th className="pb-1.5 pr-4 font-medium">Name</th>
                         <th className="pb-1.5 pr-4 font-medium">Type</th>
-                        <th className="pb-1.5 pr-4 font-medium text-right">Actual Balance</th>
-                        <th className="pb-1.5 pr-4 font-medium text-right">Expected Balance</th>
+                        <th className="pb-1.5 pr-4 font-medium text-right">Current Balance</th>
+                        <th className="pb-1.5 pr-4 font-medium text-right">Calculated Balance</th>
                         <th className="pb-1.5 pr-4 font-medium">Status</th>
                         <th className="pb-1.5 pr-4 font-medium">Institution</th>
                         <th className="pb-1.5" />
@@ -3316,8 +3316,8 @@ txnMerchantRef.current?.focus()
                                 </select>
                               ) : ACCOUNT_TYPE_LABELS[a.type]}
                             </td>
-                            {/* Actual Balance */}
-                            <td className={`py-2 pr-4 text-right font-semibold ${isEdit ? '' : a.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                            {/* Current Balance — credit cards show debt owed, others show signed balance */}
+                            <td className={`py-2 pr-4 text-right font-semibold ${isEdit ? '' : a.type === 'credit card' ? (a.balance === 0 ? 'text-green-400' : 'text-red-400') : a.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                               {isEdit ? (
                                 <input
                                   ref={inlineAccountBalanceRef}
@@ -3333,16 +3333,25 @@ txnMerchantRef.current?.focus()
                                     if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineAccountNameRef.current?.focus() }
                                   }}
                                 />
-                              ) : a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)}
+                              ) : a.type === 'credit card'
+                                  ? (a.balance === 0 ? 'Paid Off' : `${currency(Math.abs(a.balance))} owed`)
+                                  : a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)
+                              }
                             </td>
-                            {/* Expected Balance (transaction-adjusted) */}
+                            {/* Calculated Balance (transaction-adjusted) */}
                             <td className="py-2 pr-4 text-right text-slate-400 text-xs">
                               {recon ? (
                                 <>
-                                  {recon.expectedBalance < 0 ? `−${currency(Math.abs(recon.expectedBalance))}` : currency(recon.expectedBalance)}
+                                  {a.type === 'credit card'
+                                    ? (recon.expectedBalance === 0 ? 'Paid Off' : `${currency(Math.abs(recon.expectedBalance))} owed`)
+                                    : recon.expectedBalance < 0 ? `−${currency(Math.abs(recon.expectedBalance))}` : currency(recon.expectedBalance)
+                                  }
                                   {Math.abs(recon.txnImpact) > 0.005 && (
                                     <div className="text-[10px] text-slate-500">
-                                      {recon.txnImpact > 0 ? '+' : '−'}{currency(Math.abs(recon.txnImpact))} transaction impact
+                                      {a.type === 'credit card'
+                                        ? `Tracked card activity: ${currency(Math.abs(recon.txnImpact))}`
+                                        : `${recon.txnImpact > 0 ? '+' : '−'}${currency(Math.abs(recon.txnImpact))} transaction impact`
+                                      }
                                     </div>
                                   )}
                                 </>
@@ -3355,9 +3364,14 @@ txnMerchantRef.current?.focus()
                                   <span className="text-green-400 font-medium">Reconciled</span>
                                 ) : (
                                   <span className={`font-medium ${Math.abs(recon.difference) > 100 ? 'text-red-400' : 'text-amber-300'}`}>
-                                    {recon.difference > 0
-                                      ? `Actual is ${currency(recon.difference)} higher than expected`
-                                      : `Actual is ${currency(Math.abs(recon.difference))} lower than expected`}
+                                    {a.type === 'credit card'
+                                      ? recon.difference > 0
+                                        ? `Tracked activity suggests you owe ${currency(recon.difference)} more.`
+                                        : `Tracked activity suggests you owe ${currency(Math.abs(recon.difference))} less.`
+                                      : recon.difference > 0
+                                        ? `Actual is ${currency(recon.difference)} higher than expected`
+                                        : `Actual is ${currency(Math.abs(recon.difference))} lower than expected`
+                                    }
                                   </span>
                                 )
                               ) : null}
