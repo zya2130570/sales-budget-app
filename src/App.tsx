@@ -2285,6 +2285,7 @@ txnMerchantRef.current?.focus()
       importSource: 'csv',
       preset: csvIsAppleCard ? 'apple-card' : csvImportPreset,
     }
+    setImportBatches(prev => [batch, ...prev.slice(0, 49)])
     closeCsvImport()
     if (newTxns[0]) flashHighlight(newTxns[0].id, setHighlightedTxnId, highlightTxnTimerRef)
     const skipped = csvImportPreview.duplicateCount ?? 0
