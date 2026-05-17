@@ -75,34 +75,49 @@ export function commission(gp: number): number {
 // --- Income breakdown ---------------------------------------------------------
 
 export function estimateTaxBreakdown(annualGross: number) {
-  // Rough effective-rate model
-  // Includes federal + FICA + light state estimate
-
-  let effectiveRate = 0.82
+  let takeHomeRate = 0.82
 
   if (annualGross <= 50000) {
-    effectiveRate = 0.83
+    takeHomeRate = 0.83
   } else if (annualGross <= 80000) {
-    effectiveRate = 0.79
+    takeHomeRate = 0.79
   } else if (annualGross <= 120000) {
-    effectiveRate = 0.75
+    takeHomeRate = 0.75
   } else if (annualGross <= 200000) {
-    effectiveRate = 0.71
+    takeHomeRate = 0.71
   } else {
-    effectiveRate = 0.68
+    takeHomeRate = 0.68
   }
 
-  const netAnnual = annualGross * effectiveRate
-  const totalTaxes = annualGross - netAnnual
+  const grossAnnual = annualGross
+  const takeHomeAnnual = annualGross * takeHomeRate
+
+  const totalTax = grossAnnual - takeHomeAnnual
+
+  const fedTax = totalTax * 0.55
+  const ssTax = totalTax * 0.25
+  const medicareTax = totalTax * 0.10
+  const azTax = totalTax * 0.10
 
   return {
-    effectiveRate,
-    federal: totalTaxes * 0.55,
-    fica: totalTaxes * 0.35,
-    state: totalTaxes * 0.10,
-    total: totalTaxes,
-    netAnnual,
-    netMonthly: netAnnual / 12,
+    grossAnnual,
+    takeHomeRate,
+    takeHomeAnnual,
+
+    fedTax,
+    azTax,
+    ssTax,
+    medicareTax,
+    totalTax,
+
+    // compatibility aliases
+    effectiveRate: takeHomeRate,
+    federal: fedTax,
+    fica: ssTax + medicareTax,
+    state: azTax,
+    total: totalTax,
+    netAnnual: takeHomeAnnual,
+    netMonthly: takeHomeAnnual / 12,
   }
 }
 export function income(gp: number, adjustedSalary: number, takeHomeRate: number = TAKE_HOME_RATE) {
