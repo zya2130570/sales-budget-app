@@ -748,6 +748,8 @@ export default function App() {
   // V9.14 — Soft-delete: recently deleted transactions (recoverable within session)
   const [deletedTxns, setDeletedTxns]               = useState<Transaction[]>([])
   const [showRecentlyDeleted, setShowRecentlyDeleted] = useState(false)
+  // V9.5 — Review Center open/collapsed
+  const [reviewOpen, setReviewOpen]                 = useState(true)
 
   // Soft-delete helper: moves transaction to deletedTxns instead of permanent removal
   const softDeleteTxn = (txId: string) => {
@@ -5705,19 +5707,19 @@ txnMerchantRef.current?.focus()
               <Card title="Data Integrity" noHover>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {(() => {
-                    const importedCount = transactions.filter(t => t.batchId || t.importSource).length
-                    const manualCount   = transactions.filter(t => !t.batchId && !t.importSource).length
+                    const importedCount = transactions.filter(t => t.batchId || t.importBatchId).length
+                    const manualCount   = transactions.filter(t => !t.batchId && !t.importBatchId).length
                     const dupCandidates = transactions.filter(tx =>
                       transactions.some(o => o.id !== tx.id &&
                         o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
                         o.amount === tx.amount && o.date === tx.date)
                     ).length
                     const lastBatch = importBatches.length > 0
-                      ? importBatches.reduce((a, b) => a.importedAt > b.importedAt ? a : b)
+                      ? importBatches.reduce((a, b) => a.createdAt > b.createdAt ? a : b)
                       : null
                     return [
                       { label: 'Total Transactions', val: transactions.length, sub: null, color: 'text-slate-200' },
-                      { label: 'Imported', val: importedCount, sub: lastBatch ? `Last: ${lastBatch.importedAt.slice(0, 10)}` : null, color: 'text-blue-300' },
+                      { label: 'Imported', val: importedCount, sub: lastBatch ? `Last: ${lastBatch.createdAt.slice(0, 10)}` : null, color: 'text-blue-300' },
                       { label: 'Manual', val: manualCount, sub: null, color: 'text-slate-300' },
                       { label: 'Needs Review', val: reviewableTxns.length, sub: null, color: reviewableTxns.length > 0 ? 'text-amber-300' : 'text-green-400' },
                       { label: 'Dup. Candidates', val: dupCandidates, sub: null, color: dupCandidates > 0 ? 'text-amber-400' : 'text-slate-400' },
