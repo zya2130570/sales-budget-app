@@ -355,6 +355,18 @@ const SAMPLE_BUDGET_CATS: Array<{ name: string; type: CategoryType; monthly: num
   { name: 'Travel',         type: 'savings',           monthly: 150  },
 ]
 
+// ── V9.8 Manual recurring item type ─────────────────────────────────────────
+type ManualRecurringItem = {
+  id: string
+  name: string
+  amount: number
+  cadence: 'weekly' | 'bi-weekly' | 'monthly' | 'yearly'
+  nextDue: string
+  type: 'expense' | 'income' | 'transfer'
+  categoryId?: string
+  accountId?: string
+}
+
 const TXN_FILTER_OPTIONS = [
   { value: 'all'                 as const, label: 'All'                  },
   { value: 'needs-review'        as const, label: 'Needs Review'         },
@@ -666,6 +678,16 @@ export default function App() {
   const [recurringOpen, setRecurringOpen]         = useState(true)
   const [confirmedRecurring, setConfirmedRecurring] = useState<Set<string>>(new Set()) // merchantKeys
   const [dismissedRecurring, setDismissedRecurring] = useState<Set<string>>(new Set()) // merchantKeys
+  // V9.8 — Manual recurring items (user-added; supplement detected items)
+  const [manualRecurring, setManualRecurring]       = useState<ManualRecurringItem[]>([])
+  const [manualRecurringFormOpen, setManualRecurringFormOpen] = useState(false)
+  const [manualRecurringForm, setManualRecurringForm] = useState<{
+    name: string; amount: string; cadence: 'weekly' | 'bi-weekly' | 'monthly' | 'yearly'
+    nextDue: string; type: 'expense' | 'income' | 'transfer'; categoryId: string; accountId: string
+  }>({ name: '', amount: '', cadence: 'monthly', nextDue: new Date().toISOString().slice(0, 10), type: 'expense', categoryId: '', accountId: '' })
+  const [editManualRecurringId, setEditManualRecurringId] = useState<string | null>(null)
+  // V9.8 — Cash Flow Forecast period
+  const [forecastPeriod, setForecastPeriod] = useState<7 | 14 | 30 | 60>(30)
   // V9.7 — Rule suggestion after category assign from Review Center
   const [ruleSuggestion, setRuleSuggestion]       = useState<{
     merchants: string[]; categoryId: string; txIds: string[]
@@ -1025,6 +1047,66 @@ export default function App() {
     return { totalCash, totalDebt, totalInvestments, netWorth }
   }, [accounts, computedAccountBalances])
 
+  // ── V9.8 Cash Flow Forecast ───────────────────────────────────────────────
+  const cashFlowForecast = useMemo(() => {
+    const BUFFER = 250
+    const today  = new Date(); today.setHours(0, 0, 0, 0)
+    const endDay = new Date(today); endDay.setDate(today.getDate() + forecastPeriod)
+
+    // Starting cash = sum of checking + savings + cash accounts (computed balance)
+    const startingCash = accounts
+      .filter(a => a.type === 'checking' || a.type === 'savings' || a.type === 'cash')
+      .reduce((s, a) => s + (computedAccountBalances[a.id] ?? a.balance), 0)
+
+    // Pro-rate monthly income and expenses over the forecast window
+    const dailyRate = forecastPeriod / 30.4375
+
+    // Expected income: net monthly income scaled to period
+    const expectedIncome = inc.totalMonthly * dailyRate
+
+    // Expected expenses: recurring items (detected + manual) scaled to period
+    const detectedExpenses = recurringCandidates
+      .filter(c => c.confidence === 'high' || confirmedRecurring.has(c.merchantKey))
+      .reduce((s, c) => s + c.estimatedMonthlyAmount * dailyRate, 0)
+
+    const manualExpenses = manualRecurring
+      .filter(r => r.type === 'expense')
+      .reduce((s, r) => s + manualRecurringMonthly(r) * dailyRate, 0)
+
+    const manualIncome = manualRecurring
+      .filter(r => r.type === 'income')
+      .reduce((s, r) => s + manualRecurringMonthly(r) * dailyRate, 0)
+
+    const expectedExpenses = detectedExpenses + manualExpenses
+
+    const projectedCash = startingCash + expectedIncome + manualIncome - expectedExpenses
+    const safeToSpend   = Math.max(0, projectedCash - BUFFER)
+
+    const status: 'Comfortable' | 'Tight' | 'Risk' =
+      projectedCash < 0       ? 'Risk' :
+      projectedCash < BUFFER  ? 'Tight' :
+                                'Comfortable'
+
+    // Upcoming items list: manual recurring items with nextDue in forecast window
+    const upcomingItems = manualRecurring
+      .filter(r => {
+        const d = new Date(r.nextDue + 'T00:00:00')
+        return !isNaN(d.getTime()) && d >= today && d <= endDay
+      })
+      .sort((a, b) => a.nextDue.localeCompare(b.nextDue))
+
+    return {
+      startingCash,
+      expectedIncome,
+      expectedExpenses,
+      projectedCash,
+      safeToSpend,
+      status,
+      upcomingItems,
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts, computedAccountBalances, inc.totalMonthly, forecastPeriod, recurringCandidates, confirmedRecurring, manualRecurring])
+
   // V9.3 — Reconciliation engine
   // For each account:
   //   startingBalance = account.startingBalance ?? account.balance (the manual baseline)
@@ -1147,9 +1229,17 @@ export default function App() {
     () => detectRecurringPatterns(transactions).filter(c => !dismissedRecurring.has(c.merchantKey)),
     [transactions, dismissedRecurring]
   )
+  // Monthly equivalent for a manual recurring item
+  const manualRecurringMonthly = (item: ManualRecurringItem): number => {
+    if (item.cadence === 'weekly')    return item.amount * 4.33
+    if (item.cadence === 'bi-weekly') return item.amount * 2.17
+    if (item.cadence === 'yearly')    return item.amount / 12
+    return item.amount
+  }
   const estimatedMonthlyRecurring = recurringCandidates
     .filter(c => c.confidence === 'high' || confirmedRecurring.has(c.merchantKey))
     .reduce((s, c) => s + c.estimatedMonthlyAmount, 0)
+    + manualRecurring.filter(r => r.type === 'expense').reduce((s, r) => s + manualRecurringMonthly(r), 0)
 
   const bulkAssign = () => {
     if (!bulkCategoryId || selectedTxnIds.size === 0) return
@@ -2796,6 +2886,99 @@ txnMerchantRef.current?.focus()
                 <Info title="Budget Status / Health Tier" value={statusLabel} tone={statusTone} glow={selectedPeriodRemaining < 0} />
               </div>
             </Card>
+
+            {/* ── V9.8 Cash Flow Forecast ── */}
+            {(() => {
+              const cf = cashFlowForecast
+              const statusColor =
+                cf.status === 'Comfortable' ? 'text-green-400' :
+                cf.status === 'Tight'       ? 'text-amber-300' :
+                                              'text-red-400'
+              const statusBorder =
+                cf.status === 'Comfortable' ? 'border-green-500/30' :
+                cf.status === 'Tight'       ? 'border-amber-500/30' :
+                                              'border-red-500/40'
+              const statusBg =
+                cf.status === 'Comfortable' ? 'from-green-900/10 to-slate-800/80' :
+                cf.status === 'Tight'       ? 'from-amber-900/15 to-slate-800/80' :
+                                              'from-red-900/20 to-slate-800/80'
+              const statusNote =
+                cf.status === 'Comfortable' ? 'Projected cash stays positive.' :
+                cf.status === 'Tight'       ? 'Projected cash is getting low.' :
+                                              'Projected cash may go negative.'
+              return (
+                <div className={`rounded-2xl border ${statusBorder} bg-gradient-to-br ${statusBg} shadow-sm p-4 md:p-5`}>
+                  <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-lg font-semibold text-slate-100">Cash Flow Forecast</h2>
+                      <span className={`text-sm font-semibold ${statusColor}`}>{cf.status}: {statusNote}</span>
+                    </div>
+                    <div className="flex gap-1.5">
+                      {([7, 14, 30, 60] as const).map(d => (
+                        <button
+                          key={d}
+                          onClick={() => setForecastPeriod(d)}
+                          className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${forecastPeriod === d ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+                        >{d}d</button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                    <div className="rounded-lg bg-slate-800/60 border border-slate-700/50 px-3 py-2.5">
+                      <div className="text-xs text-slate-400 mb-1">Starting Cash</div>
+                      <div className={`text-base font-bold ${cf.startingCash >= 0 ? 'text-slate-200' : 'text-red-400'}`}>{currency(cf.startingCash)}</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">checking + savings + cash</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-800/60 border border-slate-700/50 px-3 py-2.5">
+                      <div className="text-xs text-slate-400 mb-1">Expected Income</div>
+                      <div className="text-base font-bold text-green-400">+{currency(cf.expectedIncome)}</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">salary + commission ({forecastPeriod}d)</div>
+                    </div>
+                    <div className="rounded-lg bg-slate-800/60 border border-slate-700/50 px-3 py-2.5">
+                      <div className="text-xs text-slate-400 mb-1">Expected Expenses</div>
+                      <div className="text-base font-bold text-red-300">−{currency(cf.expectedExpenses)}</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">recurring ({forecastPeriod}d estimate)</div>
+                    </div>
+                    <div className={`rounded-lg border px-3 py-2.5 ${cf.projectedCash < 0 ? 'border-red-500/40 bg-red-900/15' : 'bg-slate-800/60 border-slate-700/50'}`}>
+                      <div className="text-xs text-slate-400 mb-1">Projected Cash</div>
+                      <div className={`text-base font-bold ${cf.projectedCash >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{currency(cf.projectedCash)}</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">after {forecastPeriod} days</div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between gap-3 rounded-lg bg-slate-800/50 border border-slate-700/40 px-3 py-2 mb-3">
+                    <div>
+                      <span className="text-xs text-slate-400">Safe to spend over {forecastPeriod} days</span>
+                      <div className="text-lg font-bold text-sky-300">{currency(cf.safeToSpend)}</div>
+                    </div>
+                    <div className="text-[10px] text-slate-500 text-right max-w-[140px]">After projected expenses and a $250 buffer</div>
+                  </div>
+                  {cf.upcomingItems.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2">Upcoming in {forecastPeriod} days</p>
+                      <div className="space-y-1">
+                        {cf.upcomingItems.map(item => (
+                          <div key={item.id} className="flex items-center justify-between text-sm rounded px-2 py-1 bg-slate-800/40 border border-slate-700/30">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${item.type === 'income' ? 'bg-green-900/50 text-green-300' : item.type === 'transfer' ? 'bg-blue-900/50 text-blue-300' : 'bg-slate-700 text-slate-300'}`}>
+                                {item.type}
+                              </span>
+                              <span className="text-slate-200 truncate">{item.name}</span>
+                              <span className="text-slate-500 text-xs shrink-0">{item.nextDue}</span>
+                            </div>
+                            <span className={`font-semibold shrink-0 ml-2 ${item.type === 'income' ? 'text-green-400' : 'text-slate-200'}`}>
+                              {item.type === 'income' ? '+' : '−'}{currency(item.amount)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {cf.upcomingItems.length === 0 && (
+                    <p className="text-xs text-slate-500">No manual recurring items with a due date in this window. Add upcoming bills in Subscriptions &amp; Recurring.</p>
+                  )}
+                </div>
+              )
+            })()}
           </section>
         )}
 
@@ -3707,6 +3890,12 @@ txnMerchantRef.current?.focus()
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
                                     if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
                                     if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineAccountNameRef.current?.focus() }
+                                    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                      e.preventDefault()
+                                      const cur = parseFloat(inlineAccountEditForm.balance) || 0
+                                      const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
+                                      setInlineAccountEditForm(v => ({ ...v, balance: next === 0 ? '' : String(next) }))
+                                    }
                                   }}
                                 />
                               ) : a.type === 'credit card'
@@ -3957,14 +4146,24 @@ txnMerchantRef.current?.focus()
                             type="checkbox"
                             checked={isSelected}
                             onChange={e => {
-                              // Checkbox toggles independently
                               e.stopPropagation()
-                              setSelectedTxnIds(prev => {
-                                const next = new Set(prev)
-                                e.target.checked ? next.add(tx.id) : next.delete(tx.id)
-                                return next
-                              })
-                              lastReviewSelectIdxRef.current = rowIdx
+                              // Support shift-click range select on checkbox too
+                              if ((e.nativeEvent as MouseEvent).shiftKey && lastReviewSelectIdxRef.current >= 0) {
+                                const lo = Math.min(lastReviewSelectIdxRef.current, rowIdx)
+                                const hi = Math.max(lastReviewSelectIdxRef.current, rowIdx)
+                                setSelectedTxnIds(prev => {
+                                  const next = new Set(prev)
+                                  reviewableTxns.slice(lo, hi + 1).forEach(t => next.add(t.id))
+                                  return next
+                                })
+                              } else {
+                                setSelectedTxnIds(prev => {
+                                  const next = new Set(prev)
+                                  e.target.checked ? next.add(tx.id) : next.delete(tx.id)
+                                  return next
+                                })
+                                lastReviewSelectIdxRef.current = rowIdx
+                              }
                             }}
                             className="accent-blue-500 shrink-0"
                           />
@@ -3989,8 +4188,8 @@ txnMerchantRef.current?.focus()
                             <span className={`text-sm font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-200'}`}>
                               {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : ''}{currency(tx.amount)}
                             </span>
-                            {/* Duplicate resolution actions */}
-                            {isDup && (
+                            {/* Duplicate resolution actions — hidden once user has confirmed Keep Both */}
+                            {isDup && !isConfirmedDup && (
                               <div className="flex flex-col gap-1 min-w-0">
                                 <button
                                   className="text-[10px] text-slate-300 hover:text-white bg-slate-700 hover:bg-slate-600 px-2 py-0.5 rounded transition-colors whitespace-nowrap"
@@ -4069,18 +4268,163 @@ txnMerchantRef.current?.focus()
                 <span className="text-slate-500 text-xs">{recurringOpen ? '▲' : '▼'}</span>
               </button>
               {recurringOpen && (
-                <div className="border-t border-teal-700/20 px-4 pb-4 pt-3 space-y-2">
+                <div className="border-t border-teal-700/20 px-4 pb-4 pt-3 space-y-3">
                   <p className="text-xs text-slate-500">
                     Recurring suggestions appear after the same merchant appears 2+ times with similar amounts and timing.{' '}
                     {recurringCandidates.length === 0 && 'Add or import repeated merchants (Netflix, gym, rent, etc.) to see suggestions.'}
                   </p>
-                  {recurringCandidates.length === 0 ? (
+
+                  {/* ── V9.8 Manual recurring items ── */}
+                  {manualRecurring.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Manually Added</p>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs min-w-[520px]">
+                          <thead>
+                            <tr className="text-left text-slate-500 border-b border-slate-700/40">
+                              <th className="pb-1 pr-3 font-medium">Name</th>
+                              <th className="pb-1 pr-3 font-medium">Cadence</th>
+                              <th className="pb-1 pr-3 font-medium">Amount</th>
+                              <th className="pb-1 pr-3 font-medium">Est. /mo</th>
+                              <th className="pb-1 pr-3 font-medium">Next Due</th>
+                              <th className="pb-1 pr-3 font-medium">Type</th>
+                              <th className="pb-1 font-medium">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {manualRecurring.map(item => (
+                              <tr key={item.id} className="border-b border-slate-800/60 hover:bg-teal-900/5">
+                                {editManualRecurringId === item.id ? (
+                                  // Inline edit row
+                                  <>
+                                    <td className="py-1 pr-2"><input className="w-full px-1 py-0.5 rounded bg-slate-700 border border-blue-500 text-xs focus:outline-none" value={manualRecurringForm.name} onChange={e => setManualRecurringForm(v => ({ ...v, name: e.target.value }))} /></td>
+                                    <td className="py-1 pr-2">
+                                      <select className="px-1 py-0.5 rounded bg-slate-700 border border-blue-500 text-xs focus:outline-none" value={manualRecurringForm.cadence} onChange={e => setManualRecurringForm(v => ({ ...v, cadence: e.target.value as ManualRecurringItem['cadence'] }))}>
+                                        <option value="weekly">Weekly</option><option value="bi-weekly">Bi-weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option>
+                                      </select>
+                                    </td>
+                                    <td className="py-1 pr-2"><input type="number" min={0} step={1} className="w-20 px-1 py-0.5 rounded bg-slate-700 border border-blue-500 text-xs text-right focus:outline-none" value={manualRecurringForm.amount} onChange={e => setManualRecurringForm(v => ({ ...v, amount: e.target.value }))} /></td>
+                                    <td className="py-1 pr-2 text-slate-500">{currency(manualRecurringMonthly({ ...item, amount: Number(manualRecurringForm.amount) || 0, cadence: manualRecurringForm.cadence }))}</td>
+                                    <td className="py-1 pr-2"><input type="date" className="px-1 py-0.5 rounded bg-slate-700 border border-blue-500 text-xs focus:outline-none" value={manualRecurringForm.nextDue} onChange={e => setManualRecurringForm(v => ({ ...v, nextDue: e.target.value }))} /></td>
+                                    <td className="py-1 pr-2">
+                                      <select className="px-1 py-0.5 rounded bg-slate-700 border border-blue-500 text-xs focus:outline-none" value={manualRecurringForm.type} onChange={e => setManualRecurringForm(v => ({ ...v, type: e.target.value as ManualRecurringItem['type'] }))}>
+                                        <option value="expense">Expense</option><option value="income">Income</option><option value="transfer">Transfer</option>
+                                      </select>
+                                    </td>
+                                    <td className="py-1 whitespace-nowrap space-x-1.5">
+                                      <button className="text-blue-400 hover:text-blue-300" onClick={() => {
+                                        const name = manualRecurringForm.name.trim()
+                                        const amount = parseFloat(manualRecurringForm.amount) || 0
+                                        if (!name || amount <= 0) return
+                                        setManualRecurring(prev => prev.map(r => r.id === item.id
+                                          ? { ...r, name, amount, cadence: manualRecurringForm.cadence, nextDue: manualRecurringForm.nextDue, type: manualRecurringForm.type }
+                                          : r
+                                        ))
+                                        setEditManualRecurringId(null)
+                                      }}>Save</button>
+                                      <button className="text-slate-400 hover:text-slate-200" onClick={() => setEditManualRecurringId(null)}>Cancel</button>
+                                    </td>
+                                  </>
+                                ) : (
+                                  <>
+                                    <td className="py-1.5 pr-3 text-slate-200 font-medium">{item.name}</td>
+                                    <td className="py-1.5 pr-3 text-slate-400 capitalize">{item.cadence}</td>
+                                    <td className="py-1.5 pr-3 text-slate-300">{currency(item.amount)}</td>
+                                    <td className="py-1.5 pr-3 text-slate-300 font-medium">{currency(manualRecurringMonthly(item))}</td>
+                                    <td className="py-1.5 pr-3 text-slate-500">{item.nextDue}</td>
+                                    <td className="py-1.5 pr-3">
+                                      <span className={`text-[9px] px-1.5 py-0.5 rounded ${item.type === 'income' ? 'bg-green-900/50 text-green-300 border border-green-700/40' : item.type === 'transfer' ? 'bg-blue-900/50 text-blue-300 border border-blue-700/40' : 'bg-slate-700 text-slate-300 border border-slate-600/40'}`}>{item.type}</span>
+                                    </td>
+                                    <td className="py-1.5 whitespace-nowrap space-x-1.5">
+                                      <button className="text-teal-400 hover:text-teal-300" onClick={() => {
+                                        setEditManualRecurringId(item.id)
+                                        setManualRecurringForm({ name: item.name, amount: String(item.amount), cadence: item.cadence, nextDue: item.nextDue, type: item.type, categoryId: item.categoryId ?? '', accountId: item.accountId ?? '' })
+                                      }}>Edit</button>
+                                      <button className="text-red-400 hover:text-red-300" onClick={() => setManualRecurring(prev => prev.filter(r => r.id !== item.id))}>Delete</button>
+                                    </td>
+                                  </>
+                                )}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Add Recurring Item form ── */}
+                  {manualRecurringFormOpen ? (
+                    <div className="rounded-lg border border-teal-700/30 bg-teal-900/10 p-3 space-y-2">
+                      <p className="text-xs font-semibold text-teal-300">Add Recurring Item</p>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <div>
+                          <label className="block text-[10px] text-slate-400 mb-0.5">Name</label>
+                          <input className="w-full px-1.5 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-teal-500 focus:outline-none" placeholder="e.g. Netflix" value={manualRecurringForm.name} onChange={e => setManualRecurringForm(v => ({ ...v, name: e.target.value }))} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 mb-0.5">Amount</label>
+                          <input type="number" min={0} step={1} className="w-full px-1.5 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-teal-500 focus:outline-none" placeholder="0.00" value={manualRecurringForm.amount} onChange={e => setManualRecurringForm(v => ({ ...v, amount: e.target.value }))} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 mb-0.5">Cadence</label>
+                          <select className="w-full px-1.5 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-teal-500 focus:outline-none" value={manualRecurringForm.cadence} onChange={e => setManualRecurringForm(v => ({ ...v, cadence: e.target.value as ManualRecurringItem['cadence'] }))}>
+                            <option value="weekly">Weekly</option><option value="bi-weekly">Bi-weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 mb-0.5">Type</label>
+                          <select className="w-full px-1.5 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-teal-500 focus:outline-none" value={manualRecurringForm.type} onChange={e => setManualRecurringForm(v => ({ ...v, type: e.target.value as ManualRecurringItem['type'] }))}>
+                            <option value="expense">Expense</option><option value="income">Income</option><option value="transfer">Transfer</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 mb-0.5">Next Due Date</label>
+                          <input type="date" className="w-full px-1.5 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-teal-500 focus:outline-none" value={manualRecurringForm.nextDue} onChange={e => setManualRecurringForm(v => ({ ...v, nextDue: e.target.value }))} />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 mb-0.5">Category (optional)</label>
+                          <select className="w-full px-1.5 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-teal-500 focus:outline-none" value={manualRecurringForm.categoryId} onChange={e => setManualRecurringForm(v => ({ ...v, categoryId: e.target.value }))}>
+                            <option value="">— none —</option>
+                            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 pt-1">
+                        <button
+                          className="rounded px-3 py-1 text-xs bg-teal-700 hover:bg-teal-600 text-teal-100 transition-colors"
+                          onClick={() => {
+                            const name = manualRecurringForm.name.trim()
+                            const amount = parseFloat(manualRecurringForm.amount) || 0
+                            if (!name || amount <= 0) return
+                            setManualRecurring(prev => [{
+                              id: crypto.randomUUID(), name, amount,
+                              cadence: manualRecurringForm.cadence, nextDue: manualRecurringForm.nextDue,
+                              type: manualRecurringForm.type,
+                              categoryId: manualRecurringForm.categoryId || undefined,
+                              accountId: manualRecurringForm.accountId || undefined,
+                            }, ...prev])
+                            setManualRecurringForm({ name: '', amount: '', cadence: 'monthly', nextDue: new Date().toISOString().slice(0, 10), type: 'expense', categoryId: '', accountId: '' })
+                            setManualRecurringFormOpen(false)
+                          }}
+                        >Add Item</button>
+                        <button className="rounded px-3 py-1 text-xs bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors" onClick={() => setManualRecurringFormOpen(false)}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      className="text-xs text-teal-400 hover:text-teal-300 border border-teal-700/30 rounded px-3 py-1.5 bg-teal-900/10 hover:bg-teal-900/20 transition-colors"
+                      onClick={() => setManualRecurringFormOpen(true)}
+                    >+ Add Recurring Item</button>
+                  )}
+
+                  {recurringCandidates.length === 0 && manualRecurring.length === 0 ? (
                     <div className="rounded-lg border border-teal-700/20 bg-teal-900/10 px-4 py-4 text-center">
                       <p className="text-sm text-teal-400/60 font-medium">No recurring transactions detected yet.</p>
                       <p className="text-xs text-slate-500 mt-1">Log or import repeated merchants like Netflix, Spotify, gym, rent, or payroll to see them here.</p>
                     </div>
-                  ) : (
+                  ) : recurringCandidates.length > 0 && (
                     <div className="overflow-x-auto">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1.5">Auto-Detected</p>
                       <table className="w-full text-xs min-w-[480px]">
                         <thead>
                           <tr className="text-left text-slate-400 border-b border-slate-700/60">
@@ -4136,7 +4480,7 @@ txnMerchantRef.current?.focus()
                         {estimatedMonthlyRecurring > 0 && (
                           <tfoot>
                             <tr className="border-t border-slate-700/60">
-                              <td colSpan={2} className="pt-2 text-xs text-slate-400 font-medium">Est. monthly total (confirmed + high-confidence)</td>
+                              <td colSpan={2} className="pt-2 text-xs text-slate-400 font-medium">Est. monthly total (confirmed + high-confidence + manual)</td>
                               <td className="pt-2 text-right text-sm font-bold text-teal-300">{currency(estimatedMonthlyRecurring)}</td>
                               <td colSpan={3} />
                             </tr>
