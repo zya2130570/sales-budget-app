@@ -668,6 +668,8 @@ export default function App() {
   } | null>(null)
   // V9.7 — Shift-click multi-select in Review Center
   const lastReviewSelectIdxRef = useRef<number>(-1)
+  // V9.7.1 — Collapsible main transaction list
+  const [txnListOpen, setTxnListOpen]             = useState(true)
 
   // V9.0.1 — Back to top
   const [showScrollTop, setShowScrollTop] = useState(false)
@@ -3844,6 +3846,12 @@ txnMerchantRef.current?.focus()
                         ? `, ${reviewableTxns.filter(tx => transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)).length} possible duplicate${reviewableTxns.filter(tx => transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)).length !== 1 ? 's' : ''}`
                         : ''}
                     </span>
+                    {selectedTxnIds.size > 0 && (
+                      <button
+                        className="text-[10px] text-slate-400 hover:text-slate-200 bg-slate-700/60 hover:bg-slate-600/60 px-1.5 py-0.5 rounded transition-colors"
+                        onClick={e => { e.stopPropagation(); setSelectedTxnIds(new Set()) }}
+                      >Unselect all ({selectedTxnIds.size})</button>
+                    )}
                   </div>
                   <span className="text-slate-500 text-xs">{reviewOpen ? '▲' : '▼'}</span>
                 </button>
@@ -3938,8 +3946,16 @@ txnMerchantRef.current?.focus()
                           <input
                             type="checkbox"
                             checked={isSelected}
-                            onChange={() => {/* handled by row onClick */}}
-                            onClick={e => e.stopPropagation()}
+                            onChange={e => {
+                              // Checkbox toggles independently
+                              e.stopPropagation()
+                              setSelectedTxnIds(prev => {
+                                const next = new Set(prev)
+                                e.target.checked ? next.add(tx.id) : next.delete(tx.id)
+                                return next
+                              })
+                              lastReviewSelectIdxRef.current = rowIdx
+                            }}
                             className="accent-blue-500 shrink-0"
                           />
                           <div className="flex-1 min-w-0">
@@ -3969,8 +3985,15 @@ txnMerchantRef.current?.focus()
                                 <button
                                   className="text-[10px] text-slate-300 hover:text-white bg-slate-700 hover:bg-slate-600 px-2 py-0.5 rounded transition-colors whitespace-nowrap"
                                   onClick={() => {
-                                    setDismissedDupIds(prev => new Set([...prev, tx.id]))
-                                    setConfirmedDupIds(prev => new Set([...prev, tx.id]))
+                                    // Resolve both this tx AND all matching duplicates
+                                    const partnerIds = transactions
+                                      .filter(o => o.id !== tx.id &&
+                                        o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
+                                        o.amount === tx.amount && o.date === tx.date)
+                                      .map(o => o.id)
+                                    const allIds = [tx.id, ...partnerIds]
+                                    setDismissedDupIds(prev => new Set([...prev, ...allIds]))
+                                    setConfirmedDupIds(prev => new Set([...prev, ...allIds]))
                                   }}
                                 >Keep Both</button>
                                 <button
@@ -4018,24 +4041,35 @@ txnMerchantRef.current?.focus()
               </div>
             )}
 
-            {/* ── V9.7 Subscriptions & Recurring ── */}
-            {recurringCandidates.length > 0 && (
-              <div className="rounded-2xl border border-teal-700/30 bg-teal-950/10 overflow-hidden">
-                <button
-                  className="w-full flex items-center justify-between px-4 py-3 text-left"
-                  onClick={() => setRecurringOpen(v => !v)}
-                >
-                  <div className="flex items-center gap-2.5">
+            {/* ── V9.7 Subscriptions & Recurring ── always visible */}
+            <div className="rounded-2xl border border-teal-700/30 bg-teal-950/10 overflow-hidden">
+              <button
+                className="w-full flex items-center justify-between px-4 py-3 text-left"
+                onClick={() => setRecurringOpen(v => !v)}
+              >
+                <div className="flex items-center gap-2.5">
+                  {recurringCandidates.length > 0 && (
                     <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-teal-500/25 text-teal-300 text-xs font-bold">{recurringCandidates.length}</span>
-                    <span className="text-teal-300 font-semibold text-sm">Subscriptions &amp; Recurring</span>
-                    {estimatedMonthlyRecurring > 0 && (
-                      <span className="text-slate-500 text-xs">≈ {currency(estimatedMonthlyRecurring)}/mo</span>
-                    )}
-                  </div>
-                  <span className="text-slate-500 text-xs">{recurringOpen ? '▲' : '▼'}</span>
-                </button>
-                {recurringOpen && (
-                  <div className="border-t border-teal-700/20 px-4 pb-4 pt-3 space-y-2">
+                  )}
+                  <span className="text-teal-300 font-semibold text-sm">Subscriptions &amp; Recurring</span>
+                  {estimatedMonthlyRecurring > 0 && (
+                    <span className="text-slate-500 text-xs">≈ {currency(estimatedMonthlyRecurring)}/mo</span>
+                  )}
+                </div>
+                <span className="text-slate-500 text-xs">{recurringOpen ? '▲' : '▼'}</span>
+              </button>
+              {recurringOpen && (
+                <div className="border-t border-teal-700/20 px-4 pb-4 pt-3 space-y-2">
+                  <p className="text-xs text-slate-500">
+                    Recurring suggestions appear after the same merchant appears 2+ times with similar amounts and timing.{' '}
+                    {recurringCandidates.length === 0 && 'Add or import repeated merchants (Netflix, gym, rent, etc.) to see suggestions.'}
+                  </p>
+                  {recurringCandidates.length === 0 ? (
+                    <div className="rounded-lg border border-teal-700/20 bg-teal-900/10 px-4 py-4 text-center">
+                      <p className="text-sm text-teal-400/60 font-medium">No recurring transactions detected yet.</p>
+                      <p className="text-xs text-slate-500 mt-1">Log or import repeated merchants like Netflix, Spotify, gym, rent, or payroll to see them here.</p>
+                    </div>
+                  ) : (
                     <div className="overflow-x-auto">
                       <table className="w-full text-xs min-w-[480px]">
                         <thead>
@@ -4100,10 +4134,10 @@ txnMerchantRef.current?.focus()
                         )}
                       </table>
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
+                  )}
+                </div>
+              )}
+            </div>
 
             <Card title="Log Transaction" noHover>
              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
@@ -4365,7 +4399,17 @@ txnMerchantRef.current?.focus()
             </Card>
 
             {transactions.length > 0 ? (
-              <Card title={`Transactions (${transactions.length})`}>
+              <div className="rounded-2xl border border-slate-700/50 bg-slate-800/20 overflow-hidden">
+                {/* Collapsible header */}
+                <button
+                  className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-700/20 transition-colors"
+                  onClick={() => setTxnListOpen(v => !v)}
+                >
+                  <span className="text-sm font-semibold text-slate-200">Transactions ({transactions.length})</span>
+                  <span className="text-slate-500 text-xs">{txnListOpen ? '▲' : '▼'}</span>
+                </button>
+                {txnListOpen && (
+                <div className="px-4 pb-4">
                 {/* V9.5 — Search and multi-filter row */}
                 <div className="flex flex-wrap gap-2 mb-3">
                   <input
@@ -4667,7 +4711,9 @@ txnMerchantRef.current?.focus()
                     </tbody>
                   </table>
                 </div>
-              </Card>
+                </div>
+                )}
+              </div>
             ) : (
               <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 p-6 text-center">
                 <p className="text-slate-400 text-sm font-medium">No transactions yet</p>
