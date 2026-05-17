@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule, ImportBatch } from './types'
+import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule, ImportBatch, ImportPreset } from './types'
 
 import { currency, labelPeriod, formatDate } from './utils/formatting'
 import {
@@ -716,6 +716,11 @@ export default function App() {
   const [csvCategoryHints, setCsvCategoryHints]       = useState<Record<string, string>>({})
   const [importBatches, setImportBatches]             = useState<ImportBatch[]>([])
   const [csvShowHistory, setCsvShowHistory]           = useState(false)
+  // V9.10 — Import preset and column mapping preview
+  const [csvImportPreset, setCsvImportPreset]         = useState<ImportPreset>('auto')
+  const [csvColumnMapping, setCsvColumnMapping]       = useState<Record<string, string> | null>(null)
+  // V9.10 — Batch deletion confirmation
+  const [batchToDelete, setBatchToDelete]             = useState<string | null>(null)
   // V9.9 — PDF import state (parallel to CSV flow)
   const [csvImportIsPdf, setCsvImportIsPdf]           = useState(false)
   const [pdfPreviewRows, setPdfPreviewRows]           = useState<PdfImportRow[]>([])
@@ -2090,32 +2095,25 @@ txnMerchantRef.current?.focus()
   // ── V9.0 CSV Import handlers ──────────────────────────────────────────────────
 
   const openCsvImport = () => {
-    setCsvImportOpen(true)
-    setCsvImportPreview(null)
-    setCsvImportError('')
-    setCsvCategoryHints({})
-    setCsvIsAppleCard(false)
-    setCsvImportIsPdf(false)
-    setPdfPreviewRows([])
-    setPdfParseWarning('')
+    setCsvImportOpen(true); setCsvImportPreview(null); setCsvImportError('')
+    setCsvCategoryHints({}); setCsvIsAppleCard(false)
+    setCsvImportIsPdf(false); setPdfPreviewRows([]); setPdfParseWarning('')
+    setCsvColumnMapping(null)
   }
   const closeCsvImport = () => {
-    setCsvImportOpen(false)
-    setCsvImportPreview(null)
-    setCsvImportError('')
-    setCsvCategoryHints({})
-    setCsvIsAppleCard(false)
-    setCsvImportIsPdf(false)
-    setPdfPreviewRows([])
-    setPdfParseWarning('')
+    setCsvImportOpen(false); setCsvImportPreview(null); setCsvImportError('')
+    setCsvCategoryHints({}); setCsvIsAppleCard(false)
+    setCsvImportIsPdf(false); setPdfPreviewRows([]); setPdfParseWarning('')
+    setCsvColumnMapping(null)
   }
   const processCsvText = (text: string) => {
     setCsvImportLoading(true)
     setCsvImportError('')
     try {
-      // Detect and normalize Apple Card format before parsing
+      // Detect / normalize format based on preset or auto-detection
       const firstLine = text.split('\n')[0] ?? ''
-      const isApple   = detectAppleCard(firstLine)
+      const isApple = csvImportPreset === 'apple-card' || (csvImportPreset === 'auto' && detectAppleCard(firstLine))
+      const isPdfPreset = csvImportPreset === 'chase-pdf-experimental'
       setCsvIsAppleCard(isApple)
       const processedText = isApple ? normalizeAppleCardHeaders(text) : text
 
@@ -2125,11 +2123,12 @@ txnMerchantRef.current?.focus()
         setCsvImportError('No rows found. Make sure the CSV has a header row and at least one data row.')
         return
       }
-      // Extract category hints from raw rows (Apple Card Category column etc.)
       setCsvCategoryHints(extractCategoryHints(parsed.rows))
 
       const mapping = detectColumns(parsed.headers)
-      // Account-aware duplicate detection: only compare against the selected account's transactions
+      // V9.10 — Store mapping for column preview
+      setCsvColumnMapping(mapping as Record<string, string>)
+
       const effectiveAccountId = (csvImportAccountId || accounts[0]?.id) ?? ''
       const existingForAccount = transactions.filter(tx => tx.accountId === effectiveAccountId)
       const preview = runImportPipeline({
@@ -2139,6 +2138,10 @@ txnMerchantRef.current?.focus()
         rules,
         defaultAccountId: effectiveAccountId,
       })
+      if (isPdfPreset) {
+        // Chase PDF experimental — treat as low-confidence and note it
+        setCsvImportError('Chase PDF experimental mode: preview shown but parsing confidence is low. Review all rows before importing.')
+      }
       setCsvImportPreview(preview)
     } catch {
       setCsvImportError('Failed to parse the CSV. Please check the file format and try again.')
@@ -2199,6 +2202,8 @@ txnMerchantRef.current?.focus()
       importedCount: newTxns.length,
       skippedCount: pdfPreviewRows.filter(r => r.isDup).length,
       createdAt: new Date().toISOString(),
+      importSource: 'pdf',
+      preset: 'chase-pdf-experimental',
     }
     setImportBatches(prev => [batch, ...prev.slice(0, 49)])
     closeCsvImport()
@@ -2277,8 +2282,9 @@ txnMerchantRef.current?.focus()
       importedCount: newTxns.length,
       skippedCount: csvImportPreview.duplicateCount ?? 0,
       createdAt: new Date().toISOString(),
+      importSource: 'csv',
+      preset: csvIsAppleCard ? 'apple-card' : csvImportPreset,
     }
-    setImportBatches(prev => [batch, ...prev.slice(0, 49)])  // keep last 50
     closeCsvImport()
     if (newTxns[0]) flashHighlight(newTxns[0].id, setHighlightedTxnId, highlightTxnTimerRef)
     const skipped = csvImportPreview.duplicateCount ?? 0
@@ -2292,6 +2298,20 @@ txnMerchantRef.current?.focus()
     const a    = document.createElement('a')
     a.href = url; a.download = 'flow-sample-transactions.csv'; a.click()
     URL.revokeObjectURL(url)
+  }
+
+  // V9.10 — Delete an import batch and all its transactions (undo-able)
+  const deleteImportBatch = (batchId: string) => {
+    const batch = importBatches.find(b => b.id === batchId)
+    const removed = transactions.filter(tx => tx.batchId === batchId)
+    if (removed.length === 0 && !batch) return
+    setTxnWithHistory(prev => prev.filter(tx => tx.batchId !== batchId))
+    setImportBatches(prev => prev.filter(b => b.id !== batchId))
+    setBatchToDelete(null)
+    showUndoableToast(
+      `Deleted ${removed.length} transaction${removed.length !== 1 ? 's' : ''} from "${batch?.accountName ?? 'import'}" (${batch?.importMonth ?? ''}).`,
+      undoTxn
+    )
   }
 
   const upsert = () => {
@@ -4217,7 +4237,12 @@ txnMerchantRef.current?.focus()
                                 }
                                 // Non-CC: unexplained requires a known starting balance — we don't have one yet.
                                 // Showing current balance minus tracked delta produces misleading numbers.
-                                return <span className="text-slate-600 text-[10px]">Baseline not set yet</span>
+                                return (
+                                  <span className="text-slate-600 text-[10px] leading-snug">
+                                    Baseline not set yet<br />
+                                    <span className="text-slate-700">Set after importing a full month.</span>
+                                  </span>
+                                )
                               })()}
                             </td>
                             {/* Institution */}
@@ -5354,7 +5379,7 @@ txnMerchantRef.current?.focus()
               </Card>
             )}
 
-            {/* ── V9.6 Import History ── */}
+            {/* ── V9.10 Import History (upgraded) ── */}
             {importBatches.length > 0 && (
               <Card title="Import History" noHover>
                 <button
@@ -5366,24 +5391,48 @@ txnMerchantRef.current?.focus()
                 </button>
                 {csvShowHistory && (
                   <div className="mt-3 overflow-x-auto">
-                    <table className="w-full text-xs min-w-[480px]">
+                    {/* Delete confirmation */}
+                    {batchToDelete && (() => {
+                      const b = importBatches.find(x => x.id === batchToDelete)
+                      const count = transactions.filter(tx => tx.batchId === batchToDelete).length
+                      return (
+                        <div className="mb-3 rounded-lg bg-red-900/20 border border-red-700/40 px-3 py-2.5 text-xs text-red-300 flex items-center justify-between gap-3">
+                          <span>Delete {count} transaction{count !== 1 ? 's' : ''} from "{b?.accountName}" ({b?.importMonth})? This action can be undone.</span>
+                          <div className="flex gap-2 shrink-0">
+                            <button className="text-red-400 hover:text-red-200 bg-red-900/40 border border-red-700/50 px-2 py-0.5 rounded" onClick={() => deleteImportBatch(batchToDelete)}>Delete</button>
+                            <button className="text-slate-400 hover:text-slate-200" onClick={() => setBatchToDelete(null)}>Cancel</button>
+                          </div>
+                        </div>
+                      )
+                    })()}
+                    <table className="w-full text-xs min-w-[540px]">
                       <thead>
                         <tr className="text-left text-slate-400 border-b border-slate-700">
                           <th className="pb-1.5 pr-3 font-medium">Account</th>
                           <th className="pb-1.5 pr-3 font-medium">Month</th>
+                          <th className="pb-1.5 pr-3 font-medium">Source</th>
                           <th className="pb-1.5 pr-3 font-medium text-right">Imported</th>
                           <th className="pb-1.5 pr-3 font-medium text-right">Skipped</th>
-                          <th className="pb-1.5 font-medium">Date</th>
+                          <th className="pb-1.5 pr-3 font-medium">Date</th>
+                          <th className="pb-1.5 font-medium" />
                         </tr>
                       </thead>
                       <tbody>
                         {importBatches.map(b => (
-                          <tr key={b.id} className="border-b border-slate-800">
+                          <tr key={b.id} className="border-b border-slate-800 hover:bg-slate-800/30">
                             <td className="py-1.5 pr-3 text-slate-300">{b.accountName}</td>
                             <td className="py-1.5 pr-3 text-slate-400">{b.importMonth}</td>
+                            <td className="py-1.5 pr-3 text-slate-500 uppercase text-[10px]">{b.importSource ?? 'csv'}</td>
                             <td className="py-1.5 pr-3 text-right text-green-400 font-medium">{b.importedCount}</td>
                             <td className="py-1.5 pr-3 text-right text-amber-400">{b.skippedCount > 0 ? b.skippedCount : '—'}</td>
-                            <td className="py-1.5 text-slate-500">{new Date(b.createdAt).toLocaleString()}</td>
+                            <td className="py-1.5 pr-3 text-slate-500">{new Date(b.createdAt).toLocaleString()}</td>
+                            <td className="py-1.5">
+                              <button
+                                className="text-[10px] text-red-400/60 hover:text-red-400 transition-colors"
+                                onClick={() => setBatchToDelete(b.id)}
+                                title="Delete this import and its transactions"
+                              >Delete</button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -5391,9 +5440,30 @@ txnMerchantRef.current?.focus()
                     <button
                       className="mt-2 text-xs text-slate-500 hover:text-red-400 transition-colors"
                       onClick={() => setImportBatches([])}
-                    >Clear history</button>
+                    >Clear history (keeps transactions)</button>
                   </div>
                 )}
+              </Card>
+            )}
+
+            {/* ── V9.10 Data Integrity Status ── */}
+            {transactions.length > 0 && (
+              <Card title="Data Integrity" noHover>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  {[
+                    { label: 'Total Transactions', val: transactions.length, color: 'text-slate-200' },
+                    { label: 'Imported', val: transactions.filter(t => t.batchId).length, color: 'text-blue-300' },
+                    { label: 'Manual', val: transactions.filter(t => !t.batchId).length, color: 'text-slate-300' },
+                    { label: 'Needs Review', val: reviewableTxns.length, color: reviewableTxns.length > 0 ? 'text-amber-300' : 'text-green-400' },
+                    { label: 'Duplicate Candidates', val: transactions.filter(tx => transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)).length, color: 'text-amber-400' },
+                    { label: 'Import Batches', val: importBatches.length, color: 'text-slate-400' },
+                  ].map(({ label, val, color }) => (
+                    <div key={label} className="rounded-lg bg-slate-800/60 border border-slate-700/40 px-3 py-2">
+                      <div className="text-xs text-slate-500 mb-0.5">{label}</div>
+                      <div className={`text-lg font-bold ${color}`}>{val}</div>
+                    </div>
+                  ))}
+                </div>
               </Card>
             )}
 
@@ -6096,14 +6166,17 @@ txnMerchantRef.current?.focus()
           isPdf={csvImportIsPdf}
           pdfRows={pdfPreviewRows}
           pdfWarning={pdfParseWarning}
-          onImportAccountChange={id => { setCsvImportAccountId(id); setCsvImportPreview(null); setCsvCategoryHints({}); setPdfPreviewRows([]); }}
+          preset={csvImportPreset}
+          columnMapping={csvColumnMapping}
+          onPresetChange={p => { setCsvImportPreset(p); setCsvImportPreview(null); setCsvColumnMapping(null); setCsvImportIsPdf(p === 'chase-pdf-experimental') }}
+          onImportAccountChange={id => { setCsvImportAccountId(id); setCsvImportPreview(null); setCsvCategoryHints({}); setPdfPreviewRows([]) }}
           onImportMonthChange={setCsvImportMonth}
           onFileSelect={handleCsvFileSelect}
           onDrop={handleCsvDrop}
           onCommit={commitCsvImport}
           onCommitPdf={commitPdfImport}
           onCancel={closeCsvImport}
-          onResetPreview={() => { setCsvImportPreview(null); setCsvImportError(''); setCsvImportIsPdf(false); setPdfPreviewRows([]); setPdfParseWarning('') }}
+          onResetPreview={() => { setCsvImportPreview(null); setCsvImportError(''); setCsvImportIsPdf(false); setPdfPreviewRows([]); setPdfParseWarning(''); setCsvColumnMapping(null) }}
           onDownloadSample={downloadSampleCsv}
           onUseSampleData={() => processCsvText(generateSampleCsvString())}
           fileInputRef={csvFileInputRef}
@@ -6306,8 +6379,11 @@ interface CsvImportModalProps {
   isPdf: boolean
   pdfRows: PdfImportRow[]
   pdfWarning: string
+  preset: ImportPreset
+  columnMapping: Record<string, string> | null
   onImportAccountChange: (id: string) => void
   onImportMonthChange: (month: string) => void
+  onPresetChange: (preset: ImportPreset) => void
   onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void
   onDrop: (e: React.DragEvent<HTMLDivElement>) => void
   onCommit: () => void
@@ -6323,7 +6399,8 @@ function CsvImportModal({
   preview, loading, error, accounts, categories,
   importAccountId, importMonth, isAppleCard, categoryHints,
   isPdf, pdfRows, pdfWarning,
-  onImportAccountChange, onImportMonthChange,
+  preset, columnMapping,
+  onImportAccountChange, onImportMonthChange, onPresetChange,
   onFileSelect, onDrop,
   onCommit, onCommitPdf, onCancel, onDownloadSample, onUseSampleData, fileInputRef, onResetPreview,
 }: CsvImportModalProps) {
@@ -6392,6 +6469,21 @@ function CsvImportModal({
                 className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
               />
             </div>
+          </div>
+
+          {/* V9.10 — Import preset selector */}
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Import Preset</label>
+            <select
+              value={preset}
+              onChange={e => onPresetChange(e.target.value as ImportPreset)}
+              className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+            >
+              <option value="auto">Auto Detect</option>
+              <option value="apple-card">Apple Card CSV</option>
+              <option value="generic-csv">Generic CSV</option>
+              <option value="chase-pdf-experimental">Chase Statement PDF (Experimental)</option>
+            </select>
           </div>
 
           {effectiveAccount && (
@@ -6527,6 +6619,21 @@ function CsvImportModal({
                 <p className="text-xs text-amber-300/80">
                   Duplicates compared against {effectiveAccount?.name ?? 'selected account'} only. Matching transactions on other accounts are not flagged.
                 </p>
+              )}
+
+              {/* V9.10 — Column mapping preview */}
+              {columnMapping && Object.keys(columnMapping).length > 0 && (
+                <details className="text-xs">
+                  <summary className="text-slate-500 cursor-pointer hover:text-slate-300 transition-colors">Column mapping detected ▸</summary>
+                  <div className="mt-2 rounded-lg bg-slate-800/60 border border-slate-700/40 px-3 py-2 grid grid-cols-2 gap-x-4 gap-y-1">
+                    {Object.entries(columnMapping).map(([field, col]) => col ? (
+                      <div key={field} className="flex items-center justify-between">
+                        <span className="text-slate-500 capitalize">{field.replace(/_/g, ' ')}</span>
+                        <span className="text-slate-300 font-medium truncate max-w-[120px]">{String(col)}</span>
+                      </div>
+                    ) : null)}
+                  </div>
+                </details>
               )}
               {preview.readyCount === 0 && (
                 <p className="text-xs text-red-300">No importable rows — all are duplicates or invalid. Check your CSV format.</p>
