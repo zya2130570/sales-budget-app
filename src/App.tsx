@@ -53,7 +53,7 @@ import { detectRecurringPatterns } from './utils/recurring'
 import { getPeriodDateRange } from './utils/calculations'
 import { varianceTone, catStatus } from './utils/budgetMath'
 import {
-  computeNetWorth, computeBalanceCheckData, computeReconciliationData, RECON_THRESHOLD,
+  computeNetWorth, computeBalanceCheckData, computeReconciliationData,
 } from './utils/accountMath'
 import type { BalanceCheckEntry, ReconciliationEntry } from './utils/accountMath'
 import {
@@ -63,7 +63,7 @@ import {
 import type { RecurringCadence, ManualRecurringItem, ForecastLineItem } from './utils/forecastMath'
 // V10.3 — extracted UI components and helpers
 import { Card, Pill, Metric, Info, ActionCard, Row } from './components/ui'
-import { txNeedsReview, txConfidence } from './utils/transactionHelpers'
+import { txNeedsReview } from './utils/transactionHelpers'
 import { TXN_TYPE_LABELS, TXN_FILTER_OPTIONS } from './utils/transactionHelpers'
 import { TransactionsTab } from './components/TransactionsTab'
 
@@ -4304,7 +4304,7 @@ txnMerchantRef.current?.focus()
             confirmedDupIds={confirmedDupIds}
             highlightedTxnId={highlightedTxnId}
             txnFilter={txnFilter}
-            setTxnFilter={setTxnFilter}
+            setTxnFilter={setTxnFilter as (value: string) => void}
             txnSearch={txnSearch}
             setTxnSearch={setTxnSearch}
             txnAccountFilter={txnAccountFilter}
@@ -4344,9 +4344,9 @@ txnMerchantRef.current?.focus()
               bulkCategoryId, setBulkCategoryId, bulkAssign,
               ruleSuggestion, setRuleSuggestion,
               setTxnWithHistory, setRulesWithHistory, updateCategoryMemory, softDeleteTxn,
-              setTxnFilter, showToast,
+              setTxnFilter: setTxnFilter as (v: string) => void, showToast,
               uncatOpen, setUncatOpen, uncategorizedExpenseCount,
-              setInlineTxnEditId, setInlineTxnEditForm, setTxnDupWarning, inlineTxnAmountRef,
+              setInlineTxnEditId, setInlineTxnEditForm: setInlineTxnEditForm as (v: { date: string; accountId: string; merchant: string; amount: string; type: string; categoryId: string; notes: string; toAccountId: string }) => void, setTxnDupWarning, inlineTxnAmountRef,
             }}
             recurringSectionProps={{
               recurringCandidates, manualRecurringItems, setManualRecurringItems,
