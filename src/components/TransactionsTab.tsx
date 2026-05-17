@@ -15,11 +15,12 @@ import { ImportHistorySection } from './ImportHistorySection'
 import type { ImportHistorySectionProps } from './ImportHistorySection'
 
 // ── Inline edit form shape ────────────────────────────────────────────────────
+import type { TransactionType } from '../types'
+// ...and:
 export type InlineTxnEditForm = {
   date: string; accountId: string; merchant: string; amount: string
-  type: string; categoryId: string; notes: string; toAccountId: string
+  type: TransactionType; categoryId: string; notes: string; toAccountId: string
 }
-
 export interface TransactionsTabProps {
   // Core data
   transactions: Transaction[]
@@ -39,7 +40,7 @@ export interface TransactionsTabProps {
   highlightedTxnId: string | null
   // Filter state
   txnFilter: string
-  setTxnFilter: React.Dispatch<React.SetStateAction<string>>
+  setTxnFilter: (value: string) => void 
   txnSearch: string
   setTxnSearch: React.Dispatch<React.SetStateAction<string>>
   txnAccountFilter: string
