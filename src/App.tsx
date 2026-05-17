@@ -66,6 +66,7 @@ import { Card, Pill, Metric, Info, ActionCard, Row } from './components/ui'
 import { txNeedsReview } from './utils/transactionHelpers'
 import { TXN_TYPE_LABELS, TXN_FILTER_OPTIONS } from './utils/transactionHelpers'
 import { TransactionsTab } from './components/TransactionsTab'
+import { GoalPlanningSummary } from './components/GoalPlanningSummary'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -5415,29 +5416,7 @@ txnMerchantRef.current?.focus()
             </Card>
 
             {/* V9.12 — Goal Planning Summary */}
-            {targets.length > 0 && (
-              <div className="rounded-2xl border border-blue-700/20 bg-blue-950/10 px-4 py-3">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">Savings Plan Summary</p>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-                  {[
-                    { label: 'Total Goal', val: currency(goalPlanSummary.totalGoal), color: 'text-slate-200' },
-                    { label: 'Total Saved', val: currency(goalPlanSummary.totalSaved), color: 'text-green-400' },
-                    { label: 'Remaining', val: currency(goalPlanSummary.remaining), color: goalPlanSummary.remaining > 0 ? 'text-amber-300' : 'text-green-400' },
-                    { label: 'Required / Week', val: goalPlanSummary.weeklyRequired > 0 ? currency(goalPlanSummary.weeklyRequired) : '—', color: 'text-blue-300' },
-                  ].map(({ label, val, color }) => (
-                    <div key={label} className="rounded-lg bg-slate-800/60 border border-slate-700/40 px-3 py-2">
-                      <div className="text-[10px] text-slate-500 mb-0.5">{label}</div>
-                      <div className={`text-base font-bold ${color}`}>{val}</div>
-                    </div>
-                  ))}
-                </div>
-                <div className="flex gap-3 text-xs text-slate-500">
-                  <span><span className="text-slate-300 font-medium">{goalPlanSummary.activeCount}</span> active</span>
-                  {goalPlanSummary.pausedCount > 0 && <span><span className="text-slate-400 font-medium">{goalPlanSummary.pausedCount}</span> paused</span>}
-                  {goalPlanSummary.fundedCount > 0 && <span><span className="text-green-400 font-medium">{goalPlanSummary.fundedCount}</span> fully funded</span>}
-                </div>
-              </div>
-            )}
+            {targets.length > 0 && <GoalPlanningSummary summary={goalPlanSummary} />}
 
             {/* Active Targets */}
             <section className="space-y-3">
