@@ -53,7 +53,7 @@ import { detectRecurringPatterns } from './utils/recurring'
 import { getPeriodDateRange } from './utils/calculations'
 import { varianceTone, catStatus } from './utils/budgetMath'
 import {
-  computeNetWorth, computeBalanceCheckData, computeReconciliationData,
+  computeNetWorth, computeBalanceCheckData, computeReconciliationData, RECON_THRESHOLD,
 } from './utils/accountMath'
 import type { BalanceCheckEntry, ReconciliationEntry } from './utils/accountMath'
 import {
@@ -63,7 +63,7 @@ import {
 import type { RecurringCadence, ManualRecurringItem, ForecastLineItem } from './utils/forecastMath'
 // V10.3 — extracted UI components and helpers
 import { Card, Pill, Metric, Info, ActionCard, Row } from './components/ui'
-import { txNeedsReview, } from './utils/transactionHelpers'
+import { txNeedsReview, txConfidence } from './utils/transactionHelpers'
 import { TXN_TYPE_LABELS, TXN_FILTER_OPTIONS } from './utils/transactionHelpers'
 import { TransactionsTab } from './components/TransactionsTab'
 
@@ -259,7 +259,7 @@ const SAMPLE_BUDGET_CATS: Array<{ name: string; type: CategoryType; monthly: num
 ]
 
 // TXN_FILTER_OPTIONS imported from utils/transactionHelpers
-const periods: Period[] = ['weekly', 'bi-weekly', 'monthly', 'yearly']
+
 export default function App() {
   const incomeRef = useRef<HTMLInputElement>(null)
   const budgetNameRef = useRef<HTMLInputElement>(null)
@@ -4302,7 +4302,7 @@ txnMerchantRef.current?.focus()
             confirmedDupIds={confirmedDupIds}
             highlightedTxnId={highlightedTxnId}
             txnFilter={txnFilter}
-            setTxnFilter={setTxnFilter}
+            setTxnFilter={(v: string) => setTxnFilter(v as Parameters<typeof setTxnFilter>[0])}
             txnSearch={txnSearch}
             setTxnSearch={setTxnSearch}
             txnAccountFilter={txnAccountFilter}
@@ -4316,7 +4316,7 @@ txnMerchantRef.current?.focus()
             inlineTxnEditId={inlineTxnEditId}
             inlineTxnEditForm={inlineTxnEditForm}
             setInlineTxnEditId={setInlineTxnEditId}
-            setInlineTxnEditForm={setInlineTxnEditForm}
+            setInlineTxnEditForm={(v) => setInlineTxnEditForm(v as Parameters<typeof setInlineTxnEditForm>[0])}
             inlineTxnMerchantRef={inlineTxnMerchantRef}
             inlineTxnAmountRef={inlineTxnAmountRef}
             inlineTxnTypeRef={inlineTxnTypeRef}
@@ -4342,9 +4342,9 @@ txnMerchantRef.current?.focus()
               bulkCategoryId, setBulkCategoryId, bulkAssign,
               ruleSuggestion, setRuleSuggestion,
               setTxnWithHistory, setRulesWithHistory, updateCategoryMemory, softDeleteTxn,
-              setTxnFilter, showToast,
+              setTxnFilter: (v: string) => setTxnFilter(v as Parameters<typeof setTxnFilter>[0]), showToast,
               uncatOpen, setUncatOpen, uncategorizedExpenseCount,
-              setInlineTxnEditId, setInlineTxnEditForm, setTxnDupWarning, inlineTxnAmountRef,
+              setInlineTxnEditId, setInlineTxnEditForm: (v: Parameters<typeof setInlineTxnEditForm>[0]) => setInlineTxnEditForm(v), setTxnDupWarning, inlineTxnAmountRef,
             }}
             recurringSectionProps={{
               recurringCandidates, manualRecurringItems, setManualRecurringItems,
