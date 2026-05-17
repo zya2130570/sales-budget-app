@@ -602,6 +602,10 @@ export default function App() {
   })
   const inlineAccountNameRef    = useRef<HTMLInputElement>(null)
   const inlineAccountBalanceRef = useRef<HTMLInputElement>(null)
+  // V9.3.2 — Row-level ref for account inline edit blur-save (mirrors inlineCatRowRef pattern)
+  const inlineAccountRowRef     = useRef<HTMLTableRowElement | null>(null)
+  // V9.3.2 — Row-level ref for savings goal set rename blur-save
+  const renameSetRowRef         = useRef<HTMLDivElement | null>(null)
 
   // V9.3 — Saved budget inline rename (mirrors Savings Goal Set pattern)
   const [editingBudgetIdx, setEditingBudgetIdx]   = useState<number | null>(null)
@@ -3643,9 +3647,19 @@ txnMerchantRef.current?.focus()
                       {accounts.map(a => {
                         const isEdit = inlineAccountEditId === a.id
                         return (
-                          <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${
-                            highlightedAccountId === a.id ? 'bg-blue-600/20' : isEdit ? 'bg-slate-700/30' : 'hover:bg-slate-800/40'
-                          }`}>
+                          <tr
+                            key={a.id}
+                            ref={isEdit ? el => { inlineAccountRowRef.current = el } : undefined}
+                            className={`border-b border-slate-800 transition-colors duration-300 ${
+                              highlightedAccountId === a.id ? 'bg-blue-600/20' : isEdit ? 'bg-slate-700/30' : 'hover:bg-slate-800/40'
+                            }`}
+                            onBlur={isEdit ? e => {
+                              // Only blur-save when focus leaves the entire row (not between fields)
+                              if (!inlineAccountRowRef.current?.contains(e.relatedTarget as Node)) {
+                                saveInlineAccountEdit(a.id)
+                              }
+                            } : undefined}
+                          >
                             {/* Name */}
                             <td className="py-2 pr-4 font-medium">
                               {isEdit ? (
@@ -3655,7 +3669,6 @@ txnMerchantRef.current?.focus()
                                   value={inlineAccountEditForm.name}
                                   onChange={e => setInlineAccountEditForm(v => ({ ...v, name: e.target.value }))}
                                   onFocus={e => e.target.select()}
-                                  onBlur={() => saveInlineAccountEdit(a.id)}
                                   onKeyDown={e => {
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
                                     if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
@@ -3680,7 +3693,7 @@ txnMerchantRef.current?.focus()
                                 </select>
                               ) : ACCOUNT_TYPE_LABELS[a.type]}
                             </td>
-                            {/* Current Balance — credit cards show debt owed, others show signed balance */}
+                            {/* Current Balance */}
                             <td className={`py-2 pr-4 text-right font-semibold ${isEdit ? '' : a.type === 'credit card' ? (a.balance === 0 ? 'text-green-400' : 'text-red-400') : a.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
                               {isEdit ? (
                                 <input
@@ -3690,7 +3703,6 @@ txnMerchantRef.current?.focus()
                                   value={inlineAccountEditForm.balance}
                                   onChange={e => { const raw = e.target.value.replace(/[^0-9.]/g, ''); setInlineAccountEditForm(v => ({ ...v, balance: raw })) }}
                                   onFocus={e => e.target.select()}
-                                  onBlur={() => saveInlineAccountEdit(a.id)}
                                   onKeyDown={e => {
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
                                     if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
@@ -3699,26 +3711,25 @@ txnMerchantRef.current?.focus()
                                 />
                               ) : a.type === 'credit card'
                                   ? (a.balance === 0 ? 'Paid Off' : `${currency(Math.abs(a.balance))} owed`)
-                                  : a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)
+                                  : a.balance < 0 ? `\u2212${currency(Math.abs(a.balance))}` : currency(a.balance)
                               }
                             </td>
-                            {/* Tracked Activity — net transaction effect on this account */}
+                            {/* Tracked Activity */}
                             <td className="py-2 pr-4 text-right text-slate-400 text-xs">
                               {(() => {
                                 const bc = balanceCheckData[a.id]
                                 if (!bc || Math.abs(bc.trackedActivity) < 0.005) return <span className="text-slate-600">—</span>
                                 if (a.type === 'credit card') {
-                                  // trackedActivity = charges − payments (positive = net charges)
                                   return bc.trackedActivity >= 0
                                     ? `${currency(bc.trackedActivity)} charged`
                                     : `${currency(Math.abs(bc.trackedActivity))} net paid`
                                 }
                                 return bc.trackedActivity >= 0
                                   ? `+${currency(bc.trackedActivity)}`
-                                  : `−${currency(Math.abs(bc.trackedActivity))}`
+                                  : `\u2212${currency(Math.abs(bc.trackedActivity))}`
                               })()}
                             </td>
-                            {/* Unexplained — plain-language gap between current balance and tracked activity */}
+                            {/* Unexplained gap */}
                             <td className="py-2 pr-4 text-xs">
                               {(() => {
                                 const bc = balanceCheckData[a.id]
@@ -3745,7 +3756,6 @@ txnMerchantRef.current?.focus()
                                   value={inlineAccountEditForm.institution}
                                   placeholder="Institution"
                                   onChange={e => setInlineAccountEditForm(v => ({ ...v, institution: e.target.value }))}
-                                  onBlur={() => saveInlineAccountEdit(a.id)}
                                   onKeyDown={e => {
                                     if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
                                     if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
@@ -3757,8 +3767,8 @@ txnMerchantRef.current?.focus()
                             <td className="py-2 whitespace-nowrap space-x-2">
                               {isEdit ? (
                                 <>
-                                  <button className="text-green-400 hover:text-green-300 text-xs" onClick={() => saveInlineAccountEdit(a.id)}>Save</button>
-                                  <button className="text-slate-400 hover:text-slate-200 text-xs" onClick={cancelInlineAccountEdit}>Cancel</button>
+                                  <button className="text-green-400 hover:text-green-300 text-xs" onMouseDown={e => { e.preventDefault(); saveInlineAccountEdit(a.id) }}>Save</button>
+                                  <button className="text-slate-400 hover:text-slate-200 text-xs" onMouseDown={e => { e.preventDefault(); cancelInlineAccountEdit() }}>Cancel</button>
                                 </>
                               ) : (
                                 <>
@@ -5391,7 +5401,22 @@ txnMerchantRef.current?.focus()
                 {savedTargetSets.map((s, idx) => (
                   <div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between items-center gap-2">
                     {editingSetIdx === idx ? (
-                      <>
+                      <div
+                        ref={el => { renameSetRowRef.current = el }}
+                        className="flex flex-1 items-center gap-2"
+                        onBlur={e => {
+                          // Blur-save only when focus leaves the entire rename container
+                          if (!renameSetRowRef.current?.contains(e.relatedTarget as Node)) {
+                            const newName = renameSetValue.trim()
+                            if (newName && newName !== s.name) {
+                              pushSetHistory(savedTargetSets)
+                              setSavedTargetSets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName, savedAt: new Date().toISOString() } : x))
+                              showToast('Savings goal set renamed.')
+                            }
+                            setEditingSetIdx(null)
+                          }
+                        }}
+                      >
                         <input
                           className="flex-1 p-1 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
                           value={renameSetValue}
@@ -5410,7 +5435,8 @@ txnMerchantRef.current?.focus()
                           autoFocus
                         />
                         <div className="flex gap-2 shrink-0">
-                          <button className="text-blue-300 hover:text-blue-200 text-sm" onClick={() => {
+                          <button className="text-blue-300 hover:text-blue-200 text-sm" onMouseDown={e => {
+                            e.preventDefault()
                             const newName = renameSetValue.trim()
                             if (!newName) return
                             pushSetHistory(savedTargetSets)
@@ -5418,9 +5444,9 @@ txnMerchantRef.current?.focus()
                             showToast('Savings goal set renamed.')
                             setEditingSetIdx(null)
                           }}>Save</button>
-                          <button className="text-slate-400 hover:text-slate-300 text-sm" onClick={() => setEditingSetIdx(null)}>Cancel</button>
+                          <button className="text-slate-400 hover:text-slate-300 text-sm" onMouseDown={e => { e.preventDefault(); setEditingSetIdx(null) }}>Cancel</button>
                         </div>
-                      </>
+                      </div>
                     ) : (
                       <>
                         <div>
