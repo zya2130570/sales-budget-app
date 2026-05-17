@@ -49,6 +49,75 @@ import { parseCsv, detectColumns, generateSampleCsvString } from './utils/csv'
 const isMoneyMovement = (type: TransactionType): boolean =>
   type === 'transfer' || type === 'credit card payment'
 
+// ── V9.5 Merchant normalization ───────────────────────────────────────────────
+// Cleans up raw bank-export merchant strings to friendly display names.
+// Pattern: strip trailing store numbers, normalize well-known brands.
+const MERCHANT_ALIASES: Array<[RegExp, string]> = [
+  [/^MCDONALDS?(\s|$)/i,       "McDonald's"],
+  [/^CHICK.FIL.A/i,             'Chick-fil-A'],
+  [/^CHIPOTLE/i,                'Chipotle'],
+  [/^AMZN\s*MKTPLACE/i,        'Amazon'],
+  [/^AMAZON(\s*(COM|MKTPLACE|PRIME))?/i, 'Amazon'],
+  [/^WHOLEFDS|WHOLE\s*FOODS/i, 'Whole Foods'],
+  [/^STARBUCKS|SBUX/i,         'Starbucks'],
+  [/^DUNKIN/i,                  "Dunkin'"],
+  [/^WALMART|WAL.MART/i,       'Walmart'],
+  [/^TARGET(\s|$)/i,            'Target'],
+  [/^COSTCO/i,                  'Costco'],
+  [/^NETFLIX/i,                 'Netflix'],
+  [/^SPOTIFY/i,                 'Spotify'],
+  [/^DOORDASH/i,                'DoorDash'],
+  [/^UBER\s*EATS/i,             'Uber Eats'],
+  [/^GRUBHUB/i,                 'Grubhub'],
+  [/^CHEVRON/i,                 'Chevron'],
+  [/^EXXON/i,                   'ExxonMobil'],
+  [/^SHELL(\s|$)/i,             'Shell'],
+]
+function normalizeMerchant(raw: string): string {
+  if (!raw) return raw
+  // Strip common bank prefixes (SQ *, TST *, PP *)
+  const stripped = raw.replace(/^(SQ|TST|PP)\s*\*/i, '').replace(/\*/g, ' ').replace(/\s+/g, ' ').trim()
+  for (const [pattern, name] of MERCHANT_ALIASES) {
+    if (pattern.test(stripped)) return name
+  }
+  // Strip trailing store/location numbers: "TARGET #4821" → "Target"
+  const noNum = stripped.replace(/\s+#\d+$/, '').replace(/\s+\d{4,}$/, '').trim()
+  // Apply title-case to all-caps strings
+  if (noNum === noNum.toUpperCase() && noNum.length > 3) {
+    return noNum.replace(/\b\w/g, c => c.toUpperCase()).toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
+  }
+  return noNum || stripped
+}
+
+// ── V9.5 Review classification ────────────────────────────────────────────────
+function txNeedsReview(tx: Transaction, allTxns: Transaction[]): boolean {
+  // Uncategorized expense
+  if (tx.type === 'expense' && !tx.categoryId) return true
+  // Possible duplicate: identical merchant + amount + date signature elsewhere
+  if (allTxns.some(o =>
+    o.id !== tx.id &&
+    o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
+    o.amount === tx.amount &&
+    o.date === tx.date
+  )) return true
+  return false
+}
+
+type TxConfidence = 'high' | 'medium' | 'low'
+function txConfidence(tx: Transaction, allTxns: Transaction[]): TxConfidence {
+  // Non-expenses: always high (no categorization needed)
+  if (tx.type !== 'expense') return 'high'
+  // Has a category: high
+  if (tx.categoryId) return 'high'
+  // Uncategorized but same merchant was categorized elsewhere: medium
+  const seenCategorized = allTxns.some(o =>
+    o.id !== tx.id &&
+    o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
+    o.categoryId
+  )
+  return seenCategorized ? 'medium' : 'low'
+}
+
 const presetTypeMap: Record<string, CategoryType> = {
   Bike: 'fixed bill',
   Braiding: 'fixed bill',
@@ -173,6 +242,7 @@ const SAMPLE_BUDGET_CATS: Array<{ name: string; type: CategoryType; monthly: num
 
 const TXN_FILTER_OPTIONS = [
   { value: 'all'                 as const, label: 'All'                  },
+  { value: 'needs-review'        as const, label: 'Needs Review'         },
   { value: 'uncategorized'       as const, label: 'Uncategorized'        },
   { value: 'expense'             as const, label: 'Expense'              },
   { value: 'income'              as const, label: 'Income'               },
@@ -451,6 +521,14 @@ export default function App() {
   const [csvImportLoading, setCsvImportLoading] = useState(false)
   const [csvImportError, setCsvImportError]     = useState('')
   const csvFileInputRef                         = useRef<HTMLInputElement>(null)
+
+  // V9.5 — Transaction Review Center + smart filters
+  const [reviewOpen, setReviewOpen]             = useState(true)
+  const [selectedTxnIds, setSelectedTxnIds]     = useState<Set<string>>(new Set())
+  const [bulkCategoryId, setBulkCategoryId]     = useState('')
+  const [txnSearch, setTxnSearch]               = useState('')
+  const [txnAccountFilter, setTxnAccountFilter] = useState('')
+  const [txnCategoryFilter, setTxnCategoryFilter] = useState('')
 
   // V9.0.1 — Back to top
   const [showScrollTop, setShowScrollTop] = useState(false)
@@ -909,6 +987,25 @@ export default function App() {
   const uncategorizedExpenseCount = transactions.filter(
     tx => tx.type === 'expense' && !tx.categoryId
   ).length
+
+  // V9.5 — Review Center data
+  const reviewableTxns = useMemo(() =>
+    [...transactions]
+      .filter(tx => txNeedsReview(tx, transactions))
+      .sort((a, b) => b.date.localeCompare(a.date)),
+    [transactions]
+  )
+  const needsReviewTxnCount = reviewableTxns.length
+
+  const bulkAssign = () => {
+    if (!bulkCategoryId || selectedTxnIds.size === 0) return
+    setTxnWithHistory(prev => prev.map(tx =>
+      selectedTxnIds.has(tx.id) ? { ...tx, categoryId: bulkCategoryId } : tx
+    ))
+    setSelectedTxnIds(new Set())
+    setBulkCategoryId('')
+    showToast(`Assigned category to ${selectedTxnIds.size} transaction${selectedTxnIds.size !== 1 ? 's' : ''}.`)
+  }
   // Re-arm the glow whenever the count grows above the previous watermark
   if (uncategorizedExpenseCount > prevUncategorizedCountRef.current) {
     uncategorizedGlowSeenRef.current = false
@@ -3520,10 +3617,10 @@ txnMerchantRef.current?.focus()
               return (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {[
-                    { label: 'Uncategorized',     value: uncategorizedExpenseCount,          alert: uncategorizedExpenseCount > 0 },
-                    { label: 'Period Spend',       value: currency(periodSpend),              alert: false                          },
-                    { label: 'Rules Applied',      value: rulesApplied,                       alert: false                          },
-                    { label: 'Total Transactions', value: transactions.length,                alert: false                          },
+                    { label: 'Needs Review',       value: needsReviewTxnCount,                alert: needsReviewTxnCount > 0        },
+                    { label: 'Period Spend',        value: currency(periodSpend),              alert: false                          },
+                    { label: 'Rules Applied',       value: rulesApplied,                       alert: false                          },
+                    { label: 'Total Transactions',  value: transactions.length,                alert: false                          },
                   ].map(({ label, value, alert }) => (
                     <div key={label} className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
                       <div className="text-xs text-slate-400 mb-1">{label}</div>
@@ -3533,6 +3630,119 @@ txnMerchantRef.current?.focus()
                 </div>
               )
             })()}
+            {/* ── V9.5 Transaction Review Center ── */}
+            {reviewableTxns.length > 0 && (
+              <div className="rounded-2xl border border-amber-600/30 bg-amber-950/10 overflow-hidden">
+                <button
+                  className="w-full flex items-center justify-between px-4 py-3 text-left"
+                  onClick={() => setReviewOpen(v => !v)}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500/25 text-amber-300 text-xs font-bold">{reviewableTxns.length}</span>
+                    <span className="text-amber-300 font-semibold text-sm">Needs Review</span>
+                    <span className="text-slate-500 text-xs">
+                      {reviewableTxns.filter(tx => !tx.categoryId && tx.type === 'expense').length} uncategorized
+                      {reviewableTxns.filter(tx => transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)).length > 0
+                        ? `, ${reviewableTxns.filter(tx => transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)).length} possible duplicate${reviewableTxns.filter(tx => transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)).length !== 1 ? 's' : ''}`
+                        : ''}
+                    </span>
+                  </div>
+                  <span className="text-slate-500 text-xs">{reviewOpen ? '▲' : '▼'}</span>
+                </button>
+                {reviewOpen && (
+                  <div className="border-t border-amber-700/20 px-4 pb-4 pt-3 space-y-2">
+                    {/* Bulk action bar */}
+                    {selectedTxnIds.size > 0 && (
+                      <div className="flex items-center gap-2 mb-3 p-2 rounded-lg bg-blue-900/20 border border-blue-700/30">
+                        <span className="text-xs text-blue-300 font-medium">{selectedTxnIds.size} selected</span>
+                        <select
+                          value={bulkCategoryId}
+                          onChange={e => setBulkCategoryId(e.target.value)}
+                          className="flex-1 text-xs px-2 py-1 rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                        >
+                          <option value="">Assign category…</option>
+                          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                        <button
+                          onClick={bulkAssign}
+                          disabled={!bulkCategoryId}
+                          className="text-xs bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 px-3 py-1 rounded transition-colors"
+                        >Apply</button>
+                        <button onClick={() => setSelectedTxnIds(new Set())} className="text-xs text-slate-400 hover:text-slate-200">Clear</button>
+                      </div>
+                    )}
+                    {reviewableTxns.slice(0, 15).map(tx => {
+                      const acct       = accounts.find(a => a.id === tx.accountId)
+                      const cat        = categories.find(c => c.id === tx.categoryId)
+                      const isSelected = selectedTxnIds.has(tx.id)
+                      const confidence = txConfidence(tx, transactions)
+                      const isDup      = transactions.some(o =>
+                        o.id !== tx.id &&
+                        o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
+                        o.amount === tx.amount && o.date === tx.date
+                      )
+                      return (
+                        <div
+                          key={tx.id}
+                          className={`rounded-lg border px-3 py-2.5 flex items-center gap-3 transition-colors ${
+                            isSelected ? 'border-blue-500/60 bg-blue-900/15' : 'border-slate-700/50 bg-slate-800/40 hover:bg-slate-800/60'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={e => setSelectedTxnIds(prev => {
+                              const next = new Set(prev)
+                              e.target.checked ? next.add(tx.id) : next.delete(tx.id)
+                              return next
+                            })}
+                            className="accent-blue-500 shrink-0"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-medium text-sm truncate">{tx.merchant}</span>
+                              {isDup && (
+                                <span className="text-[10px] bg-amber-900/50 text-amber-300 border border-amber-700/40 px-1.5 py-0.5 rounded shrink-0">Duplicate?</span>
+                              )}
+                              {!tx.categoryId && tx.type === 'expense' && (
+                                <span className="text-[10px] bg-slate-700/70 text-slate-400 border border-slate-600/40 px-1.5 py-0.5 rounded shrink-0">No Category</span>
+                              )}
+                              {confidence === 'low' && !isDup && (
+                                <span className="text-[10px] bg-red-900/30 text-red-400 border border-red-700/30 px-1.5 py-0.5 rounded shrink-0">New Merchant</span>
+                              )}
+                            </div>
+                            <div className="text-xs text-slate-500 mt-0.5">{tx.date} · {acct?.name ?? '—'} · {TXN_TYPE_LABELS[tx.type]}</div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <span className={`text-sm font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-200'}`}>
+                              {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : ''}{currency(tx.amount)}
+                            </span>
+                            {tx.type === 'expense' && (
+                              <select
+                                value={cat?.id ?? ''}
+                                onChange={e => setTxnWithHistory(prev => prev.map(x =>
+                                  x.id === tx.id ? { ...x, categoryId: e.target.value || undefined } : x
+                                ))}
+                                className="text-xs px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none max-w-[120px]"
+                              >
+                                <option value="">Assign…</option>
+                                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              </select>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {reviewableTxns.length > 15 && (
+                      <p className="text-xs text-slate-500 text-center pt-1">
+                        Showing 15 of {reviewableTxns.length} — use <button className="underline text-slate-400 hover:text-slate-200" onClick={() => setTxnFilter('needs-review')}>Needs Review filter</button> to see all.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             <Card title="Log Transaction" noHover>
              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
                 {/* Date — native left/right used by date picker; Enter navigates forward */}
@@ -3794,12 +4004,43 @@ txnMerchantRef.current?.focus()
 
             {transactions.length > 0 ? (
               <Card title={`Transactions (${transactions.length})`}>
+                {/* V9.5 — Search and multi-filter row */}
+                <div className="flex flex-wrap gap-2 mb-3">
+                  <input
+                    type="text"
+                    placeholder="Search merchant or notes…"
+                    value={txnSearch}
+                    onChange={e => setTxnSearch(e.target.value)}
+                    className="flex-1 min-w-[160px] px-2.5 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none placeholder:text-slate-600"
+                  />
+                  <select value={txnAccountFilter} onChange={e => setTxnAccountFilter(e.target.value)} className="text-xs px-2 py-1 rounded bg-slate-800 border border-slate-600 focus:outline-none">
+                    <option value="">All accounts</option>
+                    {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  </select>
+                  <select value={txnCategoryFilter} onChange={e => setTxnCategoryFilter(e.target.value)} className="text-xs px-2 py-1 rounded bg-slate-800 border border-slate-600 focus:outline-none">
+                    <option value="">All categories</option>
+                    <option value="__none__">Uncategorized</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  {(txnSearch || txnAccountFilter || txnCategoryFilter) && (
+                    <button
+                      onClick={() => { setTxnSearch(''); setTxnAccountFilter(''); setTxnCategoryFilter('') }}
+                      className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
+                    >Clear</button>
+                  )}
+                </div>
                 {/* Filter pills */}
                 <div className="flex gap-1.5 flex-wrap mb-3">
                   {TXN_FILTER_OPTIONS.map(opt => {
+                    const isNeedsReview   = opt.value === 'needs-review'
                     const isUncategorized = opt.value === 'uncategorized'
                     const isActive = txnFilter === opt.value
                     const glowRing = isUncategorized && showUncategorizedGlow && !isActive
+                    const badge = isNeedsReview && needsReviewTxnCount > 0
+                      ? ` (${needsReviewTxnCount})`
+                      : isUncategorized && uncategorizedExpenseCount > 0
+                        ? ` (${uncategorizedExpenseCount})`
+                        : ''
                     return (
                       <button
                         key={opt.value}
@@ -3810,15 +4051,12 @@ txnMerchantRef.current?.focus()
                         className={[
                           'rounded-full px-3 py-0.5 text-xs transition-colors',
                           isActive
-                            ? 'bg-blue-600 text-white'
+                            ? isNeedsReview ? 'bg-amber-600 text-white' : 'bg-blue-600 text-white'
                             : 'bg-slate-700 hover:bg-slate-600 text-slate-300',
                           glowRing ? 'ring-1 ring-amber-400/70 shadow-[0_0_6px_rgba(251,191,36,0.22)]' : '',
                         ].filter(Boolean).join(' ')}
                       >
-                        {opt.label}
-                        {isUncategorized && uncategorizedExpenseCount > 0
-                          ? ` (${uncategorizedExpenseCount})`
-                          : ''}
+                        {opt.label}{badge}
                       </button>
                     )
                   })}
@@ -3840,9 +4078,21 @@ txnMerchantRef.current?.focus()
                     <tbody>
                       {[...transactions]
                         .filter(tx => {
-                          if (txnFilter === 'uncategorized') return tx.type === 'expense' && !tx.categoryId
-                          if (txnFilter === 'all') return true
-                          return tx.type === txnFilter
+                          // type/review filter
+                          if (txnFilter === 'uncategorized') { if (!(tx.type === 'expense' && !tx.categoryId)) return false }
+                          else if (txnFilter === 'needs-review') { if (!txNeedsReview(tx, transactions)) return false }
+                          else if (txnFilter !== 'all') { if (tx.type !== txnFilter) return false }
+                          // search
+                          if (txnSearch) {
+                            const q = txnSearch.toLowerCase()
+                            if (!tx.merchant.toLowerCase().includes(q) && !(tx.notes ?? '').toLowerCase().includes(q)) return false
+                          }
+                          // account filter
+                          if (txnAccountFilter && tx.accountId !== txnAccountFilter) return false
+                          // category filter
+                          if (txnCategoryFilter === '__none__' && tx.categoryId) return false
+                          if (txnCategoryFilter && txnCategoryFilter !== '__none__' && tx.categoryId !== txnCategoryFilter) return false
+                          return true
                         })
                         .sort((a, b) => b.date.localeCompare(a.date))
                         .map(tx => {
@@ -4001,18 +4251,32 @@ txnMerchantRef.current?.focus()
                           )
                         }
                         const txTypeColor = tx.type === 'income' ? 'bg-green-900/50 text-green-300' : tx.type === 'transfer' ? 'bg-blue-900/50 text-blue-300' : tx.type === 'credit card payment' ? 'bg-purple-900/50 text-purple-300' : 'bg-slate-700 text-slate-300'
+                        const txIsDup    = transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)
+                        const txIsImported = !!(tx as Transaction & { batchId?: string }).batchId
+                        const txReview   = txNeedsReview(tx, transactions)
                         return (
-                          <tr key={tx.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedTxnId === tx.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
+                          <tr key={tx.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedTxnId === tx.id ? 'bg-blue-600/20' : txReview ? 'bg-amber-950/10' : 'hover:bg-slate-800/40'}`}>
                             <td className="py-2 pr-3 text-slate-300 text-xs whitespace-nowrap">{tx.date}</td>
                             <td className="py-2 pr-3 text-slate-400 text-xs">{acct?.name ?? '—'}</td>
-                            <td className="py-2 pr-3 font-medium">{tx.merchant}</td>
+                            <td className="py-2 pr-3 font-medium">
+                              {tx.merchant}
+                              {txIsImported && (
+                                <span className="ml-1.5 text-[9px] text-blue-400 bg-blue-900/30 border border-blue-700/30 px-1 py-0.5 rounded">Imported</span>
+                              )}
+                              {txIsDup && (
+                                <span className="ml-1.5 text-[9px] text-amber-400 bg-amber-900/30 border border-amber-700/30 px-1 py-0.5 rounded">Duplicate?</span>
+                              )}
+                            </td>
                             <td className="py-2 pr-3">
                               <span className={`text-xs px-1.5 py-0.5 rounded ${txTypeColor}`}>{TXN_TYPE_LABELS[tx.type]}</span>
                             </td>
                             <td className="py-2 pr-3 text-slate-400 text-xs">
-                              {cat?.name ?? '—'}
+                              {cat?.name ?? <span className={tx.type === 'expense' ? 'text-amber-400/70' : 'text-slate-600'}>—</span>}
                               {tx.appliedByRule && (
                                 <span className="ml-1.5 text-[9px] text-indigo-400 bg-indigo-900/40 border border-indigo-700/40 px-1 py-0.5 rounded">Rule Applied</span>
+                              )}
+                              {txReview && !txIsDup && !tx.appliedByRule && (
+                                <span className="ml-1.5 text-[9px] text-amber-400 bg-amber-900/30 border border-amber-700/30 px-1 py-0.5 rounded">Review</span>
                               )}
                             </td>
                             <td className={`py-2 pr-3 text-right font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-100'}`}>
