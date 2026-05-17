@@ -53,7 +53,7 @@ import { detectRecurringPatterns } from './utils/recurring'
 import { getPeriodDateRange } from './utils/calculations'
 import { varianceTone, catStatus } from './utils/budgetMath'
 import {
-  computeNetWorth, computeBalanceCheckData, computeReconciliationData,
+  computeNetWorth, computeBalanceCheckData, computeReconciliationData, RECON_THRESHOLD,
 } from './utils/accountMath'
 import type { BalanceCheckEntry, ReconciliationEntry } from './utils/accountMath'
 import {
@@ -61,6 +61,11 @@ import {
   projectManualItems, projectRecurringCandidates,
 } from './utils/forecastMath'
 import type { RecurringCadence, ManualRecurringItem, ForecastLineItem } from './utils/forecastMath'
+// V10.3 — extracted UI components and helpers
+import { Card, Pill, Metric, Info, ActionCard, Row } from './components/ui'
+import { txNeedsReview, txConfidence } from './utils/transactionHelpers'
+import { TXN_TYPE_LABELS, TXN_FILTER_OPTIONS } from './utils/transactionHelpers'
+import { TransactionsTab } from './components/TransactionsTab'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -164,35 +169,8 @@ function parsePdfText(raw: string): { rows: PdfImportRow[]; warning: string } {
 type ForecastItem = ForecastLineItem
 
 // ── V9.5 Review classification ────────────────────────────────────────────────
-function txNeedsReview(tx: Transaction, allTxns: Transaction[], dismissedDupIds?: Set<string>): boolean {
-  // Uncategorized expense
-  if (tx.type === 'expense' && !tx.categoryId) return true
-  // Skip dup check if user explicitly resolved this transaction's duplicate flag
-  if (dismissedDupIds?.has(tx.id)) return false
-  // Possible duplicate: identical merchant + amount + date signature elsewhere
-  if (allTxns.some(o =>
-    o.id !== tx.id &&
-    o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
-    o.amount === tx.amount &&
-    o.date === tx.date
-  )) return true
-  return false
-}
-
-type TxConfidence = 'high' | 'medium' | 'low'
-function txConfidence(tx: Transaction, allTxns: Transaction[]): TxConfidence {
-  // Non-expenses: always high (no categorization needed)
-  if (tx.type !== 'expense') return 'high'
-  // Has a category: high
-  if (tx.categoryId) return 'high'
-  // Uncategorized but same merchant was categorized elsewhere: medium
-  const seenCategorized = allTxns.some(o =>
-    o.id !== tx.id &&
-    o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
-    o.categoryId
-  )
-  return seenCategorized ? 'medium' : 'low'
-}
+// txNeedsReview and txConfidence imported from utils/transactionHelpers
+// TXN_TYPE_LABELS, TXN_FILTER_OPTIONS imported from utils/transactionHelpers
 
 const presetTypeMap: Record<string, CategoryType> = {
   Bike: 'fixed bill',
@@ -224,15 +202,8 @@ const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   'retirement':  'Retirement',
   'other':       'Other',
 }
+// TXN_TYPES local constant (not exported, only used by Log Transaction form in App)
 const TXN_TYPES: TransactionType[] = ['expense', 'income', 'transfer', 'credit card payment']
-const TXN_TYPE_LABELS: Record<TransactionType, string> = {
-  'expense':              'Expense',
-  'income':               'Income',
-  'transfer':             'Transfer',
-  'credit card payment':  'Credit Card Payment',
-}
-
-const periods: Period[] = ['weekly', 'bi-weekly', 'monthly', 'yearly']
 const targetPresets = ['Bike', 'Emergency Fund', 'Long-term Savings', 'Tuition', 'Custom']
 const tabTips: Record<Tab, string> = {
   Dashboard:    'See your take-home pay, leftover money, warnings, and log savings from each paycheck.',
@@ -287,15 +258,7 @@ const SAMPLE_BUDGET_CATS: Array<{ name: string; type: CategoryType; monthly: num
   { name: 'Travel',         type: 'savings',           monthly: 150  },
 ]
 
-const TXN_FILTER_OPTIONS = [
-  { value: 'all'                 as const, label: 'All'                  },
-  { value: 'needs-review'        as const, label: 'Needs Review'         },
-  { value: 'uncategorized'       as const, label: 'Uncategorized'        },
-  { value: 'expense'             as const, label: 'Expense'              },
-  { value: 'income'              as const, label: 'Income'               },
-  { value: 'transfer'            as const, label: 'Transfer'             },
-  { value: 'credit card payment' as const, label: 'Credit Card Payment'  },
-]
+// TXN_FILTER_OPTIONS imported from utils/transactionHelpers
 
 export default function App() {
   const incomeRef = useRef<HTMLInputElement>(null)
@@ -517,6 +480,8 @@ export default function App() {
   const inlineTxnMerchantRef  = useRef<HTMLInputElement>(null)
   const inlineTxnTypeRef      = useRef<HTMLSelectElement>(null)
   const inlineTxnCategoryRef  = useRef<HTMLSelectElement>(null)
+  // V10.3 — Row ref for transaction inline edit blur-save (extracted to TransactionsTab component)
+  const inlineTxnRowRef       = useRef<HTMLTableRowElement | null>(null)
 // V8.6.1 — Inline rule edit refs
   const inlineRuleNameRef   = useRef<HTMLInputElement>(null)
   const inlineRuleMatchRef  = useRef<HTMLInputElement>(null)
@@ -4321,448 +4286,84 @@ txnMerchantRef.current?.focus()
 
         {/* ── TRANSACTIONS ── */}
         {tab === 'Transactions' && (
-          <section className="space-y-4 transition-all duration-300">
-            {/* ── V8.5 Review queue summary ── */}
-            {transactions.length > 0 && (() => {
-              const range = getPeriodDateRange(period)
-              // V9.2 — period spend = expenses only; transfers/CC payments are money movements, not spending
-              const periodSpend  = transactions
-                .filter(tx => tx.date >= range.start && tx.date <= range.end && tx.type === 'expense')
-                .reduce((s, tx) => s + tx.amount, 0)
-              const rulesApplied = transactions.filter(tx => tx.appliedByRule).length
-              return (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {[
-                    { label: 'Needs Review',       value: needsReviewTxnCount,                alert: needsReviewTxnCount > 0        },
-                    { label: 'Period Spend',        value: currency(periodSpend),              alert: false                          },
-                    { label: 'Rules Applied',       value: rulesApplied,                       alert: false                          },
-                    { label: 'Total Transactions',  value: transactions.length,                alert: false                          },
-                  ].map(({ label, value, alert }) => (
-                    <div key={label} className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-1">{label}</div>
-                      <div className={`text-xl font-bold ${alert ? 'text-amber-300' : 'text-slate-200'}`}>{value}</div>
-                    </div>
-                  ))}
-                </div>
-              )
-            })()}
-            {/* ── V9.5 Transaction Review Center ── */}
-            {reviewableTxns.length > 0 && (
-              <div className="rounded-2xl border border-amber-600/30 bg-amber-950/10 overflow-hidden">
-                <button
-                  className="w-full flex items-center justify-between px-4 py-3 text-left"
-                  onClick={() => setReviewOpen(v => !v)}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500/25 text-amber-300 text-xs font-bold">{reviewableTxns.length}</span>
-                    <span className="text-amber-300 font-semibold text-sm">Needs Review</span>
-                    <span className="text-slate-500 text-xs">
-                      {reviewableTxns.filter(tx => !tx.categoryId && tx.type === 'expense').length} uncategorized
-                      {reviewableTxns.filter(tx => transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)).length > 0
-                        ? `, ${reviewableTxns.filter(tx => transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)).length} possible duplicate${reviewableTxns.filter(tx => transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)).length !== 1 ? 's' : ''}`
-                        : ''}
-                    </span>
-                    {selectedTxnIds.size > 0 && (
-                      <button
-                        className="text-[10px] text-slate-400 hover:text-slate-200 bg-slate-700/60 hover:bg-slate-600/60 px-1.5 py-0.5 rounded transition-colors"
-                        onClick={e => { e.stopPropagation(); setSelectedTxnIds(new Set()) }}
-                      >Unselect all ({selectedTxnIds.size})</button>
-                    )}
-                  {/* V9.11 — Delete All Duplicates */}
-                  {reviewableTxns.some(tx => transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date) && !confirmedDupIds.has(tx.id)) && (
-                    <button
-                      className="text-[10px] text-red-400/70 hover:text-red-400 bg-slate-700/40 hover:bg-red-900/20 border border-slate-600/30 hover:border-red-700/30 px-1.5 py-0.5 rounded transition-colors"
-                      onClick={e => { e.stopPropagation(); setDeleteDupsConfirm(true) }}
-                    >Delete all unresolved duplicates</button>
-                  )}
-                  </div>
-                  <span className="text-slate-500 text-xs">{reviewOpen ? '▲' : '▼'}</span>
-                </button>
-                {reviewOpen && (
-                  <div className="border-t border-amber-700/20 px-4 pb-4 pt-3 space-y-2">
-                    {/* V9.11 — Delete all duplicates confirmation */}
-                    {deleteDupsConfirm && (() => {
-                      const dupTxns = reviewableTxns.filter(tx =>
-                        transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date) &&
-                        !confirmedDupIds.has(tx.id)
-                      )
-                      return (
-                        <div className="mb-2 rounded-lg bg-red-900/20 border border-red-700/40 px-3 py-2.5 text-xs text-red-300 flex items-center justify-between gap-3">
-                          <span>Delete {dupTxns.length} unresolved duplicate transaction{dupTxns.length !== 1 ? 's' : ''}? This is undoable.</span>
-                          <div className="flex gap-2 shrink-0">
-                            <button className="text-red-400 hover:text-red-200 bg-red-900/40 border border-red-700/50 px-2 py-0.5 rounded"
-                              onClick={() => {
-                                const idsToDelete = new Set(dupTxns.map(t => t.id))
-                                setTxnWithHistory(prev => prev.filter(tx => !idsToDelete.has(tx.id)))
-                                setDeleteDupsConfirm(false)
-                                showToast(`Deleted ${dupTxns.length} duplicate transaction${dupTxns.length !== 1 ? 's' : ''}.`)
-                              }}>Delete</button>
-                            <button className="text-slate-400 hover:text-slate-200" onClick={() => setDeleteDupsConfirm(false)}>Cancel</button>
-                          </div>
-                        </div>
-                      )
-                    })()}
-                    {/* Bulk action bar */}
-                    {selectedTxnIds.size > 0 && (
-                      <div className="flex items-center gap-2 mb-3 p-2 rounded-lg bg-blue-900/20 border border-blue-700/30">
-                        <span className="text-xs text-blue-300 font-medium">{selectedTxnIds.size} selected</span>
-                        <select
-                          value={bulkCategoryId}
-                          onChange={e => setBulkCategoryId(e.target.value)}
-                          className="flex-1 text-xs px-2 py-1 rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
-                        >
-                          <option value="">Assign category…</option>
-                          {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
-                        <button
-                          onClick={bulkAssign}
-                          disabled={!bulkCategoryId}
-                          className="text-xs bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 px-3 py-1 rounded transition-colors"
-                        >Apply</button>
-                        <button onClick={() => setSelectedTxnIds(new Set())} className="text-xs text-slate-400 hover:text-slate-200">Clear</button>
-                      </div>
-                    )}
-                    {/* Rule suggestion prompt */}
-                    {ruleSuggestion && (
-                      <div className="flex items-center gap-3 mb-2 p-2.5 rounded-lg bg-indigo-900/20 border border-indigo-700/30 text-xs">
-                        <span className="text-indigo-200 flex-1">
-                          {ruleSuggestion.merchants.length === 1
-                            ? `Auto-categorize "${ruleSuggestion.merchants[0]}" → ${categories.find(c => c.id === ruleSuggestion.categoryId)?.name} in future?`
-                            : `Create rules for ${ruleSuggestion.merchants.slice(0, 3).join(', ')}${ruleSuggestion.merchants.length > 3 ? ` +${ruleSuggestion.merchants.length - 3} more` : ''} → ${categories.find(c => c.id === ruleSuggestion.categoryId)?.name}?`
-                          }
-                        </span>
-                        <button
-                          className="text-indigo-300 hover:text-white bg-indigo-700/50 hover:bg-indigo-600/60 px-2 py-0.5 rounded transition-colors whitespace-nowrap"
-                          onClick={() => {
-                            ruleSuggestion.merchants.forEach(m => {
-                              const newRule: TransactionRule = {
-                                id: crypto.randomUUID(), name: m,
-                                matchText: m, matchField: 'merchant',
-                                categoryId: ruleSuggestion.categoryId,
-                                createdAt: new Date().toISOString(),
-                              }
-                              setRulesWithHistory(prev => [...prev, newRule])
-                            })
-                            showToast(`Created ${ruleSuggestion.merchants.length} rule${ruleSuggestion.merchants.length !== 1 ? 's' : ''}.`)
-                            setRuleSuggestion(null)
-                          }}
-                        >Yes, create</button>
-                        <button className="text-slate-400 hover:text-slate-200 px-1" onClick={() => setRuleSuggestion(null)}>Not now</button>
-                      </div>
-                    )}
-                    {reviewableTxns.slice(0, 15).map((tx, rowIdx) => {
-                      const acct       = accounts.find(a => a.id === tx.accountId)
-                      const cat        = categories.find(c => c.id === tx.categoryId)
-                      const isSelected = selectedTxnIds.has(tx.id)
-                      const confidence = txConfidence(tx, transactions)
-                      const isDup      = transactions.some(o =>
-                        o.id !== tx.id &&
-                        o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
-                        o.amount === tx.amount && o.date === tx.date
-                      )
-                      const isConfirmedDup = confirmedDupIds.has(tx.id)
-                      return (
-                        <div
-                          key={tx.id}
-                          className={`rounded-lg border px-3 py-2.5 flex items-center gap-3 transition-colors cursor-pointer ${
-                            isSelected ? 'border-blue-500/60 bg-blue-900/15' : 'border-slate-700/50 bg-slate-800/40 hover:bg-slate-800/60'
-                          }`}
-                          onClick={e => {
-                            // Don't toggle if clicking a button, select, or input
-                            if ((e.target as HTMLElement).closest('button,select,input')) return
-                            if (e.shiftKey && lastReviewSelectIdxRef.current >= 0) {
-                              const lo = Math.min(lastReviewSelectIdxRef.current, rowIdx)
-                              const hi = Math.max(lastReviewSelectIdxRef.current, rowIdx)
-                              setSelectedTxnIds(prev => {
-                                const next = new Set(prev)
-                                reviewableTxns.slice(lo, hi + 1).forEach(t => next.add(t.id))
-                                return next
-                              })
-                            } else {
-                              setSelectedTxnIds(prev => {
-                                const next = new Set(prev)
-                                next.has(tx.id) ? next.delete(tx.id) : next.add(tx.id)
-                                return next
-                              })
-                              lastReviewSelectIdxRef.current = rowIdx
-                            }
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={e => {
-                              // Checkbox toggles independently
-                              e.stopPropagation()
-                              setSelectedTxnIds(prev => {
-                                const next = new Set(prev)
-                                e.target.checked ? next.add(tx.id) : next.delete(tx.id)
-                                return next
-                              })
-                              lastReviewSelectIdxRef.current = rowIdx
-                            }}
-                            className="accent-blue-500 shrink-0"
-                          />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-medium text-sm truncate">{normalizeMerchant(tx.merchant)}</span>
-                              {isConfirmedDup ? (
-                                <span className="text-[10px] bg-slate-700 text-slate-400 border border-slate-600/40 px-1.5 py-0.5 rounded shrink-0">Kept Both</span>
-                              ) : isDup ? (
-                                <span className="text-[10px] bg-amber-900/50 text-amber-300 border border-amber-700/40 px-1.5 py-0.5 rounded shrink-0">Duplicate?</span>
-                              ) : null}
-                              {!tx.categoryId && tx.type === 'expense' && (
-                                <span className="text-[10px] bg-slate-700/70 text-slate-400 border border-slate-600/40 px-1.5 py-0.5 rounded shrink-0">No Category</span>
-                              )}
-                              {confidence === 'low' && !isDup && (
-                                <span className="text-[10px] bg-red-900/30 text-red-400 border border-red-700/30 px-1.5 py-0.5 rounded shrink-0">New Merchant</span>
-                              )}
-                            </div>
-                            <div className="text-xs text-slate-500 mt-0.5">{tx.date} · {acct?.name ?? '—'} · {TXN_TYPE_LABELS[tx.type]}</div>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0" onClick={e => e.stopPropagation()}>
-                            <span className={`text-sm font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-200'}`}>
-                              {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : ''}{currency(tx.amount)}
-                            </span>
-                            {/* Duplicate resolution actions */}
-                            {/* Duplicate resolution — hidden once confirmed */}
-                            {isDup && !isConfirmedDup && (
-                              <div className="flex flex-col gap-1 min-w-0">
-                                <button
-                                  className="text-[10px] text-slate-300 hover:text-white bg-slate-700 hover:bg-slate-600 px-2 py-0.5 rounded transition-colors whitespace-nowrap"
-                                  onClick={() => {
-                                    // Resolve both this tx AND all matching duplicates
-                                    const partnerIds = transactions
-                                      .filter(o => o.id !== tx.id &&
-                                        o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
-                                        o.amount === tx.amount && o.date === tx.date)
-                                      .map(o => o.id)
-                                    const allIds = [tx.id, ...partnerIds]
-                                    setDismissedDupIds(prev => new Set([...prev, ...allIds]))
-                                    setConfirmedDupIds(prev => new Set([...prev, ...allIds]))
-                                  }}
-                                >Keep Both</button>
-                                <button
-                                  className="text-[10px] text-red-400 hover:text-red-300 bg-red-900/20 hover:bg-red-900/40 border border-red-700/30 px-2 py-0.5 rounded transition-colors whitespace-nowrap"
-                                  onClick={() => softDeleteTxn(tx.id)}
-                                >Delete</button>
-                              </div>
-                            )}
-                            {/* Category quick-assign with rule suggestion */}
-                            {tx.type === 'expense' && (
-                              <select
-                                value={cat?.id ?? ''}
-                                onChange={e => {
-                                  const newCatId = e.target.value
-                                  if (!newCatId) return
-                                  setTxnWithHistory(prev => prev.map(x =>
-                                    x.id === tx.id ? { ...x, categoryId: newCatId } : x
-                                  ))
-                                  updateCategoryMemory(tx.merchant, newCatId)
-                                  // Rule suggestion: offer to create rule if none exists for this merchant
-                                  const merchant = normalizeMerchant(tx.merchant)
-                                  const ruleExists = rules.some(r =>
-                                    r.matchField === 'merchant' &&
-                                    r.categoryId === newCatId &&
-                                    r.matchText.split(',').some(m => m.trim().toLowerCase() === merchant.toLowerCase())
-                                  )
-                                  if (!ruleExists) setRuleSuggestion({ merchants: [merchant], categoryId: newCatId, txIds: [tx.id] })
-                                }}
-                                className="text-xs px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none max-w-[110px]"
-                              >
-                                <option value="">Assign…</option>
-                                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                              </select>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
-                    {reviewableTxns.length > 15 && (
-                      <p className="text-xs text-slate-500 text-center pt-1">
-                        Showing 15 of {reviewableTxns.length} — use <button className="underline text-slate-400 hover:text-slate-200" onClick={() => setTxnFilter('needs-review')}>Needs Review filter</button> to see all.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── V9.7 Subscriptions & Recurring ── always visible */}
-            <div className="rounded-2xl border border-teal-700/30 bg-teal-950/10 overflow-hidden">
-              <button
-                className="w-full flex items-center justify-between px-4 py-3 text-left"
-                onClick={() => setRecurringOpen(v => !v)}
-              >
-                <div className="flex items-center gap-2.5">
-                  {recurringCandidates.length > 0 && (
-                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-teal-500/25 text-teal-300 text-xs font-bold">{recurringCandidates.length}</span>
-                  )}
-                  <span className="text-teal-300 font-semibold text-sm">Subscriptions &amp; Recurring</span>
-                  {estimatedMonthlyRecurring > 0 && (
-                    <span className="text-slate-500 text-xs">≈ {currency(estimatedMonthlyRecurring)}/mo</span>
-                  )}
-                </div>
-                <span className="text-slate-500 text-xs">{recurringOpen ? '▲' : '▼'}</span>
-              </button>
-              {recurringOpen && (
-                <div className="border-t border-teal-700/20 px-4 pb-4 pt-3 space-y-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-xs text-slate-500">
-                      Recurring suggestions appear after the same merchant appears 2+ times with similar amounts and timing.
-                      {recurringCandidates.length === 0 && manualRecurringItems.length === 0 && ' Add or import repeated merchants to see suggestions.'}
-                    </p>
-                    <button
-                      className="shrink-0 text-xs text-teal-400 hover:text-teal-300 bg-teal-900/30 hover:bg-teal-900/50 border border-teal-700/30 px-2 py-1 rounded transition-colors"
-                      onClick={() => setShowAddRecurring(v => !v)}
-                    >{showAddRecurring ? 'Cancel' : '+ Add Item'}</button>
-                  </div>
-
-                  {/* V9.8 — Manual add form */}
-                  {showAddRecurring && (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 p-3 rounded-lg bg-slate-800/60 border border-slate-700/60">
-                      <input
-                        className="col-span-2 px-2 py-1.5 text-xs rounded bg-slate-800 border border-slate-600 focus:border-teal-500 focus:outline-none"
-                        placeholder="Name (e.g. Netflix, Rent)"
-                        value={recurringForm.name}
-                        onChange={e => setRecurringForm(v => ({ ...v, name: e.target.value }))}
-                      />
-                      <input
-                        type="number" min={0} step={0.01}
-                        className="px-2 py-1.5 text-xs rounded bg-slate-800 border border-slate-600 focus:border-teal-500 focus:outline-none"
-                        placeholder="Amount"
-                        value={recurringForm.amount}
-                        onChange={e => setRecurringForm(v => ({ ...v, amount: e.target.value }))}
-                      />
-                      <select
-                        className="px-2 py-1.5 text-xs rounded bg-slate-800 border border-slate-600 focus:outline-none"
-                        value={recurringForm.cadence}
-                        onChange={e => setRecurringForm(v => ({ ...v, cadence: e.target.value as RecurringCadence }))}
-                      >
-                        <option value="weekly">Weekly</option>
-                        <option value="bi-weekly">Bi-weekly</option>
-                        <option value="monthly">Monthly</option>
-                        <option value="yearly">Yearly</option>
-                      </select>
-                      <select
-                        className="px-2 py-1.5 text-xs rounded bg-slate-800 border border-slate-600 focus:outline-none"
-                        value={recurringForm.type}
-                        onChange={e => setRecurringForm(v => ({ ...v, type: e.target.value as 'expense' | 'income' }))}
-                      >
-                        <option value="expense">Expense</option>
-                        <option value="income">Income</option>
-                      </select>
-                      <div>
-                        <label className="text-[10px] text-slate-500 block mb-0.5">Next due</label>
-                        <input
-                          type="date"
-                          className="w-full px-2 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-teal-500 focus:outline-none"
-                          value={recurringForm.nextDueDate}
-                          onChange={e => setRecurringForm(v => ({ ...v, nextDueDate: e.target.value }))}
-                        />
-                      </div>
-                      <button
-                        className="col-span-2 text-xs bg-teal-600 hover:bg-teal-500 disabled:bg-slate-700 disabled:text-slate-500 px-3 py-1.5 rounded transition-colors"
-                        disabled={!recurringForm.name.trim() || parseFloat(recurringForm.amount) <= 0}
-                        onClick={() => {
-                          const item: ManualRecurringItem = {
-                            id: crypto.randomUUID(), name: recurringForm.name.trim(),
-                            amount: parseFloat(recurringForm.amount), cadence: recurringForm.cadence,
-                            nextDueDate: recurringForm.nextDueDate, type: recurringForm.type,
-                          }
-                          setManualRecurringItems(prev => [...prev, item])
-                          setRecurringForm({ name: '', amount: '', cadence: 'monthly', nextDueDate: new Date().toISOString().slice(0, 10), type: 'expense' })
-                          setShowAddRecurring(false)
-                        }}
-                      >Add recurring item</button>
-                    </div>
-                  )}
-
-                  {/* Combined detected + manual items table */}
-                  {(recurringCandidates.length > 0 || manualRecurringItems.length > 0) ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs min-w-[500px]">
-                        <thead>
-                          <tr className="text-left text-slate-400 border-b border-slate-700/60">
-                            <th className="pb-1.5 pr-3 font-medium">Merchant / Item</th>
-                            <th className="pb-1.5 pr-3 font-medium">Cadence</th>
-                            <th className="pb-1.5 pr-3 font-medium text-right">Est. /mo</th>
-                            <th className="pb-1.5 pr-3 font-medium">Last / Next</th>
-                            <th className="pb-1.5 pr-3 font-medium text-center">Seen</th>
-                            <th className="pb-1.5 font-medium">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {/* Manual items */}
-                          {manualRecurringItems.map(item => (
-                            <tr key={item.id} className="border-b border-slate-800/60 hover:bg-teal-900/5">
-                              <td className="py-1.5 pr-3">
-                                <span className="font-medium text-slate-200">{item.name}</span>
-                                <span className="ml-1.5 text-[9px] bg-blue-900/40 text-blue-300 border border-blue-700/30 px-1 py-0.5 rounded">Manual</span>
-                                {item.type === 'income' && <span className="ml-1 text-[9px] text-green-400">Income</span>}
-                              </td>
-                              <td className="py-1.5 pr-3 text-slate-400 capitalize">{item.cadence}</td>
-                              <td className="py-1.5 pr-3 text-right text-slate-300 font-medium">{currency(item.amount * cadenceMult(item.cadence))}</td>
-                              <td className="py-1.5 pr-3 text-slate-500">{item.nextDueDate}</td>
-                              <td className="py-1.5 pr-3 text-center text-slate-600">—</td>
-                              <td className="py-1.5">
-                                <button
-                                  className="text-[10px] text-red-400 hover:text-red-300 px-1.5 py-0.5 rounded"
-                                  onClick={() => setManualRecurringItems(prev => prev.filter(x => x.id !== item.id))}
-                                >Remove</button>
-                              </td>
-                            </tr>
-                          ))}
-                          {/* Detected recurring candidates */}
-                          {recurringCandidates.map(c => {
-                            const isConfirmed = confirmedRecurring.has(c.merchantKey)
-                            return (
-                              <tr key={c.merchantKey} className="border-b border-slate-800/60 hover:bg-teal-900/5">
-                                <td className="py-1.5 pr-3">
-                                  <span className="font-medium text-slate-200">{c.displayName}</span>
-                                  {isConfirmed
-                                    ? <span className="ml-1.5 text-[9px] bg-teal-900/50 text-teal-300 border border-teal-700/40 px-1 py-0.5 rounded">Confirmed</span>
-                                    : <span className="ml-1.5 text-[9px] bg-slate-700 text-slate-400 border border-slate-600/40 px-1 py-0.5 rounded">Suggested</span>
-                                  }
-                                </td>
-                                <td className="py-1.5 pr-3 text-slate-400 capitalize">{c.cadence}</td>
-                                <td className="py-1.5 pr-3 text-right text-slate-300 font-medium">{currency(c.estimatedMonthlyAmount)}</td>
-                                <td className="py-1.5 pr-3 text-slate-500">{c.lastDate}</td>
-                                <td className="py-1.5 pr-3 text-center text-slate-400">{c.count}×</td>
-                                <td className="py-1.5">
-                                  <div className="flex gap-1.5">
-                                    {!isConfirmed
-                                      ? <button className="text-[10px] text-teal-400 hover:text-teal-300 bg-teal-900/30 hover:bg-teal-900/50 border border-teal-700/30 px-1.5 py-0.5 rounded" onClick={() => setConfirmedRecurring(prev => new Set([...prev, c.merchantKey]))}>Confirm</button>
-                                      : <button className="text-[10px] text-slate-400 hover:text-slate-200 bg-slate-700/50 px-1.5 py-0.5 rounded" onClick={() => setConfirmedRecurring(prev => { const n = new Set(prev); n.delete(c.merchantKey); return n })}>Unconfirm</button>
-                                    }
-                                    <button className="text-[10px] text-slate-500 hover:text-slate-300 px-1.5 py-0.5 rounded" onClick={() => setDismissedRecurring(prev => new Set([...prev, c.merchantKey]))}>Dismiss</button>
-                                  </div>
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                        {estimatedMonthlyRecurring > 0 && (
-                          <tfoot>
-                            <tr className="border-t border-slate-700/60">
-                              <td colSpan={2} className="pt-2 text-xs text-slate-400 font-medium">Est. monthly total</td>
-                              <td className="pt-2 text-right text-sm font-bold text-teal-300">{currency(estimatedMonthlyRecurring)}</td>
-                              <td colSpan={3} />
-                            </tr>
-                          </tfoot>
-                        )}
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="rounded-lg border border-teal-700/20 bg-teal-900/10 px-4 py-4 text-center">
-                      <p className="text-sm text-teal-400/60 font-medium">No recurring transactions detected yet.</p>
-                      <p className="text-xs text-slate-500 mt-1">Log or import repeated merchants like Netflix, Spotify, gym, rent, or payroll — or use + Add Item above.</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
+          <TransactionsTab
+            transactions={transactions}
+            accounts={accounts}
+            categories={categories}
+            rules={rules}
+            period={period}
+            filteredTxns={filteredTxns}
+            hasActiveFilters={hasActiveFilters}
+            needsReviewTxnCount={needsReviewTxnCount}
+            reviewableTxns={reviewableTxns}
+            uncategorizedExpenseCount={uncategorizedExpenseCount}
+            recurringCandidates={recurringCandidates}
+            dismissedDupIds={dismissedDupIds}
+            confirmedDupIds={confirmedDupIds}
+            highlightedTxnId={highlightedTxnId}
+            txnFilter={txnFilter}
+            setTxnFilter={setTxnFilter}
+            txnSearch={txnSearch}
+            setTxnSearch={setTxnSearch}
+            txnAccountFilter={txnAccountFilter}
+            setTxnAccountFilter={setTxnAccountFilter}
+            txnCategoryFilter={txnCategoryFilter}
+            setTxnCategoryFilter={setTxnCategoryFilter}
+            txnListOpen={txnListOpen}
+            setTxnListOpen={setTxnListOpen}
+            deleteFilteredConfirm={deleteFilteredConfirm}
+            setDeleteFilteredConfirm={setDeleteFilteredConfirm}
+            inlineTxnEditId={inlineTxnEditId}
+            inlineTxnEditForm={inlineTxnEditForm}
+            setInlineTxnEditId={setInlineTxnEditId}
+            setInlineTxnEditForm={setInlineTxnEditForm}
+            inlineTxnMerchantRef={inlineTxnMerchantRef}
+            inlineTxnAmountRef={inlineTxnAmountRef}
+            inlineTxnTypeRef={inlineTxnTypeRef}
+            inlineTxnCategoryRef={inlineTxnCategoryRef}
+            inlineTxnRowRef={inlineTxnRowRef}
+            inlineEditBlurTimerRef={inlineEditBlurTimerRef}
+            txnDupWarning={txnDupWarning}
+            setTxnDupWarning={setTxnDupWarning}
+            showUncategorizedGlow={showUncategorizedGlow}
+            uncategorizedGlowSeenRef={uncategorizedGlowSeenRef}
+            setTxnWithHistory={setTxnWithHistory}
+            saveInlineTxnEdit={saveInlineTxnEdit}
+            cancelInlineTxnEdit={cancelInlineTxnEdit}
+            softDeleteTxn={softDeleteTxn}
+            showUndoableToast={showUndoableToast}
+            undoTxn={undoTxn}
+            needsReviewProps={{
+              reviewableTxns, transactions, accounts, categories, rules,
+              reviewOpen, setReviewOpen,
+              selectedTxnIds, setSelectedTxnIds, lastReviewSelectIdxRef,
+              confirmedDupIds, setDismissedDupIds, setConfirmedDupIds,
+              deleteDupsConfirm, setDeleteDupsConfirm,
+              bulkCategoryId, setBulkCategoryId, bulkAssign,
+              ruleSuggestion, setRuleSuggestion,
+              setTxnWithHistory, setRulesWithHistory, updateCategoryMemory, softDeleteTxn,
+              setTxnFilter, showToast,
+              uncatOpen, setUncatOpen, uncategorizedExpenseCount,
+              setInlineTxnEditId, setInlineTxnEditForm, setTxnDupWarning, inlineTxnAmountRef,
+            }}
+            recurringSectionProps={{
+              recurringCandidates, manualRecurringItems, setManualRecurringItems,
+              estimatedMonthlyRecurring,
+              recurringOpen, setRecurringOpen,
+              confirmedRecurring, setConfirmedRecurring,
+              dismissedRecurring, setDismissedRecurring,
+              showAddRecurring, setShowAddRecurring,
+              recurringForm, setRecurringForm,
+            }}
+            importHistoryProps={{
+              importBatches, transactions, accounts,
+              reviewableTxns, deletedTxns,
+              csvShowHistory, setCsvShowHistory,
+              batchToDelete, setBatchToDelete, deleteImportBatch, setImportBatches,
+              showRecentlyDeleted, setShowRecentlyDeleted,
+              restoreDeletedTxn, permanentlyDeleteTxn,
+            }}
+            logTransactionSlot={
             <Card title="Log Transaction" noHover>
              <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
                 {/* Date — native left/right used by date picker; Enter navigates forward */}
@@ -5021,559 +4622,8 @@ txnMerchantRef.current?.focus()
               </div>
               {txnHint && <p className="mt-2 text-sm text-amber-300">{txnHint}</p>}
             </Card>
-
-            {transactions.length > 0 ? (
-              <div className="rounded-2xl border border-slate-700/50 bg-slate-800/20 overflow-hidden">
-                {/* Collapsible header */}
-                <button
-                  className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-700/20 transition-colors"
-                  onClick={() => setTxnListOpen(v => !v)}
-                >
-                  <span className="text-lg font-semibold">Transactions ({transactions.length})</span>
-                  <span className="text-slate-500 text-xs">{txnListOpen ? '▲' : '▼'}</span>
-                </button>
-                {txnListOpen && (
-                <div className="px-4 pb-4">
-                {/* V9.5 — Search and multi-filter row */}
-                <div className="flex flex-wrap gap-2 mb-3">
-                  <input
-                    type="text"
-                    placeholder="Search merchant or notes…"
-                    value={txnSearch}
-                    onChange={e => setTxnSearch(e.target.value)}
-                    className="flex-1 min-w-[160px] px-2.5 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none placeholder:text-slate-600"
-                  />
-                  <select value={txnAccountFilter} onChange={e => setTxnAccountFilter(e.target.value)} className="text-xs px-2 py-1 rounded bg-slate-800 border border-slate-600 focus:outline-none">
-                    <option value="">All accounts</option>
-                    {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </select>
-                  <select value={txnCategoryFilter} onChange={e => setTxnCategoryFilter(e.target.value)} className="text-xs px-2 py-1 rounded bg-slate-800 border border-slate-600 focus:outline-none">
-                    <option value="">All categories</option>
-                    <option value="__none__">Uncategorized</option>
-                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                  {(txnSearch || txnAccountFilter || txnCategoryFilter) && (
-                    <button
-                      onClick={() => { setTxnSearch(''); setTxnAccountFilter(''); setTxnCategoryFilter('') }}
-                      className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
-                    >Clear</button>
-                  )}
-                </div>
-                {/* Filter pills */}
-                <div className="flex gap-1.5 flex-wrap mb-3">
-                  {TXN_FILTER_OPTIONS.map(opt => {
-                    const isNeedsReview   = opt.value === 'needs-review'
-                    const isUncategorized = opt.value === 'uncategorized'
-                    const isActive = txnFilter === opt.value
-                    const glowRing = isUncategorized && showUncategorizedGlow && !isActive
-                    const badge = isNeedsReview && needsReviewTxnCount > 0
-                      ? ` (${needsReviewTxnCount})`
-                      : isUncategorized && uncategorizedExpenseCount > 0
-                        ? ` (${uncategorizedExpenseCount})`
-                        : ''
-                    return (
-                      <button
-                        key={opt.value}
-                        onClick={() => {
-                          setTxnFilter(opt.value)
-                          if (isUncategorized) uncategorizedGlowSeenRef.current = true
-                        }}
-                        className={[
-                          'rounded-full px-3 py-0.5 text-xs transition-colors',
-                          isActive
-                            ? isNeedsReview ? 'bg-amber-600 text-white' : 'bg-blue-600 text-white'
-                            : 'bg-slate-700 hover:bg-slate-600 text-slate-300',
-                          glowRing ? 'ring-1 ring-amber-400/70 shadow-[0_0_6px_rgba(251,191,36,0.22)]' : '',
-                        ].filter(Boolean).join(' ')}
-                      >
-                        {opt.label}{badge}
-                      </button>
-                    )
-                  })}
-                </div>
-               {/* V9.12 — Filter results summary + delete action */}
-               {(hasActiveFilters || transactions.length > 0) && (
-                 <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-                   <span className="text-xs text-slate-500">
-                     {hasActiveFilters
-                       ? `Results: ${filteredTxns.length} of ${transactions.length} transaction${transactions.length !== 1 ? 's' : ''}`
-                       : `Showing all ${transactions.length} transaction${transactions.length !== 1 ? 's' : ''}`
-                     }
-                   </span>
-                   {hasActiveFilters && filteredTxns.length > 0 && (
-                     deleteFilteredConfirm ? (
-                       <div className="flex items-center gap-2 text-xs text-red-300">
-                         <span>Delete {filteredTxns.length} filtered transaction{filteredTxns.length !== 1 ? 's' : ''}?</span>
-                         <button className="bg-red-700/60 hover:bg-red-600/60 border border-red-600/40 px-2 py-0.5 rounded text-red-200"
-                           onClick={() => {
-                             const ids = new Set(filteredTxns.map(t => t.id))
-                             setTxnWithHistory(prev => prev.filter(t => !ids.has(t.id)))
-                             setDeleteFilteredConfirm(false)
-                             showUndoableToast(`Deleted ${ids.size} transaction${ids.size !== 1 ? 's' : ''}.`, undoTxn)
-                           }}>Delete</button>
-                         <button className="text-slate-400 hover:text-slate-200" onClick={() => setDeleteFilteredConfirm(false)}>Cancel</button>
-                       </div>
-                     ) : (
-                       <button
-                         className="text-[10px] text-red-400/60 hover:text-red-400 bg-slate-700/40 hover:bg-red-900/20 border border-slate-600/20 hover:border-red-700/30 px-2 py-0.5 rounded transition-colors"
-                         onClick={() => setDeleteFilteredConfirm(true)}
-                       >Delete {filteredTxns.length} filtered result{filteredTxns.length !== 1 ? 's' : ''}…</button>
-                     )
-                   )}
-                 </div>
-               )}
-               <div className="overflow-x-auto -mx-1 px-1">
-                  <table className="w-full text-sm min-w-[640px]">
-                    <thead>
-                      <tr className="text-left text-slate-400 border-b border-slate-700">
-                        <th className="pb-1.5 pr-3 font-medium whitespace-nowrap">Date</th>
-                        <th className="pb-1.5 pr-3 font-medium">Account</th>
-                        <th className="pb-1.5 pr-3 font-medium">Merchant</th>
-                        <th className="pb-1.5 pr-3 font-medium">Type</th>
-                        <th className="pb-1.5 pr-3 font-medium">Category</th>
-                        <th className="pb-1.5 pr-3 font-medium text-right whitespace-nowrap">Amount</th>
-                        <th className="pb-1.5 pr-3 font-medium hidden sm:table-cell">Notes</th>
-                        <th className="pb-1.5 sticky right-0 bg-slate-800" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredTxns.map(tx => {
-                        const acct = accounts.find(a => a.id === tx.accountId)
-                        const cat  = categories.find(c => c.id === tx.categoryId)
-                        const isInlineEdit = inlineTxnEditId === tx.id
-
-                      if (isInlineEdit) {
-                          // Blur-save helpers: schedule save on blur, cancel if focus moves within the row
-                          const scheduleBlurSave = () => {
-                            if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
-                            inlineEditBlurTimerRef.current = setTimeout(saveInlineTxnEdit, 150)
-                          }
-                          const cancelBlurSave = () => {
-                            if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
-                          }
-                          return (
-                            <tr key={tx.id} className="border-b border-slate-700 bg-blue-950/20">
-                              {/* Date */}
-                              <td className="py-1.5 pr-2">
-                                <input
-                                  type="date"
-                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
-                                  value={inlineTxnEditForm.date}
-                                  onChange={e => { setInlineTxnEditForm(v => ({ ...v, date: e.target.value })); setTxnDupWarning(false) }}
-                                  onFocus={cancelBlurSave}
-                                  onBlur={scheduleBlurSave}
-                                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() } if (e.key === 'Escape') cancelInlineTxnEdit() }}
-                                />
-                              </td>
-                              {/* Account */}
-                              <td className="py-1.5 pr-2">
-                                <select
-                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
-                                  value={inlineTxnEditForm.accountId}
-                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, accountId: e.target.value }))}
-                                  onFocus={cancelBlurSave}
-                                  onBlur={scheduleBlurSave}
-                                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() } if (e.key === 'Escape') cancelInlineTxnEdit() }}
-                                >
-                                  <option value="">Account…</option>
-                                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                                </select>
-                              </td>
-                              {/* Merchant — ArrowRight moves to Type */}
-                              <td className="py-1.5 pr-2">
-                                <input
-                                  ref={inlineTxnMerchantRef}
-                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
-                                  value={inlineTxnEditForm.merchant}
-                                  onFocus={e => { e.target.select(); cancelBlurSave() }}
-                                  onBlur={scheduleBlurSave}
-                                  onChange={e => { setInlineTxnEditForm(v => ({ ...v, merchant: e.target.value })); setTxnDupWarning(false) }}
-                                 onKeyDown={e => {
-  if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
-  if (e.key === 'Escape') cancelInlineTxnEdit()
-}}
-                                />
-                              </td>
-                              {/* Type — ArrowLeft → Merchant, ArrowRight → Category */}
-                              <td className="py-1.5 pr-2">
-                                <select
-                                  ref={inlineTxnTypeRef}
-                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
-                                  value={inlineTxnEditForm.type}
-                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, type: e.target.value as TransactionType }))}
-                                  onFocus={cancelBlurSave}
-                                  onBlur={scheduleBlurSave}
-                                  onKeyDown={e => {
-                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineTxnMerchantRef.current?.focus(); inlineTxnMerchantRef.current?.select(); return }
-                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnCategoryRef.current?.focus(); return }
-                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
-                                    if (e.key === 'Escape') cancelInlineTxnEdit()
-                                  }}
-                                >
-                                  {TXN_TYPES.map(t => <option key={t} value={t}>{TXN_TYPE_LABELS[t]}</option>)}
-                                </select>
-                              </td>
-                              {/* Category — ArrowLeft → Type, ArrowRight → Amount */}
-                              <td className="py-1.5 pr-2">
-                                <select
-                                  ref={inlineTxnCategoryRef}
-                                  className="w-full px-1 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
-                                  value={inlineTxnEditForm.categoryId}
-                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, categoryId: e.target.value }))}
-                                  onFocus={cancelBlurSave}
-                                  onBlur={scheduleBlurSave}
-                                  onKeyDown={e => {
-                                    if (e.key === 'ArrowLeft')  { e.preventDefault(); inlineTxnTypeRef.current?.focus(); return }
-                                    if (e.key === 'ArrowRight') { e.preventDefault(); inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select(); return }
-                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
-                                    if (e.key === 'Escape') cancelInlineTxnEdit()
-                                  }}
-                                >
-                                  <option value="">— none —</option>
-                                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                </select>
-                              </td>
-                              {/* Amount — default focus target; ArrowLeft → Category */}
-                              <td className="py-1.5 pr-2">
-                                <input
-                                  ref={inlineTxnAmountRef}
-                                  type="text"
-                                  inputMode="decimal"
-                                  className="w-24 px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none text-right"
-                                  value={inlineTxnEditForm.amount}
-                                  onFocus={e => { e.target.select(); cancelBlurSave() }}
-                                  onBlur={scheduleBlurSave}
-                                  onChange={e => {
-                                    const raw = e.target.value.replace(/[^0-9.]/g, '')
-                                    const parts = raw.split('.')
-                                    const cleaned = parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : raw
-                                    setInlineTxnEditForm(v => ({ ...v, amount: cleaned }))
-                                    setTxnDupWarning(false)
-                                  }}
-                                  onKeyDown={e => {
-                                    if (['e', 'E', '+', '-'].includes(e.key)) { e.preventDefault(); return }
-                                    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                                      e.preventDefault()
-                                      const cur = parseFloat(inlineTxnEditForm.amount) || 0
-                                      const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
-                                      setInlineTxnEditForm(v => ({ ...v, amount: next === 0 ? '' : String(next) }))
-                                      setTxnDupWarning(false)
-                                      return
-                                    }
-                                    if (e.key === 'ArrowLeft') { e.preventDefault(); inlineTxnCategoryRef.current?.focus(); return }
-                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() }
-                                    if (e.key === 'Escape') cancelInlineTxnEdit()
-                                  }}
-                                />
-                              </td>
-                              {/* Notes */}
-                              <td className="py-1.5 pr-2">
-                                <input
-                                  className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
-                                  value={inlineTxnEditForm.notes}
-                                  onFocus={cancelBlurSave}
-                                  onBlur={scheduleBlurSave}
-                                  onChange={e => setInlineTxnEditForm(v => ({ ...v, notes: e.target.value }))}
-                                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveInlineTxnEdit() } if (e.key === 'Escape') cancelInlineTxnEdit() }}
-                                />
-                              </td>
-                              <td className="py-1.5 whitespace-nowrap space-x-2">
-                                <button
-                                  className="text-blue-400 hover:text-blue-300 text-xs"
-                                  onMouseDown={cancelBlurSave}
-                                  onClick={saveInlineTxnEdit}
-                                >Save</button>
-                                <button
-                                  className="text-slate-400 hover:text-slate-300 text-xs"
-                                  onMouseDown={cancelBlurSave}
-                                  onClick={cancelInlineTxnEdit}
-                                >Cancel</button>
-                              </td>
-                            </tr>
-                          )
-                        }
-                        const txTypeColor = tx.type === 'income' ? 'bg-green-900/50 text-green-300' : tx.type === 'transfer' ? 'bg-blue-900/50 text-blue-300' : tx.type === 'credit card payment' ? 'bg-purple-900/50 text-purple-300' : 'bg-slate-700 text-slate-300'
-                        const txIsDup      = transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)
-                        const txIsKeptDup  = confirmedDupIds.has(tx.id)
-                        const txIsImported = !!tx.batchId
-                        const txReview     = txNeedsReview(tx, transactions, dismissedDupIds)
-                        const txRecurring  = recurringCandidates.find(c => c.txnIds.includes(tx.id))
-                        return (
-                          <tr key={tx.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedTxnId === tx.id ? 'bg-blue-600/20' : txReview ? 'bg-amber-950/10' : 'hover:bg-slate-800/40'}`}>
-                            <td className="py-2 pr-3 text-slate-300 text-xs whitespace-nowrap">{tx.date}</td>
-                            <td className="py-2 pr-3 text-slate-400 text-xs">{acct?.name ?? '—'}</td>
-                            <td className="py-2 pr-3 font-medium">
-                              {normalizeMerchant(tx.merchant)}
-                              {txIsImported && (
-                                <span className="ml-1.5 text-[9px] text-blue-400 bg-blue-900/30 border border-blue-700/30 px-1 py-0.5 rounded">Imported</span>
-                              )}
-                              {txIsKeptDup ? (
-                                <span className="ml-1.5 text-[9px] text-slate-400 bg-slate-700/60 border border-slate-600/40 px-1 py-0.5 rounded">Kept Both</span>
-                              ) : txIsDup ? (
-                                <span className="ml-1.5 text-[9px] text-amber-400 bg-amber-900/30 border border-amber-700/30 px-1 py-0.5 rounded">Duplicate?</span>
-                              ) : null}
-                              {txRecurring && (
-                                <span className="ml-1.5 text-[9px] text-teal-400 bg-teal-900/30 border border-teal-700/30 px-1 py-0.5 rounded capitalize">{txRecurring.cadence}</span>
-                              )}
-                            </td>
-                            <td className="py-2 pr-3">
-                              <span className={`text-xs px-1.5 py-0.5 rounded ${txTypeColor}`}>{TXN_TYPE_LABELS[tx.type]}</span>
-                            </td>
-                            <td className="py-2 pr-3 text-slate-400 text-xs">
-                              {cat?.name ?? <span className={tx.type === 'expense' ? 'text-amber-400/70' : 'text-slate-600'}>—</span>}
-                              {tx.appliedByRule && (
-                                <span className="ml-1.5 text-[9px] text-indigo-400 bg-indigo-900/40 border border-indigo-700/40 px-1 py-0.5 rounded">Rule Applied</span>
-                              )}
-                              {txReview && !txIsDup && !tx.appliedByRule && (
-                                <span className="ml-1.5 text-[9px] text-amber-400 bg-amber-900/30 border border-amber-700/30 px-1 py-0.5 rounded">Review</span>
-                              )}
-                            </td>
-                            <td className={`py-2 pr-3 text-right font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-100'}`}>
-                              {tx.type === 'income' ? '+' : tx.type === 'expense' ? '−' : ''}{currency(tx.amount)}
-                            </td>
-                            <td className="py-2 pr-3 text-slate-500 text-xs max-w-[100px] truncate hidden sm:table-cell">{tx.notes ?? '—'}</td>
-                            <td className="py-2 whitespace-nowrap space-x-2">
-                              <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
-                                setInlineTxnEditId(tx.id)
-                                setInlineTxnEditForm({ date: tx.date, accountId: tx.accountId, merchant: tx.merchant, amount: String(tx.amount), type: tx.type, categoryId: tx.categoryId ?? '', notes: tx.notes ?? '', toAccountId: tx.toAccountId ?? '' })
-                                setTxnDupWarning(false)
-                                setTimeout(() => { inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select() }, 0)
-                              }}>Edit</button>
-                              <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => softDeleteTxn(tx.id)}>Delete</button>
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-                </div>
-                )}
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 p-6 text-center">
-                <p className="text-slate-400 text-sm font-medium">No transactions yet</p>
-                {accounts.length === 0
-                  ? <p className="text-slate-500 text-xs mt-1">Add an account first, then log your first transaction above.</p>
-                  : <p className="text-slate-500 text-xs mt-1">Log your first transaction above. Use Generate Sample to try it out.</p>}
-              </div>
-            )}
-
-            {/* ── V8.5.1 Uncategorized Expenses ── */}
-            {uncategorizedExpenseCount > 0 && (
-              <div className="rounded-2xl border border-amber-600/20 bg-slate-800/20 overflow-hidden">
-                <button
-                  className="w-full flex items-center justify-between px-4 py-3.5 text-left hover:bg-slate-700/20 transition-colors"
-                  onClick={() => setUncatOpen(v => !v)}
-                >
-                  <span className="text-lg font-semibold">Uncategorized Expenses ({uncategorizedExpenseCount})</span>
-                  <span className="text-slate-500 text-xs">{uncatOpen ? '▲' : '▼'}</span>
-                </button>
-                {uncatOpen && (
-                  <div className="px-4 pb-4">
-                    <p className="text-xs text-slate-400 mb-3">
-                      Only expenses need budget categories. Transfers, income, and credit card payments do not count toward Budget Actuals.
-                    </p>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-slate-400 border-b border-slate-700">
-                          <th className="pb-1.5 pr-3 font-medium">Date</th>
-                          <th className="pb-1.5 pr-3 font-medium">Account</th>
-                          <th className="pb-1.5 pr-3 font-medium">Merchant</th>
-                          <th className="pb-1.5 pr-3 font-medium">Type</th>
-                          <th className="pb-1.5 pr-3 font-medium text-right">Amount</th>
-                          <th className="pb-1.5 pr-3 font-medium">Quick Assign</th>
-                          <th className="pb-1.5" />
-                        </tr>
-                      </thead>
-                      <tbody>
-                      {[...transactions]
-                        .filter(tx => !tx.categoryId && tx.type === 'expense')
-                        .sort((a, b) => b.date.localeCompare(a.date))
-                        .map(tx => {
-                          const acct = accounts.find(a => a.id === tx.accountId)
-                          const txTypeColor = tx.type === 'income' ? 'bg-green-900/50 text-green-300' : tx.type === 'transfer' ? 'bg-blue-900/50 text-blue-300' : tx.type === 'credit card payment' ? 'bg-purple-900/50 text-purple-300' : 'bg-slate-700 text-slate-300'
-                          return (
-                            <tr key={tx.id} className="border-b border-slate-800 hover:bg-amber-900/10 transition-colors">
-                              <td className="py-2 pr-3 text-slate-300 text-xs whitespace-nowrap">{tx.date}</td>
-                              <td className="py-2 pr-3 text-slate-400 text-xs">{acct?.name ?? '—'}</td>
-                              <td className="py-2 pr-3 font-medium">{normalizeMerchant(tx.merchant)}</td>
-                              <td className="py-2 pr-3">
-                                <span className={`text-xs px-1.5 py-0.5 rounded ${txTypeColor}`}>{TXN_TYPE_LABELS[tx.type]}</span>
-                              </td>
-                              <td className={`py-2 pr-3 text-right font-semibold ${tx.type === 'income' ? 'text-green-400' : 'text-slate-100'}`}>
-                                {tx.type === 'income' ? '+' : '−'}{currency(tx.amount)}
-                              </td>
-                              <td className="py-2 pr-3">
-                                <select
-                                  className="px-2 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
-                                  value=""
-                                  onChange={e => {
-                                    if (!e.target.value) return
-                                    setTxnWithHistory(prev => prev.map(x =>
-                                      x.id === tx.id ? { ...x, categoryId: e.target.value } : x
-                                    ))
-                                  }}
-                                >
-                                  <option value="">Assign category…</option>
-                                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                </select>
-                              </td>
-                              <td className="py-2 whitespace-nowrap space-x-2">
-                                <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
-                                  setInlineTxnEditId(tx.id)
-                                  setInlineTxnEditForm({ date: tx.date, accountId: tx.accountId, merchant: tx.merchant, amount: String(tx.amount), type: tx.type, categoryId: tx.categoryId ?? '', notes: tx.notes ?? '', toAccountId: tx.toAccountId ?? '' })
-                                  setTxnFilter('all')
-                                  setTxnDupWarning(false)
-                                  setTimeout(() => { inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select() }, 0)
-                                }}>Edit</button>
-                                <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => softDeleteTxn(tx.id)}>Delete</button>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                    </tbody>
-                  </table>
-                </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── V9.10 Import History (upgraded) ── */}
-            {importBatches.length > 0 && (
-              <Card title="Import History" noHover>
-                <button
-                  className="w-full flex items-center justify-between text-left"
-                  onClick={() => setCsvShowHistory(v => !v)}
-                >
-                  <span className="text-sm font-medium text-slate-300">Import History ({importBatches.length})</span>
-                  <span className="text-slate-500 text-xs">{csvShowHistory ? '▲' : '▼'}</span>
-                </button>
-                {csvShowHistory && (
-                  <div className="mt-3 overflow-x-auto">
-                    {/* Delete confirmation */}
-                    {batchToDelete && (() => {
-                      const b = importBatches.find(x => x.id === batchToDelete)
-                      const count = transactions.filter(tx => tx.batchId === batchToDelete).length
-                      return (
-                        <div className="mb-3 rounded-lg bg-red-900/20 border border-red-700/40 px-3 py-2.5 text-xs text-red-300 flex items-center justify-between gap-3">
-                          <span>Delete {count} transaction{count !== 1 ? 's' : ''} from "{b?.accountName}" ({b?.importMonth})? This action can be undone.</span>
-                          <div className="flex gap-2 shrink-0">
-                            <button className="text-red-400 hover:text-red-200 bg-red-900/40 border border-red-700/50 px-2 py-0.5 rounded" onClick={() => deleteImportBatch(batchToDelete)}>Delete</button>
-                            <button className="text-slate-400 hover:text-slate-200" onClick={() => setBatchToDelete(null)}>Cancel</button>
-                          </div>
-                        </div>
-                      )
-                    })()}
-                    <table className="w-full text-xs min-w-[540px]">
-                      <thead>
-                        <tr className="text-left text-slate-400 border-b border-slate-700">
-                          <th className="pb-1.5 pr-3 font-medium">Account</th>
-                          <th className="pb-1.5 pr-3 font-medium">Month</th>
-                          <th className="pb-1.5 pr-3 font-medium">Source</th>
-                          <th className="pb-1.5 pr-3 font-medium text-right">Imported</th>
-                          <th className="pb-1.5 pr-3 font-medium text-right">Skipped</th>
-                          <th className="pb-1.5 pr-3 font-medium">Date</th>
-                          <th className="pb-1.5 font-medium" />
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {importBatches.map(b => (
-                          <tr key={b.id} className="border-b border-slate-800 hover:bg-slate-800/30">
-                            <td className="py-1.5 pr-3 text-slate-300">{b.accountName}</td>
-                            <td className="py-1.5 pr-3 text-slate-400">{b.importMonth}</td>
-                            <td className="py-1.5 pr-3 text-slate-500 uppercase text-[10px]">{b.importSource ?? 'csv'}</td>
-                            <td className="py-1.5 pr-3 text-right text-green-400 font-medium">{b.importedCount}</td>
-                            <td className="py-1.5 pr-3 text-right text-amber-400">{b.skippedCount > 0 ? b.skippedCount : '—'}</td>
-                            <td className="py-1.5 pr-3 text-slate-500">{new Date(b.createdAt).toLocaleString()}</td>
-                            <td className="py-1.5">
-                              <button
-                                className="text-[10px] text-red-400/60 hover:text-red-400 transition-colors"
-                                onClick={() => setBatchToDelete(b.id)}
-                                title="Delete this import and its transactions"
-                              >Delete</button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    <button
-                      className="mt-2 text-xs text-slate-500 hover:text-red-400 transition-colors"
-                      onClick={() => setImportBatches([])}
-                    >Clear history (keeps transactions)</button>
-                  </div>
-                )}
-              </Card>
-            )}
-
-            {/* ── V9.14 Data Integrity Status ── */}
-            {transactions.length > 0 && (
-              <Card title="Data Integrity" noHover>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  {(() => {
-                    const importedCount = transactions.filter(t => t.batchId || t.batchId).length
-                    const manualCount   = transactions.filter(t => !t.batchId && !t.batchId).length
-                    const dupCandidates = transactions.filter(tx =>
-                      transactions.some(o => o.id !== tx.id &&
-                        o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
-                        o.amount === tx.amount && o.date === tx.date)
-                    ).length
-                    const lastBatch = importBatches.length > 0
-                      ? importBatches.reduce((a, b) => a.createdAt > b.createdAt ? a : b)
-                      : null
-                    return [
-                      { label: 'Total Transactions', val: transactions.length, sub: null, color: 'text-slate-200' },
-                      { label: 'Imported', val: importedCount, sub: lastBatch ? `Last: ${lastBatch.createdAt.slice(0, 10)}` : null, color: 'text-blue-300' },
-                      { label: 'Manual', val: manualCount, sub: null, color: 'text-slate-300' },
-                      { label: 'Needs Review', val: reviewableTxns.length, sub: null, color: reviewableTxns.length > 0 ? 'text-amber-300' : 'text-green-400' },
-                      { label: 'Dup. Candidates', val: dupCandidates, sub: null, color: dupCandidates > 0 ? 'text-amber-400' : 'text-slate-400' },
-                      { label: 'Import Batches', val: importBatches.length, sub: null, color: 'text-slate-400' },
-                      { label: 'Recently Deleted', val: deletedTxns.length, sub: deletedTxns.length > 0 ? 'Session only' : null, color: deletedTxns.length > 0 ? 'text-red-300' : 'text-slate-600' },
-                      { label: 'Uncategorized Expenses', val: transactions.filter(t => t.type === 'expense' && !t.categoryId).length, sub: null, color: 'text-slate-400' },
-                    ].map(({ label, val, sub, color }) => (
-                      <div key={label} className="rounded-lg bg-slate-800/60 border border-slate-700/40 px-3 py-2">
-                        <div className="text-xs text-slate-500 mb-0.5">{label}</div>
-                        <div className={`text-lg font-bold ${color}`}>{val}</div>
-                        {sub && <div className="text-[10px] text-slate-600 mt-0.5">{sub}</div>}
-                      </div>
-                    ))
-                  })()}
-                </div>
-                {deletedTxns.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-slate-700/60">
-                    <button
-                      className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-200 transition-colors"
-                      onClick={() => setShowRecentlyDeleted(v => !v)}
-                    >
-                      <span>Recently Deleted ({deletedTxns.length})</span>
-                      <span>{showRecentlyDeleted ? '▲' : '▼'}</span>
-                    </button>
-                    {showRecentlyDeleted && (
-                      <div className="mt-2 space-y-1">
-                        <p className="text-[10px] text-slate-600">Deleted this session only — not persisted after refresh.</p>
-                        {deletedTxns.map(tx => {
-                          const acct = accounts.find(a => a.id === tx.accountId)
-                          return (
-                            <div key={tx.id} className="flex items-center gap-2 text-xs py-1 border-b border-slate-800/60">
-                              <span className="text-slate-500 w-20 shrink-0">{tx.date}</span>
-                              <span className="flex-1 truncate text-slate-400">{tx.merchant}</span>
-                              <span className="text-slate-500">{acct?.name ?? '—'}</span>
-                              <span className="font-medium text-slate-300 w-16 text-right shrink-0">{currency(tx.amount)}</span>
-                              <button className="text-blue-400 hover:text-blue-300 shrink-0" onClick={() => restoreDeletedTxn(tx.id)}>Restore</button>
-                              <button className="text-red-500 hover:text-red-400 shrink-0" onClick={() => permanentlyDeleteTxn(tx.id)}>Remove</button>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </Card>
-            )}
-
-            {/* ── V8.3 Transaction Rules ── */}
+            }
+            transactionRulesSlot={
             <Card title="Transaction Rules" noHover>
               <p className="text-xs text-slate-400 mb-3">Rules help auto-categorize transactions based on merchant names or notes. New transactions get a category applied automatically if a rule matches.</p>
               <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-start">
@@ -5834,7 +4884,9 @@ txnMerchantRef.current?.focus()
                 </div>
               )}
             </Card>
-          </section>
+            }
+            txnTypes={[]}
+          />
         )}
 
         {/* ── SCENARIOS ── */}
@@ -6597,78 +5649,8 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
   )
 }
 
-// ── Shared UI primitives ──────────────────────────────────────────────────────
-
-function Card({ title, children, className = '', style, headerAction, noHover = false }: { title: React.ReactNode; children: React.ReactNode; className?: string; style?: React.CSSProperties; headerAction?: React.ReactNode; noHover?: boolean }) {
-  return (
-    <div style={style} className={`rounded-2xl border border-slate-700 bg-slate-800/80 shadow-lg p-4 md:p-5 transition-all duration-200 ${noHover ? '' : 'hover:-translate-y-0.5'} ${className}`}>
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-semibold">{title}</h2>
-        {headerAction}
-      </div>
-      {children}
-    </div>
-  )
-}
-
-function Pill({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return <button onClick={onClick} className={`px-3 py-1.5 rounded text-sm ${active ? 'bg-blue-600' : 'bg-slate-700 hover:bg-slate-600'} transition`}>{children}</button>
-}
-
-function Metric({ title, value, tone = 'neutral', featured = false, glow = false }: { title: string; value: string; tone?: 'neutral' | 'good' | 'warn' | 'risk' | 'danger'; featured?: boolean; glow?: boolean }) {
-  const c = tone === 'good' ? 'text-green-400' : tone === 'warn' ? 'text-yellow-300' : tone === 'risk' ? 'text-orange-300' : tone === 'danger' ? 'text-red-300' : 'text-slate-100'
-  return (
-    <div
-      className={`rounded-xl border p-3 ${featured ? 'border-sky-200/70 bg-gradient-to-br from-slate-700 via-slate-700/95 to-slate-600/95 shadow-[0_0_24px_rgba(125,211,252,0.28)]' : 'border-slate-700 bg-slate-800'} ${glow ? 'shadow-[0_0_22px_rgba(248,113,113,0.36)] border-red-400/85 bg-gradient-to-br from-red-800/45 via-red-900/38 to-red-950/34 ring-1 ring-red-300/40' : ''}`}
-      style={glow ? { boxShadow: 'inset 0 0 20px rgba(248,113,113,0.18), 0 0 22px rgba(248,113,113,0.36)' } : undefined}
-    >
-      <div className="text-xs text-slate-400 mb-1">{title}</div>
-      <div className="flex items-center justify-between gap-2">
-        <div className={`${featured ? 'text-xl text-sky-100' : `text-xl ${c}`} font-bold`}>{value}</div>
-        {featured && <div className="inline-flex rounded-full border border-sky-200/40 bg-slate-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-100">Primary Take-Home</div>}
-      </div>
-    </div>
-  )
-}
-
-function Info({ title, value, className = '', tone = 'neutral', glow = false }: { title: string; value: string; className?: string; tone?: 'neutral' | 'good' | 'warn' | 'risk' | 'danger'; glow?: boolean }) {
-  const tc = tone === 'good' ? 'text-green-400' : tone === 'warn' ? 'text-yellow-300' : tone === 'risk' ? 'text-orange-300' : tone === 'danger' ? 'text-red-300' : 'text-slate-100'
-  return (
-    <div
-      className={`rounded-xl border border-slate-700 bg-slate-800 p-3 ${glow ? 'shadow-[0_0_22px_rgba(248,113,113,0.34)] border-red-400/85 bg-gradient-to-br from-red-800/45 via-red-900/38 to-red-950/34 ring-1 ring-red-300/35' : ''}`}
-      style={glow ? { boxShadow: 'inset 0 0 18px rgba(248,113,113,0.17), 0 0 22px rgba(248,113,113,0.34)' } : undefined}
-    >
-      <div className="text-xs text-slate-400 mb-1">{title}</div>
-      <div className={`font-semibold ${tc} ${className}`}>{value}</div>
-    </div>
-  )
-}
-
-function ActionCard({ title, description, onClick, tone = 'neutral' }: { title: string; description: string; onClick: () => void; tone?: 'neutral' | 'warn' | 'good' }) {
-  const accent = tone === 'warn' ? 'border-yellow-500/40 hover:border-yellow-400/60' : tone === 'good' ? 'border-green-500/40 hover:border-green-400/60' : 'border-slate-600/60 hover:border-slate-500/80'
-  const dot = tone === 'warn' ? 'bg-yellow-400' : tone === 'good' ? 'bg-green-400' : 'bg-slate-500'
-  return (
-    <button
-      onClick={onClick}
-      className={`group text-left rounded-xl border ${accent} bg-slate-800/70 hover:bg-slate-700/80 p-3 transition-all duration-200 hover:-translate-y-0.5 shadow-sm w-full`}
-    >
-      <div className="flex items-center gap-1.5 mb-1">
-        {tone !== 'neutral' && <span className={`shrink-0 h-1.5 w-1.5 rounded-full ${dot}`} />}
-        <span className="text-sm font-semibold text-slate-100 group-hover:text-white transition-colors">{title}</span>
-      </div>
-      <p className="text-xs text-slate-400 leading-relaxed">{description}</p>
-    </button>
-  )
-}
-
-function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: string; valueClass?: string }) {
-  return (
-    <div className="py-1.5 border-b border-slate-700 last:border-b-0 flex justify-between gap-2 text-sm">
-      <span className="text-slate-400 shrink-0">{l}</span>
-      <span className={`font-medium text-right ${valueClass}`}>{v}</span>
-    </div>
-  )
-}
+// ── Shared UI primitives imported from ./components/ui ────────────────────────
+// Card, Pill, Metric, Info, ActionCard, Row
 
 // ── V9.6 CSV Import Modal ─────────────────────────────────────────────────────
 
