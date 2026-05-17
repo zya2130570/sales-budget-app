@@ -39,17 +39,14 @@ export interface NeedsReviewSectionProps {
   setRulesWithHistory: (fn: (prev: TransactionRule[]) => TransactionRule[]) => void
   updateCategoryMemory: (merchant: string, catId: string) => void
   softDeleteTxn: (id: string) => void
-  setTxnFilter: React.Dispatch<React.SetStateAction<string>>
+  setTxnFilter: (v: string) => void
   showToast: (msg: string) => void
   // Uncategorized section
   uncatOpen: boolean
   setUncatOpen: React.Dispatch<React.SetStateAction<boolean>>
   uncategorizedExpenseCount: number
   setInlineTxnEditId: React.Dispatch<React.SetStateAction<string | null>>
-  setInlineTxnEditForm: React.Dispatch<React.SetStateAction<{
-    date: string; accountId: string; merchant: string; amount: string
-    type: string; categoryId: string; notes: string; toAccountId: string
-  }>>
+  setInlineTxnEditForm: (v: { date: string; accountId: string; merchant: string; amount: string; type: string; categoryId: string; notes: string; toAccountId: string }) => void
   setTxnDupWarning: React.Dispatch<React.SetStateAction<boolean>>
   inlineTxnAmountRef: React.RefObject<HTMLInputElement | null>
 }
