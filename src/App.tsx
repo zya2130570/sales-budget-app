@@ -44,6 +44,14 @@ import {
 import { runImportPipeline, buildImportedTransactions } from './utils/importHelpers'
 import type { ImportPipelineResult } from './utils/importHelpers'
 import { parseCsv, detectColumns, generateSampleCsvString } from './utils/csv'
+// V10.1 — extracted helpers
+import { normalizeMerchant } from './utils/merchantNormalization'
+import { loadCategoryMemory, saveCategoryMemory } from './utils/categoryMemory'
+import type { CategoryMemory } from './utils/categoryMemory'
+import { resolveHint } from './utils/importHints'
+import type { HintResult } from './utils/importHints'
+import { detectRecurringPatterns } from './utils/recurring'
+import type { RecurringCandidate } from './utils/recurring'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -83,58 +91,6 @@ function extractCategoryHints(rows: Array<Record<string, string>>): Record<strin
 
 // ── V10.0 Category Memory ─────────────────────────────────────────────────────
 // Persists normalized-merchant → categoryId to improve future import hints.
-const CATEGORY_MEMORY_KEY = 'flow_category_memory'
-
-function loadCategoryMemory(): Record<string, string> {
-  try { const s = localStorage.getItem(CATEGORY_MEMORY_KEY); return s ? JSON.parse(s) : {} } catch { return {} }
-}
-function saveCategoryMemory(mem: Record<string, string>): void {
-  try { localStorage.setItem(CATEGORY_MEMORY_KEY, JSON.stringify(mem)) } catch { /* ignore */ }
-}
-
-type HintResult = { categoryId: string; categoryName: string; confidence: 'high' | 'medium' | 'low'; source: 'rule' | 'memory' | 'history' | 'csv' }
-
-/**
- * Resolve the best category hint for a merchant name using priority order:
- * 1. Rule match (High confidence)
- * 2. Category memory (Medium)
- * 3. CSV-provided category that matches a budget category (Low)
- */
-function resolveHint(
-  normalizedMerchant: string,
-  csvHint: string,
-  rules: { id: string; matchText: string; matchField: string; categoryId: string }[],
-  categories: { id: string; name: string }[],
-  memory: Record<string, string>,
-): HintResult | null {
-  const key = normalizedMerchant.toLowerCase()
-
-  // Priority 1: Rule match
-  for (const rule of rules) {
-    if (rule.matchField === 'merchant') {
-      const terms = rule.matchText.split(',').map(t => t.trim().toLowerCase())
-      if (terms.some(t => t && key.includes(t))) {
-        const cat = categories.find(c => c.id === rule.categoryId)
-        if (cat) return { categoryId: cat.id, categoryName: cat.name, confidence: 'high', source: 'rule' }
-      }
-    }
-  }
-
-  // Priority 2: Category memory (previously categorized by user)
-  if (memory[key]) {
-    const cat = categories.find(c => c.id === memory[key])
-    if (cat) return { categoryId: cat.id, categoryName: cat.name, confidence: 'medium', source: 'memory' }
-  }
-
-  // Priority 3: CSV-provided hint that matches a budget category name
-  if (csvHint) {
-    const cat = categories.find(c => c.name.toLowerCase() === csvHint.toLowerCase())
-    if (cat) return { categoryId: cat.id, categoryName: cat.name, confidence: 'low', source: 'csv' }
-  }
-
-  return null
-}
-
 /** Payment/transfer merchant patterns that should be flagged for review rather than categorized. */
 const PAYMENT_PATTERNS = /payment|transfer|zelle|venmo|paypal|apple cash|e-payment|gsbank|discover e|online transfer/i
 
@@ -193,71 +149,7 @@ function parsePdfText(raw: string): { rows: PdfImportRow[]; warning: string } {
   return { rows, warning }
 }
 
-// ── V9.5 Merchant normalization ───────────────────────────────────────────────
-// Cleans up raw bank-export merchant strings to friendly display names.
-// Pattern: strip trailing store numbers, normalize well-known brands.
-const MERCHANT_ALIASES: Array<[RegExp, string]> = [
-  [/^MCDONALDS?(\s|$)/i,                  "McDonald's"],
-  [/^CHICK.FIL.A/i,                        'Chick-fil-A'],
-  [/^CHIPOTLE/i,                           'Chipotle'],
-  [/^AMZN\s*MKTPLACE/i,                   'Amazon'],
-  [/^AMAZON\s*(COM|MKTPLACE|PRIME|DIGITAL)?/i, 'Amazon'],
-  [/^WHOLEFDS|WHOLE\s*FOODS/i,            'Whole Foods'],
-  [/^STARBUCKS|SBUX/i,                    'Starbucks'],
-  [/^DUNKIN/i,                             "Dunkin'"],
-  [/^WALMART|WAL.MART/i,                  'Walmart'],
-  [/^TARGET(\s|$)/i,                       'Target'],
-  [/^COSTCO/i,                             'Costco'],
-  [/^NETFLIX(\s|$|\.)/i,                  'Netflix'],
-  [/^SPOTIFY(\s|$)/i,                     'Spotify'],
-  [/^APPLE\.?COM\/?BILL?/i,              'Apple'],
-  [/^APPLE(\s|$)/i,                        'Apple'],
-  [/^OPENAI/i,                             'OpenAI'],
-  [/^GOOGLE(\s*(ONE|STORAGE|PLAY|LLC))?/i,'Google'],
-  [/^DOORDASH/i,                           'DoorDash'],
-  [/^UBER\s*EATS/i,                        'Uber Eats'],
-  [/^UBER(\s|$)/i,                         'Uber'],
-  [/^GRUBHUB/i,                            'Grubhub'],
-  [/^CHEVRON/i,                            'Chevron'],
-  [/^EXXON/i,                              'ExxonMobil'],
-  [/^SHELL(\s|$)/i,                        'Shell'],
-  [/^VENMO\b/i,                            'Venmo'],
-  [/^PAYPAL\b/i,                           'PayPal'],
-  [/^HULU(\s|$)/i,                         'Hulu'],
-  [/^DISNEY\s*PLUS|DISNEY\+/i,            'Disney+'],
-  [/^YOUTUBE\s*PREMIUM/i,                  'YouTube Premium'],
-  [/^MICROSOFT(\s|$)/i,                    'Microsoft'],
-  [/^AMAZON\s*WEB|AWS/i,                  'AWS'],
-  [/^GITHUB(\s|$)/i,                       'GitHub'],
-]
-function normalizeMerchant(raw: string): string {
-  if (!raw) return raw
-  // Strip common bank prefixes (SQ *, TST *, PP *)
-  const stripped = raw.replace(/^(SQ|TST|PP)\s*\*/i, '').replace(/\*/g, ' ').replace(/\s+/g, ' ').trim()
-  for (const [pattern, name] of MERCHANT_ALIASES) {
-    if (pattern.test(stripped)) return name
-  }
-  // Strip trailing store/location numbers: "TARGET #4821" → "Target"
-  const noNum = stripped.replace(/\s+#\d+$/, '').replace(/\s+\d{4,}$/, '').trim()
-  // Apply title-case to all-caps strings
-  if (noNum === noNum.toUpperCase() && noNum.length > 3) {
-    return noNum.replace(/\b\w/g, c => c.toUpperCase()).toLowerCase().replace(/\b\w/g, c => c.toUpperCase())
-  }
-  return noNum || stripped
-}
-
 // ── V9.7 Recurring detection ──────────────────────────────────────────────────
-type RecurringCandidate = {
-  merchantKey: string         // normalized, lowercased merchant name (group key)
-  displayName: string         // pretty display name
-  cadence: 'weekly' | 'bi-weekly' | 'monthly'
-  estimatedMonthlyAmount: number
-  lastDate: string
-  count: number
-  txnIds: string[]
-  confidence: 'high' | 'medium'
-}
-
 // V9.8 — Manual recurring items (user-entered, not auto-detected)
 type RecurringCadence = 'weekly' | 'bi-weekly' | 'monthly' | 'yearly'
 type ManualRecurringItem = {
@@ -267,59 +159,6 @@ type ManualRecurringItem = {
 // V9.8 — Cash flow forecast line item
 type ForecastItem = {
   date: string; name: string; amount: number; type: 'expense' | 'income'; source: 'detected' | 'manual'
-}
-
-/** Detect transactions that repeat on a regular cadence per normalized merchant. */
-function detectRecurringPatterns(transactions: Transaction[]): RecurringCandidate[] {
-  // Group expenses (and income for payroll) by normalized merchant
-  const groups = new Map<string, Transaction[]>()
-  for (const tx of transactions) {
-    if (tx.type !== 'expense' && tx.type !== 'income') continue
-    const display = normalizeMerchant(tx.merchant)
-    const key     = display.toLowerCase()
-    if (!groups.has(key)) groups.set(key, [])
-    groups.get(key)!.push(tx)
-  }
-
-  const results: RecurringCandidate[] = []
-
-  for (const [key, txns] of groups.entries()) {
-    if (txns.length < 2) continue
-    const sorted = [...txns].sort((a, b) => a.date.localeCompare(b.date))
-
-    // Compute day-gaps between consecutive occurrences
-    const gaps: number[] = []
-    for (let i = 1; i < sorted.length; i++) {
-      const ms = new Date(sorted[i].date).getTime() - new Date(sorted[i - 1].date).getTime()
-      gaps.push(ms / 86_400_000)
-    }
-    const medianGap = [...gaps].sort((a, b) => a - b)[Math.floor(gaps.length / 2)]
-
-    let cadence: RecurringCandidate['cadence'] | null = null
-    if (medianGap >= 5  && medianGap <= 9)  cadence = 'weekly'
-    else if (medianGap >= 11 && medianGap <= 18) cadence = 'bi-weekly'
-    else if (medianGap >= 25 && medianGap <= 35) cadence = 'monthly'
-    if (!cadence) continue
-
-    // Amount consistency: skip if amounts vary more than 40%
-    const avg = sorted.reduce((s, t) => s + t.amount, 0) / sorted.length
-    const maxDev = Math.max(...sorted.map(t => Math.abs(t.amount - avg) / (avg || 1)))
-    if (maxDev > 0.4) continue
-
-    const monthlyAmt = cadence === 'weekly' ? avg * 4.33 : cadence === 'bi-weekly' ? avg * 2.17 : avg
-    results.push({
-      merchantKey: key,
-      displayName: normalizeMerchant(sorted[0].merchant),
-      cadence,
-      estimatedMonthlyAmount: monthlyAmt,
-      lastDate: sorted[sorted.length - 1].date,
-      count: sorted.length,
-      txnIds: sorted.map(t => t.id),
-      confidence: sorted.length >= 3 ? 'high' : 'medium',
-    })
-  }
-
-  return results.sort((a, b) => b.estimatedMonthlyAmount - a.estimatedMonthlyAmount)
 }
 
 // ── V9.5 Review classification ────────────────────────────────────────────────
