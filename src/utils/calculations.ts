@@ -567,3 +567,35 @@ function applyActualsOverlay(
     context: result.context ? `${result.context} ${note}` : note,
   }
 }
+
+// ── Period date-range helper ──────────────────────────────────────────────────
+// Moved from App.tsx in V10.2. Returns ISO date strings for the start and end
+// of the current period relative to today.
+export function getPeriodDateRange(period: Period): { start: string; end: string } {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const fmt = (d: Date) => d.toISOString().slice(0, 10)
+  if (period === 'monthly') {
+    return {
+      start: fmt(new Date(today.getFullYear(), today.getMonth(), 1)),
+      end:   fmt(new Date(today.getFullYear(), today.getMonth() + 1, 0)),
+    }
+  }
+  if (period === 'yearly') {
+    return {
+      start: fmt(new Date(today.getFullYear(), 0, 1)),
+      end:   fmt(new Date(today.getFullYear(), 11, 31)),
+    }
+  }
+  if (period === 'weekly') {
+    const sun = new Date(today)
+    sun.setDate(today.getDate() - today.getDay())
+    const sat = new Date(sun)
+    sat.setDate(sun.getDate() + 6)
+    return { start: fmt(sun), end: fmt(sat) }
+  }
+  // bi-weekly: trailing 14-day window ending today
+  const start = new Date(today)
+  start.setDate(today.getDate() - 13)
+  return { start: fmt(start), end: fmt(today) }
+}
