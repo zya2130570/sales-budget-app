@@ -68,6 +68,8 @@ import { TXN_TYPE_LABELS, TXN_FILTER_OPTIONS } from './utils/transactionHelpers'
 import { TransactionsTab } from './components/TransactionsTab'
 import { GoalPlanningSummary } from './components/GoalPlanningSummary'
 import { GoalCard } from './components/GoalCard'
+import { SavingsGoalSetManager } from './components/SavingsGoalSetManager'
+import { SavingsGoalForm } from './components/SavingsGoalForm'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -4635,187 +4637,30 @@ txnMerchantRef.current?.focus()
         {/* ── SAVINGS GOALS ── */}
         {tab === 'Targets' && (
           <section className="space-y-4">
-            <Card title="Create Savings Goal" noHover>
-              <div className="grid md:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Goal Name</label>
-                  <div ref={targetAutocompleteWrapRef} className="relative">
-                    <input
-                      ref={targetNameRef}
-                      className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600"
-                      value={targetForm.name}
-                      placeholder="e.g. Emergency Fund"
-                      onFocus={() => setShowTargetSuggestions(true)}
-                      onChange={(e) => { setTargetForm((v) => ({ ...v, name: e.target.value })); setTargetSuggestionIndex(-1); setShowTargetSuggestions(true); setTargetFormHint('') }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'ArrowDown') {
-                          e.preventDefault()
-                          if (targetSuggestionList.length) { setTargetSuggestionIndex((v) => Math.min(v + 1, targetSuggestionList.length - 1)); setShowTargetSuggestions(true) }
-                          return
-                        }
-                        if (e.key === 'ArrowUp') {
-                          e.preventDefault()
-                          if (targetSuggestionList.length) { setTargetSuggestionIndex((v) => Math.max(v - 1, 0)); setShowTargetSuggestions(true) }
-                          return
-                        }
-                        if (e.key === 'Enter') {
-                          e.preventDefault()
-                          if (targetSuggestionIndex >= 0 && targetSuggestionList.length) {
-                            setTargetForm((v) => ({ ...v, name: targetSuggestionList[targetSuggestionIndex] }))
-                            setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus(); return
-                          }
-                          if (targetSuggestionList.length === 1) {
-                            setTargetForm((v) => ({ ...v, name: targetSuggestionList[0] }))
-                            setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus(); return
-                          }
-                          if (targetForm.name.trim()) { setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus() }
-                        }
-                      }}
-                    />
-                    {showTargetSuggestions && targetSuggestionList.length > 0 && (
-                      <div className="absolute z-10 w-full mt-1 max-h-48 overflow-y-auto bg-slate-800 border border-slate-600 rounded-lg">
-                        {targetSuggestionList.map((preset, i) => (
-                          <button
-                            key={preset}
-                            type="button"
-                            className={`w-full text-left px-2 py-1 text-sm ${i === targetSuggestionIndex ? 'bg-slate-700' : 'hover:bg-slate-700'}`}
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => { setTargetForm((v) => ({ ...v, name: preset })); setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus() }}
-                          >
-                            {preset}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Goal Amount</label>
-                  <input
-                    ref={targetGoalRef}
-                    type="number"
-                    min={0}
-                    step={25}
-                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600"
-                    value={targetForm.goalAmount}
-                    onChange={(e) => setTargetForm((v) => ({ ...v, goalAmount: e.target.value }))}
-                    onFocus={e => e.target.select()}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); targetSavedRef.current?.focus() }
-                    }}
-                    placeholder="e.g. 1000"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Current Saved</label>
-                  <input
-                    ref={targetSavedRef}
-                    type="number"
-                    min={0}
-                    step={25}
-                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600"
-                    value={targetForm.currentSaved}
-                    onChange={(e) => setTargetForm((v) => ({ ...v, currentSaved: e.target.value }))}
-                    onFocus={e => e.target.select()}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); targetStartDateRef.current?.focus() }
-                      if (e.key === 'ArrowLeft') { e.preventDefault(); targetGoalRef.current?.focus() }
-                    }}
-                    placeholder="e.g. 250"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Start Date (when you began saving)</label>
-                  <input
-                    ref={targetStartDateRef}
-                    type="date"
-                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600"
-                    value={targetForm.startDate}
-                    onChange={(e) => setTargetForm((v) => ({ ...v, startDate: e.target.value }))}
-                    onKeyDown={(e) => {
-                      if (e.key === 'ArrowRight') {
-                        startDateLeftArrowCount.current = 0
-                        startDateArrowCount.current += 1
-                        if (startDateArrowCount.current > 2) {
-                          e.preventDefault()
-                          startDateArrowCount.current = 0
-                          targetDeadlineRef.current?.focus()
-                        }
-                      } else if (e.key === 'ArrowLeft') {
-                        startDateArrowCount.current = 0
-                        startDateLeftArrowCount.current += 1
-                        if (startDateLeftArrowCount.current > 2) {
-                          e.preventDefault()
-                          startDateLeftArrowCount.current = 0
-                          targetSavedRef.current?.focus()
-                        }
-                      } else if (e.key === 'Enter') {
-                        e.preventDefault()
-                        startDateArrowCount.current = 0
-                        startDateLeftArrowCount.current = 0
-                        targetDeadlineRef.current?.focus()
-                      } else {
-                        startDateArrowCount.current = 0
-                        startDateLeftArrowCount.current = 0
-                      }
-                    }}
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Deadline (when the goal is due)</label>
-                  <input
-                    ref={targetDeadlineRef}
-                    type="date"
-                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600"
-                    value={targetForm.deadline}
-                    onChange={(e) => setTargetForm((v) => ({ ...v, deadline: e.target.value }))}
-                    onKeyDown={(e) => {
-                      if (e.key === 'ArrowRight') {
-                        deadlineLeftArrowCount.current = 0
-                        deadlineArrowCount.current += 1
-                        if (deadlineArrowCount.current > 2) {
-                          e.preventDefault()
-                          deadlineArrowCount.current = 0
-                          createTarget()
-                        }
-                      } else if (e.key === 'ArrowLeft') {
-                        deadlineArrowCount.current = 0
-                        deadlineLeftArrowCount.current += 1
-                        if (deadlineLeftArrowCount.current > 2) {
-                          e.preventDefault()
-                          deadlineLeftArrowCount.current = 0
-                          targetStartDateRef.current?.focus()
-                        }
-                      } else if (e.key === 'Enter') {
-                        e.preventDefault()
-                        deadlineArrowCount.current = 0
-                        deadlineLeftArrowCount.current = 0
-                        createTarget()
-                      } else {
-                        deadlineArrowCount.current = 0
-                        deadlineLeftArrowCount.current = 0
-                      }
-                    }}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <button className="w-full px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 transition-colors" onClick={createTarget}>Create Savings Goal</button>
-                  <button
-                    className="w-full px-3 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors"
-                    title="Instantly add a randomized sample savings goal"
-                    onClick={generateSampleGoal}
-                  >Generate Sample</button>
-                </div>
-              </div>
-              {targetFormHint && (
-                <p className="mt-2 text-sm text-amber-300">{targetFormHint}</p>
-              )}
-              {editTargetHint && (
-  <p className="text-xs text-yellow-300 mt-1">
-    {editTargetHint}
-  </p>
-)}
-            </Card>
+            <SavingsGoalForm
+              targetForm={targetForm}
+              setTargetForm={setTargetForm}
+              targetFormHint={targetFormHint}
+              setTargetFormHint={setTargetFormHint}
+              editTargetHint={editTargetHint}
+              targetSuggestionList={targetSuggestionList}
+              showTargetSuggestions={showTargetSuggestions}
+              setShowTargetSuggestions={setShowTargetSuggestions}
+              targetSuggestionIndex={targetSuggestionIndex}
+              setTargetSuggestionIndex={setTargetSuggestionIndex}
+              targetAutocompleteWrapRef={targetAutocompleteWrapRef}
+              targetNameRef={targetNameRef}
+              targetGoalRef={targetGoalRef}
+              targetSavedRef={targetSavedRef}
+              targetStartDateRef={targetStartDateRef}
+              targetDeadlineRef={targetDeadlineRef}
+              startDateArrowCount={startDateArrowCount}
+              deadlineArrowCount={deadlineArrowCount}
+              startDateLeftArrowCount={startDateLeftArrowCount}
+              deadlineLeftArrowCount={deadlineLeftArrowCount}
+              createTarget={createTarget}
+              generateSampleGoal={generateSampleGoal}
+            />
 
             {/* Target Undo / Redo / Clear row */}
             <div className="flex gap-2 items-center">
@@ -4841,100 +4686,26 @@ txnMerchantRef.current?.focus()
               </button>
             </div>
 
-            <Card title="Savings Goal Sets" noHover>
-              <div className="grid md:grid-cols-3 gap-2">
-                <input className="p-2 rounded bg-slate-800 border border-slate-600" value={targetSetName} onChange={(e) => setTargetSetName(e.target.value)} placeholder="Savings goal set name" />
-                <button className="rounded bg-blue-600" onClick={() => {
-                  const n = targetSetName.trim()
-                  if (!n) return
-                  pushSetHistory(savedTargetSets)
-                  setSavedTargetSets([{ name: n, targets, savedAt: new Date().toISOString() }, ...savedTargetSets.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
-                  showToast('Savings goal set saved.')
-                }}>Save</button>
-                <div className="flex items-center gap-2">
-                  <div className="text-xs text-slate-400">Saved locally</div>
-                  {savedTargetSetsHistory.length > 0 && (
-                    <button onClick={undoSavedSets} className="text-xs text-slate-400 hover:text-slate-200 underline">Undo</button>
-                  )}
-                  {savedTargetSetsRedo.length > 0 && (
-                    <button onClick={redoSavedSets} className="text-xs text-slate-400 hover:text-slate-200 underline">Redo</button>
-                  )}
-                </div>
-              </div>
-              <div className="space-y-2 mt-2">
-                {savedTargetSets.map((s, idx) => (
-                  <div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between items-center gap-2">
-                    {editingSetIdx === idx ? (
-                      <div
-                        ref={el => { renameSetRowRef.current = el }}
-                        className="flex flex-1 items-center gap-2"
-                        onBlur={e => {
-                          // Blur-save only when focus leaves the entire rename container
-                          if (!renameSetRowRef.current?.contains(e.relatedTarget as Node)) {
-                            const newName = renameSetValue.trim()
-                            if (newName && newName !== s.name) {
-                              pushSetHistory(savedTargetSets)
-                              setSavedTargetSets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName, savedAt: new Date().toISOString() } : x))
-                              showToast('Savings goal set renamed.')
-                            }
-                            setEditingSetIdx(null)
-                          }
-                        }}
-                      >
-                        <input
-                          className="flex-1 p-1 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
-                          value={renameSetValue}
-                          onChange={e => setRenameSetValue(e.target.value)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') {
-                              const newName = renameSetValue.trim()
-                              if (!newName) return
-                              pushSetHistory(savedTargetSets)
-                              setSavedTargetSets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName, savedAt: new Date().toISOString() } : x))
-                              showToast('Savings goal set renamed.')
-                              setEditingSetIdx(null)
-                            }
-                            if (e.key === 'Escape') setEditingSetIdx(null)
-                          }}
-                          autoFocus
-                        />
-                        <div className="flex gap-2 shrink-0">
-                          <button className="text-blue-300 hover:text-blue-200 text-sm" onMouseDown={e => {
-                            e.preventDefault()
-                            const newName = renameSetValue.trim()
-                            if (!newName) return
-                            pushSetHistory(savedTargetSets)
-                            setSavedTargetSets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName, savedAt: new Date().toISOString() } : x))
-                            showToast('Savings goal set renamed.')
-                            setEditingSetIdx(null)
-                          }}>Save</button>
-                          <button className="text-slate-400 hover:text-slate-300 text-sm" onMouseDown={e => { e.preventDefault(); setEditingSetIdx(null) }}>Cancel</button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div>
-                          <div className="text-sm font-medium">{s.name}</div>
-                          <div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div>
-                        </div>
-                        <div className="flex gap-2 shrink-0">
-                          <button className="text-blue-300 hover:text-blue-200 text-sm" onClick={() => {
-                            const same = JSON.stringify(targets) === JSON.stringify(s.targets)
-                            if (!same) {
-                              pushTargetHistory(targets)
-                              setTargets(s.targets)
-                              showToast('Savings goal set loaded.')
-                            }
-                          }}>Load</button>
-                          <button className="text-slate-400 hover:text-slate-300 text-sm" onClick={() => { setEditingSetIdx(idx); setRenameSetValue(s.name) }}>Rename</button>
-                          <button className="text-red-300 hover:text-red-200 text-sm" onClick={() => { pushSetHistory(savedTargetSets); setSavedTargetSets(prev => prev.filter(x => x.name !== s.name)) }}>Delete</button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </Card>
+            <SavingsGoalSetManager
+              targetSetName={targetSetName}
+              setTargetSetName={setTargetSetName}
+              targets={targets}
+              setTargets={setTargets}
+              savedTargetSets={savedTargetSets}
+              setSavedTargetSets={setSavedTargetSets}
+              savedTargetSetsHistory={savedTargetSetsHistory}
+              savedTargetSetsRedo={savedTargetSetsRedo}
+              editingSetIdx={editingSetIdx}
+              setEditingSetIdx={setEditingSetIdx}
+              renameSetValue={renameSetValue}
+              setRenameSetValue={setRenameSetValue}
+              renameSetRowRef={renameSetRowRef}
+              pushSetHistory={pushSetHistory}
+              pushTargetHistory={pushTargetHistory}
+              undoSavedSets={undoSavedSets}
+              redoSavedSets={redoSavedSets}
+              showToast={showToast}
+            />
 
             {/* V9.12 — Goal Planning Summary */}
             {targets.length > 0 && <GoalPlanningSummary summary={goalPlanSummary} />}
