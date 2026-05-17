@@ -843,33 +843,52 @@ export default function App() {
   const balanceCheckData = useMemo((): Record<string, {
     trackedActivity: number; unexplained: number; isMatched: boolean
   }> => {
-    // Step 1: compute per-account tracked deltas
+    // Build a fast type lookup to avoid repeated .find() calls
+    const typeOf: Record<string, AccountType> = {}
+    for (const acct of accounts) typeOf[acct.id] = acct.type
+
+    // Per-account tracked delta:
+    // CC accounts:    ONLY expenses charged to that CC + CC payments targeting that CC.
+    //                 Transfers are intentionally excluded — a transfer destination being
+    //                 a CC is a data-entry error and must not inflate tracked debt.
+    // Other accounts: income/expenses on that account + transfer flows (not CC).
     const deltas: Record<string, number> = {}
     const add = (id: string | undefined, amt: number) => {
       if (!id) return; deltas[id] = (deltas[id] ?? 0) + amt
     }
-    const isCC = (id: string) => accounts.find(a => a.id === id)?.type === 'credit card'
+
     for (const tx of transactions) {
+      const srcType = typeOf[tx.accountId]
+      const dstType = tx.toAccountId ? typeOf[tx.toAccountId] : undefined
+
       if (tx.type === 'expense') {
-        isCC(tx.accountId)
-          ? add(tx.accountId, tx.amount)   // CC charge adds to tracked debt
-          : add(tx.accountId, -tx.amount)  // other: money out
+        if (srcType === 'credit card') {
+          add(tx.accountId, tx.amount)    // CC charge: increases tracked debt
+        } else {
+          add(tx.accountId, -tx.amount)   // Other account: decreases balance
+        }
       } else if (tx.type === 'income') {
-        add(tx.accountId, tx.amount)
+        if (srcType !== 'credit card') {  // Income doesn't apply to CC accounts
+          add(tx.accountId, tx.amount)
+        }
       } else if (tx.type === 'transfer') {
-        add(tx.accountId, -tx.amount)
-        add(tx.toAccountId, tx.amount)
+        // Transfers only affect non-CC accounts — never touch CC tracked activity
+        if (srcType !== 'credit card') add(tx.accountId, -tx.amount)
+        if (tx.toAccountId && dstType !== 'credit card') add(tx.toAccountId, tx.amount)
       } else if (tx.type === 'credit card payment') {
-        add(tx.accountId, -tx.amount)   // checking: money sent
-        add(tx.toAccountId, -tx.amount) // CC: payment reduces tracked debt
+        // Source (checking/cash): money out — only if not a CC itself
+        if (srcType !== 'credit card') add(tx.accountId, -tx.amount)
+        // Destination CC: payment reduces tracked debt — only if actually a CC
+        if (tx.toAccountId && dstType === 'credit card') add(tx.toAccountId, -tx.amount)
       }
     }
-    // Step 2: per-account derived values
+
+    // Build per-account results
     const result: Record<string, { trackedActivity: number; unexplained: number; isMatched: boolean }> = {}
     for (const acct of accounts) {
       const trackedActivity = deltas[acct.id] ?? 0
-      // For CC: compare |balance| (debt owed) vs tracked net charge activity
-      // For other: compare balance vs tracked net delta
+      // CC: compare absolute debt owed vs net tracked charges (charges − payments)
+      // Other: compare actual balance vs net tracked delta
       const currentAmt = acct.type === 'credit card' ? Math.abs(acct.balance) : acct.balance
       const unexplained = currentAmt - trackedActivity
       result[acct.id] = {
@@ -3391,9 +3410,15 @@ txnMerchantRef.current?.focus()
                               {(() => {
                                 const bc = balanceCheckData[a.id]
                                 if (!bc || Math.abs(bc.trackedActivity) < 0.005) return <span className="text-slate-600">—</span>
-                                return a.type === 'credit card'
-                                  ? `${currency(Math.abs(bc.trackedActivity))} tracked`
-                                  : `${bc.trackedActivity >= 0 ? '+' : '−'}${currency(Math.abs(bc.trackedActivity))}`
+                                if (a.type === 'credit card') {
+                                  // trackedActivity = charges − payments (positive = net charges)
+                                  return bc.trackedActivity >= 0
+                                    ? `${currency(bc.trackedActivity)} charged`
+                                    : `${currency(Math.abs(bc.trackedActivity))} net paid`
+                                }
+                                return bc.trackedActivity >= 0
+                                  ? `+${currency(bc.trackedActivity)}`
+                                  : `−${currency(Math.abs(bc.trackedActivity))}`
                               })()}
                             </td>
                             {/* Unexplained — plain-language gap between current balance and tracked activity */}
