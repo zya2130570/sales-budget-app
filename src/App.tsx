@@ -409,6 +409,19 @@ export default function App() {
   const [accountHistory, setAccountHistory]   = useState<Account[][]>([])
   const [accountRedo, setAccountRedo]         = useState<Account[][]>([])
 
+  // V9.3 — Inline account edit (row-level, top form stays create-only)
+  const [inlineAccountEditId, setInlineAccountEditId] = useState<string | null>(null)
+  const [inlineAccountEditForm, setInlineAccountEditForm] = useState({
+    name: '', type: 'checking' as AccountType, balance: '', institution: '',
+  })
+  const inlineAccountNameRef    = useRef<HTMLInputElement>(null)
+  const inlineAccountBalanceRef = useRef<HTMLInputElement>(null)
+
+  // V9.3 — Saved budget inline rename (mirrors Savings Goal Set pattern)
+  const [editingBudgetIdx, setEditingBudgetIdx]   = useState<number | null>(null)
+  const [renameBudgetValue, setRenameBudgetValue] = useState('')
+  const renameBudgetInputRef = useRef<HTMLInputElement>(null)
+
   // V8 — Transactions
   const [transactions, setTransactions]       = useState<Transaction[]>([])
   const [txnForm, setTxnForm]                 = useState({
@@ -784,6 +797,42 @@ export default function App() {
     return { totalCash, totalDebt, totalInvestments, netWorth }
   }, [accounts, computedAccountBalances])
 
+  // V9.3 — Reconciliation engine
+  // For each account:
+  //   startingBalance = account.startingBalance ?? account.balance (the manual baseline)
+  //   txnImpact       = computedAccountBalances[id] - startingBalance
+  //   expectedBalance = startingBalance + txnImpact  (== computedAccountBalances[id])
+  //   actualBalance   = account.balance (user-entered)
+  //   difference      = actualBalance - expectedBalance
+  // A difference of 0 (or ±RECON_THRESHOLD) = "Reconciled"
+  const RECON_THRESHOLD = 0.02 // cents-level floating point tolerance
+  const reconciliationData = useMemo((): Record<string, {
+    startingBalance: number; txnImpact: number; expectedBalance: number;
+    actualBalance: number; difference: number; isReconciled: boolean;
+  }> => {
+    const result: Record<string, { startingBalance: number; txnImpact: number; expectedBalance: number; actualBalance: number; difference: number; isReconciled: boolean }> = {}
+    for (const acct of accounts) {
+      // startingBalance: use stored field if present; otherwise the current balance is the baseline
+      const startingBalance = (acct as Account & { startingBalance?: number }).startingBalance ?? acct.balance
+      const expectedBalance = computedAccountBalances[acct.id] ?? acct.balance
+      const txnImpact       = expectedBalance - startingBalance
+      const actualBalance   = acct.balance
+      const difference      = actualBalance - expectedBalance
+      result[acct.id] = {
+        startingBalance,
+        txnImpact,
+        expectedBalance,
+        actualBalance,
+        difference,
+        isReconciled: Math.abs(difference) <= RECON_THRESHOLD,
+      }
+    }
+    return result
+  }, [accounts, computedAccountBalances])
+
+  const reconciledCount    = accounts.filter(a => reconciliationData[a.id]?.isReconciled).length
+  const needsReviewCount   = accounts.length - reconciledCount
+
   // ── V8.6.3 Uncategorized expense count ──────────────────────────────────────
   // Single source of truth: expense transactions with no budget category assigned.
   // Income, Transfer, and Credit Card Payment are intentionally excluded.
@@ -982,6 +1031,42 @@ export default function App() {
     setAccountForm({ name: '', type: 'checking', balance: '', institution: '' })
     setEditAccountId(null)
     setAccountHint('')
+  }
+
+  // V9.3 — Inline account edit helpers
+  const startInlineAccountEdit = (a: Account) => {
+    setInlineAccountEditId(a.id)
+    setInlineAccountEditForm({
+      name: a.name,
+      type: a.type,
+      balance: a.balance === 0 ? '' : String(Math.abs(a.balance)),
+      institution: a.institution ?? '',
+    })
+    setTimeout(() => { inlineAccountBalanceRef.current?.focus(); inlineAccountBalanceRef.current?.select() }, 0)
+  }
+  const saveInlineAccountEdit = (accountId: string) => {
+    const name = inlineAccountEditForm.name.trim()
+    if (!name) return
+    const rawBalance = parseFloat(inlineAccountEditForm.balance) || 0
+    const balance = inlineAccountEditForm.type === 'credit card' && rawBalance > 0 ? -rawBalance : rawBalance
+    const institution = inlineAccountEditForm.institution.trim()
+    setAccountsWithHistory(prev => prev.map(a => a.id === accountId
+      ? { ...a, name, type: inlineAccountEditForm.type, balance, institution }
+      : a
+    ))
+    setInlineAccountEditId(null)
+  }
+  const cancelInlineAccountEdit = () => setInlineAccountEditId(null)
+
+  // V9.3 — Reconcile action: set startingBalance = expectedBalance so difference becomes 0
+  const reconcileAccount = (accountId: string) => {
+    const recon = reconciliationData[accountId]
+    if (!recon) return
+    setAccountsWithHistory(prev => prev.map(a => a.id === accountId
+      ? { ...a, startingBalance: recon.actualBalance, lastReconciledAt: new Date().toISOString().slice(0, 10) } as Account & { startingBalance: number; lastReconciledAt: string }
+      : a
+    ))
+    showToast('Account reconciled.')
   }
   const createOrSaveAccount = () => {
     const name = accountForm.name.trim()
@@ -2639,14 +2724,49 @@ export default function App() {
               </div>
               {changeSummary.length > 0 && <div className="mt-2 text-sm rounded border border-slate-700 p-2">What Changed: {changeSummary.join(' • ')}</div>}
               <div className="mt-2 space-y-2">
-                {savedBudgets.map(b => (
-                  <div key={b.name} className="rounded border border-slate-700 p-2 flex justify-between">
-                    <div><div>{b.name}</div><div className="text-xs text-slate-400">{new Date(b.savedAt).toLocaleString()}</div></div>
-                    <div className="flex gap-2">
-                      <button className="text-blue-300" onClick={() => setCategories(b.categories)}>Load</button>
-                      <button className="text-amber-300" onClick={() => { const nn = window.prompt('Rename budget', b.name); if (!nn) return; setSavedBudgets(prev => prev.map(x => x.name === b.name ? { ...x, name: nn } : x)) }}>Rename</button>
-                      <button className="text-red-300" onClick={() => setSavedBudgets(prev => prev.filter(x => x.name !== b.name))}>Delete</button>
-                    </div>
+                {savedBudgets.map((b, idx) => (
+                  <div key={b.name} className="rounded border border-slate-700 p-2 flex justify-between items-center gap-2">
+                    {editingBudgetIdx === idx ? (
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <input
+                          ref={renameBudgetInputRef}
+                          className="flex-1 min-w-0 px-2 py-1 text-sm rounded bg-slate-800 border border-blue-500 focus:outline-none text-slate-100"
+                          value={renameBudgetValue}
+                          onChange={e => setRenameBudgetValue(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              const nn = renameBudgetValue.trim()
+                              if (nn && nn !== b.name) setSavedBudgets(prev => prev.map((x, i) => i === idx ? { ...x, name: nn } : x))
+                              setEditingBudgetIdx(null)
+                            }
+                            if (e.key === 'Escape') { e.preventDefault(); setEditingBudgetIdx(null) }
+                          }}
+                          onBlur={() => {
+                            const nn = renameBudgetValue.trim()
+                            if (nn && nn !== b.name) setSavedBudgets(prev => prev.map((x, i) => i === idx ? { ...x, name: nn } : x))
+                            setEditingBudgetIdx(null)
+                          }}
+                        />
+                        <button className="text-slate-400 hover:text-slate-200 text-xs whitespace-nowrap" onClick={() => setEditingBudgetIdx(null)}>Cancel</button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="min-w-0">
+                          <div className="truncate">{b.name}</div>
+                          <div className="text-xs text-slate-400">{new Date(b.savedAt).toLocaleString()}</div>
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button className="text-blue-300 hover:text-blue-200 text-xs" onClick={() => setCategories(b.categories)}>Load</button>
+                          <button className="text-amber-300 hover:text-amber-200 text-xs" onClick={() => {
+                            setEditingBudgetIdx(idx)
+                            setRenameBudgetValue(b.name)
+                            setTimeout(() => { renameBudgetInputRef.current?.focus(); renameBudgetInputRef.current?.select() }, 0)
+                          }}>Rename</button>
+                          <button className="text-red-300 hover:text-red-200 text-xs" onClick={() => { setSavedBudgets(prev => prev.filter(x => x.name !== b.name)); showToast(`Deleted saved budget "${b.name}".`) }}>Delete</button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -2954,7 +3074,7 @@ export default function App() {
         {/* ── ACCOUNTS ── */}
         {tab === 'Accounts' && (
           <section className="space-y-4 transition-all duration-300">
-            <Card title={editAccountId ? 'Edit Account' : 'Add Account'} noHover>
+            <Card title="Add Account" noHover>
               <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
                 {/* Account Name */}
                 <div>
@@ -3045,45 +3165,45 @@ export default function App() {
               </div>
               <div className="flex gap-2 mt-3 flex-wrap">
                 <button onClick={createOrSaveAccount} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-1.5 text-sm transition-colors">
-                  {editAccountId ? 'Save Changes' : 'Add Account'}
+                  Add Account
                 </button>
-                {editAccountId
-                  ? <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Cancel</button>
-                  : <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
-                }
+                <button onClick={clearAccountForm} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-1.5 text-sm transition-colors">Clear</button>
                 <button onClick={undoAccount} disabled={!accountHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoAccount} disabled={!accountRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
-                {!editAccountId && accounts.length > 0 && (
+                {accounts.length > 0 && (
                   <button onClick={() => { if (!accounts.length) return; setAccountsWithHistory(() => []); showUndoableToast(`${accounts.length} account${accounts.length !== 1 ? 's' : ''} cleared.`, undoAccount) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
-                {!editAccountId && (
-                  <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
-                )}
+                <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
               </div>
               {accountHint && <p className="mt-2 text-sm text-amber-300">{accountHint}</p>}
             </Card>
 
             {accounts.length > 0 ? (
               <Card title="Your Accounts">
-                {/* V9.2 — Net worth summary */}
-                {accounts.length > 0 && (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-                    <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-0.5">Cash & Bank</div>
-                      <div className={`text-lg font-bold ${netWorthSummary.totalCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>{currency(netWorthSummary.totalCash)}</div>
-                    </div>
-                    <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-0.5">Investments</div>
-                      <div className="text-lg font-bold text-blue-300">{currency(netWorthSummary.totalInvestments)}</div>
-                    </div>
-                    <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-0.5">Total Debt</div>
-                      <div className="text-lg font-bold text-red-400">{currency(netWorthSummary.totalDebt)}</div>
-                    </div>
-                    <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
-                      <div className="text-xs text-slate-400 mb-0.5">Net Worth</div>
-                      <div className={`text-lg font-bold ${netWorthSummary.netWorth >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{currency(netWorthSummary.netWorth)}</div>
-                    </div>
+                {/* V9.3 — Summary cards */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                  <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
+                    <div className="text-xs text-slate-400 mb-0.5">Cash &amp; Bank</div>
+                    <div className={`text-lg font-bold ${netWorthSummary.totalCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>{currency(netWorthSummary.totalCash)}</div>
+                  </div>
+                  <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
+                    <div className="text-xs text-slate-400 mb-0.5">Investments</div>
+                    <div className="text-lg font-bold text-blue-300">{currency(netWorthSummary.totalInvestments)}</div>
+                  </div>
+                  <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
+                    <div className="text-xs text-slate-400 mb-0.5">Total Debt</div>
+                    <div className="text-lg font-bold text-red-400">{currency(netWorthSummary.totalDebt)}</div>
+                  </div>
+                  <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
+                    <div className="text-xs text-slate-400 mb-0.5">Net Worth</div>
+                    <div className={`text-lg font-bold ${netWorthSummary.netWorth >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{currency(netWorthSummary.netWorth)}</div>
+                  </div>
+                </div>
+                {/* V9.3 — Needs Review / Reconciled count */}
+                {needsReviewCount > 0 && (
+                  <div className="mb-3 flex items-center gap-2 text-xs text-amber-300">
+                    <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
+                    {needsReviewCount} account{needsReviewCount !== 1 ? 's need' : ' needs'} review — actual balance doesn&apos;t match expected from transactions.
                   </div>
                 )}
                 <div className="overflow-x-auto">
@@ -3092,47 +3212,146 @@ export default function App() {
                       <tr className="text-left text-slate-400 border-b border-slate-700">
                         <th className="pb-1.5 pr-4 font-medium">Name</th>
                         <th className="pb-1.5 pr-4 font-medium">Type</th>
-                        <th className="pb-1.5 pr-4 font-medium text-right">Base Balance</th>
-                        <th className="pb-1.5 pr-4 font-medium text-right">Adj. Balance</th>
+                        <th className="pb-1.5 pr-4 font-medium text-right">Actual Balance</th>
+                        <th className="pb-1.5 pr-4 font-medium text-right">Expected</th>
+                        <th className="pb-1.5 pr-4 font-medium">Status</th>
                         <th className="pb-1.5 pr-4 font-medium">Institution</th>
                         <th className="pb-1.5" />
                       </tr>
                     </thead>
                     <tbody>
                       {accounts.map(a => {
-                        const adjBal = computedAccountBalances[a.id] ?? a.balance
-                        const hasDelta = Math.abs(adjBal - a.balance) > 0.005
+                        const recon  = reconciliationData[a.id]
+                        const isEdit = inlineAccountEditId === a.id
                         return (
-                        <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedAccountId === a.id ? 'bg-blue-600/20' : 'hover:bg-slate-800/40'}`}>
-                          <td className="py-2 pr-4 font-medium">{a.name}</td>
-                          <td className="py-2 pr-4 text-slate-400">{ACCOUNT_TYPE_LABELS[a.type]}</td>
-                          <td className={`py-2 pr-4 text-right ${a.balance >= 0 ? 'text-slate-400' : 'text-red-400/70'} text-xs`}>
-                            {a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)}
-                          </td>
-                          <td className={`py-2 pr-4 text-right font-semibold ${adjBal >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                            {adjBal < 0 ? `−${currency(Math.abs(adjBal))}` : currency(adjBal)}
-                            {hasDelta && <span className="ml-1 text-[10px] text-slate-500">txn-adj</span>}
-                          </td>
-                          <td className="py-2 pr-4 text-slate-400 text-xs">{a.institution || '—'}</td>
-                          <td className="py-2 whitespace-nowrap space-x-2">
-                          <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
-                              setEditAccountId(a.id)
-                              setAccountForm({ name: a.name, type: a.type, balance: a.balance === 0 ? '' : String(a.balance), institution: a.institution })
-                              setTimeout(() => { accountBalanceRef.current?.focus(); accountBalanceRef.current?.select() }, 0)
-                            }}>Edit</button>
-                            <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))}>Delete</button>
-                          </td>
-                        </tr>
+                          <tr key={a.id} className={`border-b border-slate-800 transition-colors duration-300 ${
+                            highlightedAccountId === a.id ? 'bg-blue-600/20' : isEdit ? 'bg-slate-700/30' : 'hover:bg-slate-800/40'
+                          }`}>
+                            {/* Name */}
+                            <td className="py-2 pr-4 font-medium">
+                              {isEdit ? (
+                                <input
+                                  ref={inlineAccountNameRef}
+                                  className="w-full px-1.5 py-0.5 text-sm rounded bg-slate-800 border border-slate-500 focus:border-blue-500 focus:outline-none"
+                                  value={inlineAccountEditForm.name}
+                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, name: e.target.value }))}
+                                  onFocus={e => e.target.select()}
+                                  onBlur={() => saveInlineAccountEdit(a.id)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
+                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
+                                    if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === e.currentTarget.value.length) { e.preventDefault(); inlineAccountBalanceRef.current?.focus() }
+                                  }}
+                                />
+                              ) : a.name}
+                            </td>
+                            {/* Type */}
+                            <td className="py-2 pr-4 text-slate-400 text-sm">
+                              {isEdit ? (
+                                <select
+                                  className="rounded bg-slate-800 border border-slate-500 text-xs px-1 py-0.5 focus:border-blue-500 focus:outline-none"
+                                  value={inlineAccountEditForm.type}
+                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, type: e.target.value as AccountType }))}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
+                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
+                                  }}
+                                >
+                                  {ACCOUNT_TYPES.map(t => <option key={t} value={t}>{ACCOUNT_TYPE_LABELS[t]}</option>)}
+                                </select>
+                              ) : ACCOUNT_TYPE_LABELS[a.type]}
+                            </td>
+                            {/* Actual Balance */}
+                            <td className={`py-2 pr-4 text-right font-semibold ${isEdit ? '' : a.balance >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                              {isEdit ? (
+                                <input
+                                  ref={inlineAccountBalanceRef}
+                                  type="text" inputMode="decimal"
+                                  className="w-24 px-1.5 py-0.5 text-sm text-right rounded bg-slate-800 border border-slate-500 focus:border-blue-500 focus:outline-none"
+                                  value={inlineAccountEditForm.balance}
+                                  onChange={e => { const raw = e.target.value.replace(/[^0-9.]/g, ''); setInlineAccountEditForm(v => ({ ...v, balance: raw })) }}
+                                  onFocus={e => e.target.select()}
+                                  onBlur={() => saveInlineAccountEdit(a.id)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
+                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
+                                    if (e.key === 'ArrowLeft' && e.currentTarget.selectionStart === 0) { e.preventDefault(); inlineAccountNameRef.current?.focus() }
+                                  }}
+                                />
+                              ) : a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)}
+                            </td>
+                            {/* Expected (transaction-adjusted) */}
+                            <td className="py-2 pr-4 text-right text-slate-400 text-xs">
+                              {recon ? (
+                                <>
+                                  {recon.expectedBalance < 0 ? `−${currency(Math.abs(recon.expectedBalance))}` : currency(recon.expectedBalance)}
+                                  {Math.abs(recon.txnImpact) > 0.005 && (
+                                    <div className="text-[10px] text-slate-500">
+                                      {recon.txnImpact > 0 ? '+' : '−'}{currency(Math.abs(recon.txnImpact))} txns
+                                    </div>
+                                  )}
+                                </>
+                              ) : '—'}
+                            </td>
+                            {/* Reconciliation status */}
+                            <td className="py-2 pr-4 text-xs">
+                              {recon ? (
+                                recon.isReconciled ? (
+                                  <span className="text-green-400 font-medium">Reconciled</span>
+                                ) : (
+                                  <span className={`font-medium ${Math.abs(recon.difference) > 100 ? 'text-red-400' : 'text-amber-300'}`}>
+                                    {recon.difference > 0 ? '+' : '−'}{currency(Math.abs(recon.difference))} off
+                                  </span>
+                                )
+                              ) : null}
+                            </td>
+                            {/* Institution */}
+                            <td className="py-2 pr-4 text-slate-400 text-xs">
+                              {isEdit ? (
+                                <input
+                                  className="w-full px-1.5 py-0.5 text-xs rounded bg-slate-800 border border-slate-500 focus:border-blue-500 focus:outline-none"
+                                  value={inlineAccountEditForm.institution}
+                                  placeholder="Institution"
+                                  onChange={e => setInlineAccountEditForm(v => ({ ...v, institution: e.target.value }))}
+                                  onBlur={() => saveInlineAccountEdit(a.id)}
+                                  onKeyDown={e => {
+                                    if (e.key === 'Enter') { e.preventDefault(); saveInlineAccountEdit(a.id) }
+                                    if (e.key === 'Escape') { e.preventDefault(); cancelInlineAccountEdit() }
+                                  }}
+                                />
+                              ) : (a.institution || '—')}
+                            </td>
+                            {/* Actions */}
+                            <td className="py-2 whitespace-nowrap space-x-2">
+                              {isEdit ? (
+                                <>
+                                  <button className="text-green-400 hover:text-green-300 text-xs" onClick={() => saveInlineAccountEdit(a.id)}>Save</button>
+                                  <button className="text-slate-400 hover:text-slate-200 text-xs" onClick={cancelInlineAccountEdit}>Cancel</button>
+                                </>
+                              ) : (
+                                <>
+                                  <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => startInlineAccountEdit(a)}>Edit</button>
+                                  {recon && !recon.isReconciled && (
+                                    <button className="text-amber-400 hover:text-amber-300 text-xs" onClick={() => reconcileAccount(a.id)}>Reconcile</button>
+                                  )}
+                                  <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => {
+                                    setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))
+                                    showUndoableToast(`Deleted "${a.name}".`, undoAccount)
+                                  }}>Delete</button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
                         )
                       })}
                     </tbody>
                     <tfoot>
                       <tr className="border-t border-slate-700">
-                        <td colSpan={3} className="pt-2 text-xs text-slate-500 font-medium">Net Balance (adjusted)</td>
-                        <td className={`pt-2 text-right text-sm font-bold ${Object.values(computedAccountBalances).reduce((s, v) => s + v, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                          {currency(Object.values(computedAccountBalances).reduce((s, v) => s + v, 0))}
+                        <td colSpan={2} className="pt-2 text-xs text-slate-500 font-medium">Net Balance (actual)</td>
+                        <td className={`pt-2 text-right text-sm font-bold ${accounts.reduce((s, a) => s + a.balance, 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                          {currency(accounts.reduce((s, a) => s + a.balance, 0))}
                         </td>
-                        <td colSpan={2} />
+                        <td colSpan={4} />
                       </tr>
                     </tfoot>
                   </table>
