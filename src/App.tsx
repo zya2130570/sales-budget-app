@@ -685,6 +685,12 @@ export default function App() {
   }>({ name: '', amount: '', cadence: 'monthly', nextDueDate: new Date().toISOString().slice(0, 10), type: 'expense' })
   // V9.8 — Cash Flow Forecast period in days
   const [forecastPeriod, setForecastPeriod]             = useState<7 | 14 | 30 | 60>(30)
+  // V9.9 — Monthly Review
+  const [reviewMonth, setReviewMonth]     = useState(() => {
+    const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [monthlyNotes, setMonthlyNotes]   = useState<Record<string, string>>({})
+  const [reviewedMonths, setReviewedMonths] = useState<Record<string, string>>({})
   // V9.7 — Rule suggestion after category assign from Review Center
   const [ruleSuggestion, setRuleSuggestion]       = useState<{
     merchants: string[]; categoryId: string; txIds: string[]
@@ -1143,7 +1149,12 @@ export default function App() {
   }, [accounts, transactions])
 
   // needsReviewCount: accounts whose balance isn't explained by tracked transactions
-  const needsReviewCount = accounts.filter(a => !balanceCheckData[a.id]?.isMatched).length
+  const needsReviewCount = accounts.filter(a => {
+    const bc = balanceCheckData[a.id]
+    if (!bc || bc.isMatched) return false
+    if (a.type === 'credit card') return true  // CC always shows unexplained
+    return transactions.some(t => t.accountId === a.id && t.batchId)  // non-CC only if imported
+  }).length
 
   // ── V8.6.3 Uncategorized expense count ──────────────────────────────────────
   // Single source of truth: expense transactions with no budget category assigned.
@@ -1208,6 +1219,14 @@ export default function App() {
     }
 
     items.sort((a, b) => a.date.localeCompare(b.date))
+    // Inject income-tab take-home estimate when no manual income items exist
+    const hasManualIncome = manualRecurringItems.some(i => i.type === 'income')
+    const hasDetectedIncome = recurringCandidates.some(c => (c.confidence === 'high' || confirmedRecurring.has(c.merchantKey)))
+    if (!hasManualIncome && !hasDetectedIncome && inc.totalMonthly > 0) {
+      const estimatedIncome = inc.totalMonthly * (forecastPeriod / 30)
+      const daysLabel = forecastPeriod === 7 ? '~1 week' : forecastPeriod === 14 ? '~2 weeks' : forecastPeriod === 30 ? '~1 month' : '~2 months'
+      items.unshift({ date: todayStr, name: `Est. take-home (${daysLabel})`, amount: Math.round(estimatedIncome * 100) / 100, type: 'income', source: 'manual' })
+    }
     const totalIncome   = items.filter(i => i.type === 'income').reduce((s, i) => s + i.amount, 0)
     const totalExpenses = items.filter(i => i.type === 'expense').reduce((s, i) => s + i.amount, 0)
     const projectedEnd  = startingCash + totalIncome - totalExpenses
@@ -1216,7 +1235,47 @@ export default function App() {
       projectedEnd < 0 ? 'risk' : projectedEnd < 250 ? 'tight' : 'comfortable'
 
     return { items, startingCash, totalIncome, totalExpenses, projectedEnd, safeToSpend, status, todayStr, endStr }
-  }, [forecastPeriod, netWorthSummary.totalCash, manualRecurringItems, recurringCandidates, confirmedRecurring, cadenceMult])
+  }, [forecastPeriod, netWorthSummary.totalCash, manualRecurringItems, recurringCandidates, confirmedRecurring, cadenceMult, inc.totalMonthly])
+
+  // V9.9 — Monthly Review computed data
+  const monthlyReview = useMemo(() => {
+    const txns = transactions.filter(tx => tx.date.startsWith(reviewMonth))
+    const income    = txns.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0)
+    const expenses  = txns.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0)
+    const transfers = txns.filter(t => t.type === 'transfer').reduce((s, t) => s + t.amount, 0)
+    const ccPayments = txns.filter(t => t.type === 'credit card payment').reduce((s, t) => s + t.amount, 0)
+    const netCash   = income - expenses - ccPayments
+
+    // Category breakdown
+    const catSpend: Record<string, number> = {}
+    txns.filter(t => t.type === 'expense').forEach(t => {
+      const key = t.categoryId ?? '__none__'
+      catSpend[key] = (catSpend[key] ?? 0) + t.amount
+    })
+    const catBreakdown = Object.entries(catSpend)
+      .map(([catId, actual]) => {
+        const cat = catId === '__none__' ? null : categories.find(c => c.id === catId)
+        const planned = cat ? cat.amount : 0
+        return { catId, name: cat?.name ?? 'Uncategorized', planned, actual, diff: actual - planned }
+      })
+      .sort((a, b) => b.actual - a.actual)
+
+    // Biggest transactions (top 10 by amount)
+    const bigTxns = [...txns]
+      .filter(t => t.type === 'expense')
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 10)
+
+    // Checklist
+    const uncatExpenses = txns.filter(t => t.type === 'expense' && !t.categoryId).length
+    const unresolvedDups = txns.filter(t => txNeedsReview(t, transactions, dismissedDupIds) &&
+      transactions.some(o => o.id !== t.id && o.merchant.toLowerCase() === t.merchant.toLowerCase() && o.amount === t.amount && o.date === t.date)
+    ).length
+    const recurringReviewed = recurringCandidates.length === 0 ||
+      recurringCandidates.every(c => confirmedRecurring.has(c.merchantKey) || dismissedRecurring.has(c.merchantKey))
+
+    return { txns, income, expenses, transfers, ccPayments, netCash, catBreakdown, bigTxns, uncatExpenses, unresolvedDups, recurringReviewed }
+  }, [transactions, reviewMonth, categories, dismissedDupIds, recurringCandidates, confirmedRecurring, dismissedRecurring])
 
   const bulkAssign = () => {
     if (!bulkCategoryId || selectedTxnIds.size === 0) return
@@ -1257,6 +1316,12 @@ export default function App() {
       period,
       budgetHealthTier: !hasBudgetData ? 'No Data' : selectedPeriodRemaining < 0 ? 'Over Budget' : remainingTier.label,
     })
+    // Fix hardcoded "/month" wording to match selected period
+    const periodWord = period === 'weekly' ? 'week' : period === 'bi-weekly' ? 'pay period' : period === 'yearly' ? 'year' : 'month'
+    const periodExplanation = monthlyLeft < 0 && base.explanation.includes('/month')
+      ? base.explanation
+          .replace(/\$[\d,]+(\.\d+)?\/month/, `${currency(Math.abs(convertFromMonthly(monthlyLeft, period)))}/${periodWord}`)
+      : base.explanation
     // If actuals show meaningful overspend, surface it in the dashboard explanation
     if (actualOverspendPct > 5 && base.tone !== 'danger') {
       const severity: DashboardStatus['tone'] = actualOverspendPct > 20 ? 'risk' : 'warn'
@@ -1265,11 +1330,12 @@ export default function App() {
       const sevIdx  = toneOrder.indexOf(severity)
       return {
         ...base,
+        explanation: periodExplanation,
         tone: sevIdx > baseIdx ? severity : base.tone,
         context: `Actuals are running ${actualOverspendPct.toFixed(0)}% over plan this period. ${base.context}`,
       }
     }
-    return base
+    return { ...base, explanation: periodExplanation }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inc.totalMonthly, monthlyBudget, monthlyLeft, savingsRate, fixedRatio, inc.commissionPct, categories, activeTargets, period, hasBudgetData, selectedPeriodRemaining, remainingTier.label, actualOverspendPct])
 
@@ -2938,6 +3004,126 @@ txnMerchantRef.current?.focus()
                 </p>
               )}
             </Card>
+
+            {/* ── V9.9 Monthly Review ── */}
+            <Card title="Monthly Review" noHover>
+              <div className="flex items-center gap-3 mb-4 flex-wrap">
+                <input
+                  type="month" value={reviewMonth} onChange={e => setReviewMonth(e.target.value)}
+                  className="px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                />
+                {reviewedMonths[reviewMonth] ? (
+                  <span className="text-xs text-green-400 bg-green-900/30 border border-green-700/30 px-2 py-0.5 rounded flex items-center gap-1.5">
+                    ✓ Reviewed {new Date(reviewedMonths[reviewMonth]).toLocaleDateString()}
+                    <button className="text-slate-400 hover:text-red-400" onClick={() => setReviewedMonths(p => { const n = {...p}; delete n[reviewMonth]; return n })}>×</button>
+                  </span>
+                ) : (
+                  <button
+                    className="text-xs bg-blue-600 hover:bg-blue-500 px-3 py-1.5 rounded transition-colors"
+                    onClick={() => setReviewedMonths(p => ({ ...p, [reviewMonth]: new Date().toISOString() }))}
+                  >Mark Month Reviewed</button>
+                )}
+                <span className="text-xs text-slate-500 ml-auto">{monthlyReview.txns.length} transaction{monthlyReview.txns.length !== 1 ? 's' : ''}</span>
+              </div>
+
+              {/* Summary */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                {[
+                  { label: 'Total Income', val: `+${currency(monthlyReview.income)}`, color: 'text-green-400' },
+                  { label: 'Total Spending', val: `−${currency(monthlyReview.expenses)}`, color: 'text-red-400' },
+                  { label: 'Net Cash Flow', val: `${monthlyReview.netCash >= 0 ? '+' : '−'}${currency(Math.abs(monthlyReview.netCash))}`, color: monthlyReview.netCash >= 0 ? 'text-emerald-400' : 'text-red-400' },
+                  { label: 'CC Payments', val: currency(monthlyReview.ccPayments), color: 'text-purple-300' },
+                ].map(({ label, val, color }) => (
+                  <div key={label} className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
+                    <div className="text-xs text-slate-400 mb-0.5">{label}</div>
+                    <div className={`text-lg font-bold ${color}`}>{val}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Checklist */}
+              <div className="rounded-lg bg-slate-800/60 border border-slate-700/40 px-4 py-3 mb-4">
+                <p className="text-xs text-slate-400 font-medium mb-2">Checklist</p>
+                <div className="space-y-1.5">
+                  {[
+                    { label: 'All expenses categorized', ok: monthlyReview.uncatExpenses === 0, note: monthlyReview.uncatExpenses > 0 ? `${monthlyReview.uncatExpenses} uncategorized` : '' },
+                    { label: 'Duplicates resolved', ok: monthlyReview.unresolvedDups === 0, note: monthlyReview.unresolvedDups > 0 ? `${monthlyReview.unresolvedDups} unresolved` : '' },
+                    { label: 'Recurring items reviewed', ok: monthlyReview.recurringReviewed, note: !monthlyReview.recurringReviewed ? 'Confirm or dismiss in Subscriptions' : '' },
+                    { label: 'Month marked reviewed', ok: !!reviewedMonths[reviewMonth], note: '' },
+                  ].map(({ label, ok, note }) => (
+                    <div key={label} className="flex items-center gap-2 text-xs">
+                      <span className={`shrink-0 w-3.5 h-3.5 rounded-full flex items-center justify-center text-[9px] font-bold ${ok ? 'bg-green-500/30 text-green-400' : 'bg-amber-500/30 text-amber-300'}`}>{ok ? '✓' : '!'}</span>
+                      <span className={ok ? 'text-slate-300' : 'text-amber-200'}>{label}</span>
+                      {note && <span className="text-slate-500">— {note}</span>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Category breakdown + biggest transactions */}
+              <div className="grid md:grid-cols-2 gap-4 mb-4">
+                {monthlyReview.catBreakdown.length > 0 && (
+                  <div>
+                    <p className="text-xs text-slate-400 font-medium mb-2">Category Breakdown</p>
+                    <table className="w-full text-xs">
+                      <thead><tr className="text-left text-slate-500 border-b border-slate-700/60">
+                        <th className="pb-1 pr-2 font-medium">Category</th>
+                        <th className="pb-1 pr-2 text-right font-medium">Planned</th>
+                        <th className="pb-1 pr-2 text-right font-medium">Actual</th>
+                        <th className="pb-1 text-right font-medium">+/−</th>
+                      </tr></thead>
+                      <tbody>
+                        {monthlyReview.catBreakdown.slice(0, 8).map(({ catId, name, planned, actual, diff }) => (
+                          <tr key={catId} className="border-b border-slate-800/60">
+                            <td className="py-1 pr-2 text-slate-300">{name}</td>
+                            <td className="py-1 pr-2 text-right text-slate-500">{planned > 0 ? currency(planned) : '—'}</td>
+                            <td className="py-1 pr-2 text-right font-medium text-slate-200">{currency(actual)}</td>
+                            <td className={`py-1 text-right font-medium ${planned > 0 ? (diff > 0 ? 'text-red-400' : 'text-green-400') : 'text-slate-600'}`}>
+                              {planned > 0 ? (diff > 0 ? `+${currency(diff)}` : `−${currency(Math.abs(diff))}`) : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {monthlyReview.bigTxns.length > 0 && (
+                  <div>
+                    <p className="text-xs text-slate-400 font-medium mb-2">Biggest Transactions</p>
+                    <div className="space-y-1">
+                      {monthlyReview.bigTxns.slice(0, 8).map(tx => {
+                        const cat = categories.find(c => c.id === tx.categoryId)
+                        const acct = accounts.find(a => a.id === tx.accountId)
+                        return (
+                          <div key={tx.id} className="flex items-center justify-between text-xs py-1 border-b border-slate-800/60 last:border-0 gap-2">
+                            <div className="min-w-0">
+                              <span className="text-slate-300 block truncate">{normalizeMerchant(tx.merchant)}</span>
+                              <span className="text-slate-600">{tx.date}{acct ? ` · ${acct.name}` : ''}{cat ? ` · ${cat.name}` : ''}</span>
+                            </div>
+                            <span className="font-semibold text-red-400 shrink-0">−{currency(tx.amount)}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Notes */}
+              <div>
+                <p className="text-xs text-slate-400 font-medium mb-1.5">Notes — What happened this month?</p>
+                <textarea
+                  className="w-full px-3 py-2 text-xs rounded-lg bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none resize-none text-slate-300 placeholder:text-slate-600"
+                  rows={3}
+                  placeholder="Any big expenses, income changes, or things to remember…"
+                  value={monthlyNotes[reviewMonth] ?? ''}
+                  onChange={e => setMonthlyNotes(p => ({ ...p, [reviewMonth]: e.target.value }))}
+                />
+              </div>
+              {monthlyReview.txns.length === 0 && (
+                <p className="text-xs text-slate-500 text-center mt-2">No transactions for {reviewMonth}. Log or import transactions to see the monthly review.</p>
+              )}
+            </Card>
           </section>
         )}
 
@@ -3876,17 +4062,27 @@ txnMerchantRef.current?.focus()
                               {(() => {
                                 const bc = balanceCheckData[a.id]
                                 if (!bc) return null
-                                if (bc.isMatched) return <span className="text-green-400 font-medium">Looks matched.</span>
-                                const amt = Math.abs(bc.unexplained)
-                                const big = amt > 100
-                                const cls = `font-medium ${big ? 'text-red-400' : 'text-amber-300'}`
+                                // CC: unexplained = debt owed minus tracked charges — meaningful without a baseline
                                 if (a.type === 'credit card') {
+                                  if (bc.isMatched) return <span className="text-green-400 font-medium">Looks matched.</span>
+                                  const amt = Math.abs(bc.unexplained)
+                                  const cls = `font-medium ${amt > 100 ? 'text-red-400' : 'text-amber-300'}`
                                   return bc.unexplained > 0
                                     ? <span className={cls}>{currency(amt)} of card debt is not explained yet.</span>
                                     : <span className={cls}>Tracked activity is {currency(amt)} higher than current card balance.</span>
                                 }
+                                // Non-CC: without a known starting balance, the "unexplained" comparison
+                                // between current balance and tracked delta is misleading.
+                                // Only show if account has been imported (has a batchId on a transaction).
+                                const hasImportedTxns = transactions.some(t => t.accountId === a.id && t.batchId)
+                                if (!hasImportedTxns) {
+                                  return <span className="text-slate-600 text-[10px]">Baseline not set yet</span>
+                                }
+                                if (bc.isMatched) return <span className="text-green-400 font-medium">Looks matched.</span>
+                                const amt = Math.abs(bc.unexplained)
+                                const cls = `font-medium ${amt > 100 ? 'text-red-400' : 'text-amber-300'}`
                                 return bc.unexplained > 0
-                                  ? <span className={cls}>{currency(amt)} not explained by tracked transactions yet.</span>
+                                  ? <span className={cls}>{currency(amt)} not explained by tracked transactions.</span>
                                   : <span className={cls}>Tracked transactions are {currency(amt)} higher than current balance.</span>
                               })()}
                             </td>
