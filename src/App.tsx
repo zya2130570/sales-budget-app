@@ -260,6 +260,8 @@ const SAMPLE_BUDGET_CATS: Array<{ name: string; type: CategoryType; monthly: num
 
 // TXN_FILTER_OPTIONS imported from utils/transactionHelpers
 
+const periods: Period[] = ['weekly', 'bi-weekly', 'monthly', 'yearly']
+
 export default function App() {
   const incomeRef = useRef<HTMLInputElement>(null)
   const budgetNameRef = useRef<HTMLInputElement>(null)
@@ -4302,7 +4304,7 @@ txnMerchantRef.current?.focus()
             confirmedDupIds={confirmedDupIds}
             highlightedTxnId={highlightedTxnId}
             txnFilter={txnFilter}
-            setTxnFilter={(v: string) => setTxnFilter(v as Parameters<typeof setTxnFilter>[0])}
+            setTxnFilter={setTxnFilter}
             txnSearch={txnSearch}
             setTxnSearch={setTxnSearch}
             txnAccountFilter={txnAccountFilter}
@@ -4316,7 +4318,7 @@ txnMerchantRef.current?.focus()
             inlineTxnEditId={inlineTxnEditId}
             inlineTxnEditForm={inlineTxnEditForm}
             setInlineTxnEditId={setInlineTxnEditId}
-            setInlineTxnEditForm={(v) => setInlineTxnEditForm(v as Parameters<typeof setInlineTxnEditForm>[0])}
+            setInlineTxnEditForm={setInlineTxnEditForm}
             inlineTxnMerchantRef={inlineTxnMerchantRef}
             inlineTxnAmountRef={inlineTxnAmountRef}
             inlineTxnTypeRef={inlineTxnTypeRef}
@@ -4342,9 +4344,9 @@ txnMerchantRef.current?.focus()
               bulkCategoryId, setBulkCategoryId, bulkAssign,
               ruleSuggestion, setRuleSuggestion,
               setTxnWithHistory, setRulesWithHistory, updateCategoryMemory, softDeleteTxn,
-              setTxnFilter: (v: string) => setTxnFilter(v as Parameters<typeof setTxnFilter>[0]), showToast,
+              setTxnFilter, showToast,
               uncatOpen, setUncatOpen, uncategorizedExpenseCount,
-              setInlineTxnEditId, setInlineTxnEditForm: (v: Parameters<typeof setInlineTxnEditForm>[0]) => setInlineTxnEditForm(v), setTxnDupWarning, inlineTxnAmountRef,
+              setInlineTxnEditId, setInlineTxnEditForm, setTxnDupWarning, inlineTxnAmountRef,
             }}
             recurringSectionProps={{
               recurringCandidates, manualRecurringItems, setManualRecurringItems,
