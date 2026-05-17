@@ -16,13 +16,26 @@ export type Transaction = {
   id: string
   date: string
   accountId: string
-  toAccountId?: string
   merchant: string
   amount: number
   type: TransactionType
   categoryId?: string
   notes?: string
   appliedByRule?: string
+  toAccountId?: string            // V9.2 — destination for transfers / CC payments
+  batchId?: string                // V9.0 — import batch identifier
+  importedCategoryHint?: string   // V9.6 — raw category from CSV (e.g. Apple Card Category column)
+  createdAt: string
+}
+
+// V9.6 — Import batch record (tracks each CSV import session)
+export type ImportBatch = {
+  id: string
+  accountId: string
+  accountName: string
+  importMonth: string       // YYYY-MM
+  importedCount: number
+  skippedCount: number
   createdAt: string
 }
 export type TransactionRule = { id: string; name: string; matchText: string; matchField: 'merchant' | 'notes'; categoryId: string; type?: TransactionType; createdAt: string }
