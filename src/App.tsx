@@ -84,6 +84,61 @@ function extractCategoryHints(rows: Array<Record<string, string>>): Record<strin
 /** Payment/transfer merchant patterns that should be flagged for review rather than categorized. */
 const PAYMENT_PATTERNS = /payment|transfer|zelle|venmo|paypal|apple cash|e-payment|gsbank|discover e|online transfer/i
 
+// ── V9.9 PDF Import ───────────────────────────────────────────────────────────
+type PdfImportRow = { date: string; merchant: string; amount: number; confidence: 'high' | 'medium' | 'low'; isDup?: boolean }
+
+/**
+ * Extract transaction rows from raw PDF text (text-based/accessible PDFs only).
+ * Parses common bank statement line formats using date + description + amount patterns.
+ * Does not attempt OCR — image-only PDFs will return an empty result with a warning.
+ */
+function parsePdfText(raw: string): { rows: PdfImportRow[]; warning: string } {
+  // Normalize raw text: strip common PDF binary noise, collapse whitespace
+  const text = raw
+    .replace(/\r\n/g, '\n')
+    .replace(/[^\x09\x0A\x20-\x7E]/g, ' ')  // keep tab, newline, printable ASCII
+    .replace(/\s{3,}/g, '\n')                 // dense whitespace → newline (common in PDF extraction)
+    .replace(/[ \t]+/g, ' ')
+
+  const rows: PdfImportRow[] = []
+  const seen = new Set<string>()
+
+  // Pattern A: MM/DD or MM/DD/YY or MM/DD/YYYY  DESCRIPTION  AMOUNT
+  // e.g. "01/15 Netflix.com 15.99" or "01/15/2025 STARBUCKS #1234 6.75"
+  const patA = /(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\s+([\w *&\-'/.,#]{3,55}?)\s+(-?[\d,]+\.\d{2})\b/g
+  // Pattern B: lines where amount appears first then description then date (some Chase formats)
+  const patB = /(-?[\d,]+\.\d{2})\s+([\w *&\-'/.,#]{3,55}?)\s+(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)/g
+
+  const addRow = (dateRaw: string, desc: string, amtRaw: string) => {
+    const amount = Math.abs(parseFloat(amtRaw.replace(/,/g, '')))
+    if (!amount || amount > 99_999) return
+    const parts = dateRaw.split('/')
+    const month = String(parseInt(parts[0])).padStart(2, '0')
+    const day   = String(parseInt(parts[1])).padStart(2, '0')
+    const rawYr = parts[2]
+    const year  = rawYr ? (rawYr.length === 2 ? '20' + rawYr : rawYr) : String(new Date().getFullYear())
+    const date  = `${year}-${month}-${day}`
+    const merchant = desc.trim().replace(/\s+/g, ' ').slice(0, 60)
+    if (merchant.length < 2) return
+    const key = `${date}|${merchant.toLowerCase()}|${amount.toFixed(2)}`
+    if (seen.has(key)) return
+    seen.add(key)
+    rows.push({ date, merchant, amount, confidence: 'medium' })
+  }
+
+  let m: RegExpExecArray | null
+  while ((m = patA.exec(text)) !== null) addRow(m[1], m[2], m[3])
+  while ((m = patB.exec(text)) !== null) addRow(m[3], m[2], m[1])
+
+  const warning = rows.length === 0
+    ? 'No transactions detected. This PDF may be image-based or use an unsupported format. Try a CSV export or an "accessible" PDF export from your bank.'
+    : rows.length < 3
+    ? `Only ${rows.length} transaction${rows.length > 1 ? 's' : ''} detected — this PDF may be partially readable. Review carefully.`
+    : ''
+
+  return { rows, warning }
+}
+
 // ── V9.5 Merchant normalization ───────────────────────────────────────────────
 // Cleans up raw bank-export merchant strings to friendly display names.
 // Pattern: strip trailing store numbers, normalize well-known brands.
@@ -661,6 +716,10 @@ export default function App() {
   const [csvCategoryHints, setCsvCategoryHints]       = useState<Record<string, string>>({})
   const [importBatches, setImportBatches]             = useState<ImportBatch[]>([])
   const [csvShowHistory, setCsvShowHistory]           = useState(false)
+  // V9.9 — PDF import state (parallel to CSV flow)
+  const [csvImportIsPdf, setCsvImportIsPdf]           = useState(false)
+  const [pdfPreviewRows, setPdfPreviewRows]           = useState<PdfImportRow[]>([])
+  const [pdfParseWarning, setPdfParseWarning]         = useState('')
 
   // V9.5 — Transaction Review Center + smart filters
   const [reviewOpen, setReviewOpen]             = useState(true)
@@ -2028,6 +2087,9 @@ txnMerchantRef.current?.focus()
     setCsvImportError('')
     setCsvCategoryHints({})
     setCsvIsAppleCard(false)
+    setCsvImportIsPdf(false)
+    setPdfPreviewRows([])
+    setPdfParseWarning('')
   }
   const closeCsvImport = () => {
     setCsvImportOpen(false)
@@ -2035,6 +2097,9 @@ txnMerchantRef.current?.focus()
     setCsvImportError('')
     setCsvCategoryHints({})
     setCsvIsAppleCard(false)
+    setCsvImportIsPdf(false)
+    setPdfPreviewRows([])
+    setPdfParseWarning('')
   }
   const processCsvText = (text: string) => {
     setCsvImportLoading(true)
@@ -2073,21 +2138,92 @@ txnMerchantRef.current?.focus()
       setCsvImportLoading(false)
     }
   }
+  const processPdfFile = (file: File) => {
+    setCsvImportLoading(true)
+    setCsvImportError('')
+    setCsvImportIsPdf(true)
+    setCsvImportPreview(null)
+    const reader = new FileReader()
+    reader.onload = ev => {
+      const text = ev.target?.result
+      if (typeof text !== 'string') { setCsvImportError('Could not read PDF.'); setCsvImportLoading(false); return }
+      const { rows, warning } = parsePdfText(text)
+      const effectiveAccountId = csvImportAccountId || accounts[0]?.id ?? ''
+      const existingForAccount = transactions.filter(tx => tx.accountId === effectiveAccountId)
+      // Mark duplicate rows
+      const marked = rows.map(r => ({
+        ...r,
+        isDup: existingForAccount.some(tx =>
+          tx.date === r.date &&
+          tx.merchant.toLowerCase() === r.merchant.toLowerCase() &&
+          tx.amount === r.amount
+        ),
+      }))
+      setPdfPreviewRows(marked)
+      setPdfParseWarning(warning)
+      setCsvImportLoading(false)
+    }
+    reader.onerror = () => { setCsvImportError('Could not read the PDF file.'); setCsvImportLoading(false) }
+    reader.readAsText(file)
+  }
+  const commitPdfImport = () => {
+    const readyRows = pdfPreviewRows.filter(r => !r.isDup)
+    if (readyRows.length === 0) { closeCsvImport(); return }
+    const effectiveAccountId = csvImportAccountId || accounts[0]?.id ?? ''
+    const batchId = crypto.randomUUID().slice(0, 8)
+    const newTxns: Transaction[] = readyRows.map(r => ({
+      id: crypto.randomUUID(),
+      date: r.date,
+      accountId: effectiveAccountId,
+      merchant: r.merchant,
+      amount: r.amount,
+      type: (PAYMENT_PATTERNS.test(r.merchant) ? 'credit card payment' : 'expense') as TransactionType,
+      batchId,
+      importedCategoryHint: 'pdf',
+      createdAt: new Date().toISOString(),
+    }))
+    setTxnWithHistory(prev => [...newTxns, ...prev])
+    const acct = accounts.find(a => a.id === effectiveAccountId)
+    const batch: ImportBatch = {
+      id: batchId, accountId: effectiveAccountId,
+      accountName: acct?.name ?? 'Unknown Account',
+      importMonth: csvImportMonth,
+      importedCount: newTxns.length,
+      skippedCount: pdfPreviewRows.filter(r => r.isDup).length,
+      createdAt: new Date().toISOString(),
+    }
+    setImportBatches(prev => [batch, ...prev.slice(0, 49)])
+    closeCsvImport()
+    if (newTxns[0]) flashHighlight(newTxns[0].id, setHighlightedTxnId, highlightTxnTimerRef)
+    const skipped = pdfPreviewRows.filter(r => r.isDup).length
+    showUndoableToast(
+      `Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''} from PDF.${skipped > 0 ? ` Skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''}.` : ''}`,
+      undoTxn
+    )
+  }
   const handleCsvFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => { const text = ev.target?.result; if (typeof text === 'string') processCsvText(text) }
-    reader.onerror = () => setCsvImportError('Could not read the file. Please try again.')
-    reader.readAsText(file)
+    if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
+      processPdfFile(file)
+    } else {
+      const reader = new FileReader()
+      reader.onload = ev => { const text = ev.target?.result; if (typeof text === 'string') processCsvText(text) }
+      reader.onerror = () => setCsvImportError('Could not read the file. Please try again.')
+      reader.readAsText(file)
+    }
     e.target.value = ''
   }
   const handleCsvDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault()
     const file = e.dataTransfer.files?.[0]
     if (!file) return
+    if (file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf') {
+      processPdfFile(file)
+      return
+    }
     if (!file.name.toLowerCase().endsWith('.csv') && file.type !== 'text/csv' && file.type !== 'text/plain') {
-      setCsvImportError('Please drop a .csv file.')
+      setCsvImportError('Please drop a .csv or .pdf file.')
       return
     }
     const reader = new FileReader()
@@ -5959,20 +6095,24 @@ txnMerchantRef.current?.focus()
           importMonth={csvImportMonth}
           isAppleCard={csvIsAppleCard}
           categoryHints={csvCategoryHints}
-          onImportAccountChange={id => { setCsvImportAccountId(id); setCsvImportPreview(null); setCsvCategoryHints({}) }}
+          isPdf={csvImportIsPdf}
+          pdfRows={pdfPreviewRows}
+          pdfWarning={pdfParseWarning}
+          onImportAccountChange={id => { setCsvImportAccountId(id); setCsvImportPreview(null); setCsvCategoryHints({}); setPdfPreviewRows([]); }}
           onImportMonthChange={setCsvImportMonth}
           onFileSelect={handleCsvFileSelect}
           onDrop={handleCsvDrop}
           onCommit={commitCsvImport}
+          onCommitPdf={commitPdfImport}
           onCancel={closeCsvImport}
-          onResetPreview={() => { setCsvImportPreview(null); setCsvImportError('') }}
+          onResetPreview={() => { setCsvImportPreview(null); setCsvImportError(''); setCsvImportIsPdf(false); setPdfPreviewRows([]); setPdfParseWarning('') }}
           onDownloadSample={downloadSampleCsv}
           onUseSampleData={() => processCsvText(generateSampleCsvString())}
           fileInputRef={csvFileInputRef}
         />
       )}
       {/* Hidden file input for CSV selection */}
-      <input ref={csvFileInputRef} type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={handleCsvFileSelect} />
+      <input ref={csvFileInputRef} type="file" accept=".csv,.pdf,text/csv,text/plain,application/pdf" className="hidden" onChange={handleCsvFileSelect} />
 
       {/* V9.0.4 Back-to-Top button — top-left, visible after scroll */}
       {showScrollTop && (
@@ -6165,11 +6305,15 @@ interface CsvImportModalProps {
   importMonth: string
   isAppleCard: boolean
   categoryHints: Record<string, string>
+  isPdf: boolean
+  pdfRows: PdfImportRow[]
+  pdfWarning: string
   onImportAccountChange: (id: string) => void
   onImportMonthChange: (month: string) => void
   onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void
   onDrop: (e: React.DragEvent<HTMLDivElement>) => void
   onCommit: () => void
+  onCommitPdf: () => void
   onCancel: () => void
   onDownloadSample: () => void
   onUseSampleData: () => void
@@ -6180,9 +6324,10 @@ interface CsvImportModalProps {
 function CsvImportModal({
   preview, loading, error, accounts, categories,
   importAccountId, importMonth, isAppleCard, categoryHints,
+  isPdf, pdfRows, pdfWarning,
   onImportAccountChange, onImportMonthChange,
   onFileSelect, onDrop,
-  onCommit, onCancel, onDownloadSample, onUseSampleData, fileInputRef, onResetPreview,
+  onCommit, onCommitPdf, onCancel, onDownloadSample, onUseSampleData, fileInputRef, onResetPreview,
 }: CsvImportModalProps) {
   const [dragOver, setDragOver] = useState(false)
 
@@ -6208,8 +6353,11 @@ function CsvImportModal({
         <div className="flex items-center justify-between p-5 border-b border-slate-700">
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-semibold text-slate-100">Import CSV</h2>
-              {isAppleCard && (
+              <h2 className="text-lg font-semibold text-slate-100">Import CSV / PDF</h2>
+              {isPdf && (
+                <span className="text-[10px] bg-blue-900/50 text-blue-300 border border-blue-700/30 px-1.5 py-0.5 rounded font-medium">PDF mode</span>
+              )}
+              {isAppleCard && !isPdf && (
                 <span className="text-[10px] bg-slate-700 text-slate-300 border border-slate-600 px-1.5 py-0.5 rounded font-medium">Apple Card detected</span>
               )}
             </div>
@@ -6263,7 +6411,7 @@ function CsvImportModal({
           )}
 
           {/* Drop zone (only shown before preview) */}
-          {!preview && !loading && (
+          {!preview && !isPdf && !loading && (
             <div
               className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${dragOver ? 'border-blue-500 bg-blue-900/20' : 'border-slate-600 hover:border-slate-500 bg-slate-800/50'}`}
               onDragOver={e => { e.preventDefault(); setDragOver(true) }}
@@ -6272,19 +6420,83 @@ function CsvImportModal({
               onClick={() => fileInputRef.current?.click()}
             >
               <div className="text-4xl mb-3">📄</div>
-              <p className="text-slate-200 font-medium mb-1">Drop a CSV file here</p>
+              <p className="text-slate-200 font-medium mb-1">Drop a CSV or PDF file here</p>
               <p className="text-slate-400 text-sm mb-4">or click to browse</p>
               <p className="text-slate-500 text-xs">
-                Apple Card CSV auto-detected. Standard headers: date, merchant, amount, type, notes.
+                Apple Card CSV auto-detected. PDF support for text-based bank statements (Chase, BofA, etc.).
               </p>
-              <input type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={onFileSelect} ref={fileInputRef} />
+              <input type="file" accept=".csv,.pdf,text/csv,text/plain,application/pdf" className="hidden" onChange={onFileSelect} ref={fileInputRef} />
             </div>
           )}
 
-          {loading && <div className="text-center py-8 text-slate-400">Parsing CSV…</div>}
+          {loading && <div className="text-center py-8 text-slate-400">{isPdf ? 'Parsing PDF…' : 'Parsing CSV…'}</div>}
 
           {error && (
             <div className="rounded-lg border border-red-700/50 bg-red-900/20 px-4 py-3 text-sm text-red-300">{error}</div>
+          )}
+
+          {/* V9.9 — PDF preview section */}
+          {isPdf && !loading && pdfRows.length > 0 && (
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
+                  <div className="text-xs text-slate-400 mb-0.5">Detected</div>
+                  <div className="text-xl font-bold text-blue-300">{pdfRows.length}</div>
+                </div>
+                <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
+                  <div className="text-xs text-slate-400 mb-0.5">Ready</div>
+                  <div className="text-xl font-bold text-green-400">{pdfRows.filter(r => !r.isDup).length}</div>
+                </div>
+                <div className="rounded-lg bg-slate-800 border border-slate-700 px-3 py-2.5 text-center">
+                  <div className="text-xs text-slate-400 mb-0.5">Duplicates</div>
+                  <div className={`text-xl font-bold ${pdfRows.filter(r => r.isDup).length > 0 ? 'text-amber-300' : 'text-slate-400'}`}>{pdfRows.filter(r => r.isDup).length}</div>
+                </div>
+              </div>
+              {pdfWarning && (
+                <p className="text-xs text-amber-300 bg-amber-900/20 border border-amber-700/30 rounded px-3 py-2">{pdfWarning}</p>
+              )}
+              <p className="text-xs text-slate-400">
+                Review detected transactions. All will be marked <span className="font-medium text-slate-300">Needs Review</span> for category assignment after import.{' '}
+                <button onClick={onResetPreview} className="underline text-blue-400 hover:text-blue-300">Choose a different file</button>
+              </p>
+              <div className="overflow-y-auto max-h-64 rounded-lg border border-slate-700/60">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0 bg-slate-800 z-10">
+                    <tr className="text-left text-slate-400 border-b border-slate-700">
+                      <th className="py-1.5 px-2 font-medium whitespace-nowrap">Date</th>
+                      <th className="py-1.5 px-2 font-medium">Merchant</th>
+                      <th className="py-1.5 px-2 font-medium text-right whitespace-nowrap">Amount</th>
+                      <th className="py-1.5 px-2 font-medium" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pdfRows.map((row, i) => (
+                      <tr key={i} className={`border-b border-slate-800 ${row.isDup ? 'opacity-50' : 'hover:bg-slate-800/40'}`}>
+                        <td className="py-1 px-2 text-slate-300 whitespace-nowrap">{row.date}</td>
+                        <td className="py-1 px-2 text-slate-200 max-w-[180px] truncate">{normalizeMerchant(row.merchant)}</td>
+                        <td className="py-1 px-2 text-right text-slate-300">${row.amount.toFixed(2)}</td>
+                        <td className="py-1 px-2">
+                          {row.isDup
+                            ? <span className="text-[10px] text-amber-400 bg-amber-900/30 border border-amber-700/30 px-1 py-0.5 rounded">Duplicate</span>
+                            : <span className="text-[10px] bg-green-900/60 text-green-300 border border-green-700/40 px-1.5 py-0.5 rounded">New</span>
+                          }
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* PDF parse failure */}
+          {isPdf && !loading && pdfRows.length === 0 && !error && (
+            <div className="rounded-lg border border-amber-700/40 bg-amber-900/15 px-4 py-4 text-sm text-amber-300 text-center space-y-2">
+              <p className="font-medium">This PDF could not be parsed automatically.</p>
+              <p className="text-xs text-amber-400/80">{pdfWarning || 'The PDF may be image-based or use an unsupported format.'}</p>
+              <p className="text-xs text-slate-400 mt-1">Try a CSV export or an "Accessible PDF" export from your bank. Chase: Accounts → Statements → Accessible PDF.</p>
+              <button onClick={onResetPreview} className="text-xs text-blue-400 hover:text-blue-300 underline mt-1">Try a different file</button>
+            </div>
           )}
 
           {!preview && !loading && (
@@ -6389,13 +6601,18 @@ function CsvImportModal({
         <div className="flex items-center justify-between gap-3 p-5 border-t border-slate-700 flex-wrap">
           <div className="flex gap-2">
             <button onClick={onCancel} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-2 text-sm transition-colors">Cancel</button>
-            {preview && (
+            {(preview || isPdf) && (
               <button onClick={onResetPreview} className="rounded-lg bg-slate-800 hover:bg-slate-700 px-4 py-2 text-sm text-slate-400 transition-colors border border-slate-700">
                 Different file
               </button>
             )}
           </div>
-          {preview && preview.readyCount > 0 && !noAccounts && (
+          {isPdf && pdfRows.filter(r => !r.isDup).length > 0 && !noAccounts && (
+            <button onClick={onCommitPdf} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-5 py-2 text-sm font-medium transition-colors">
+              Import {pdfRows.filter(r => !r.isDup).length} transaction{pdfRows.filter(r => !r.isDup).length !== 1 ? 's' : ''} from PDF → {effectiveAccount?.name ?? 'account'}
+            </button>
+          )}
+          {!isPdf && preview && preview.readyCount > 0 && !noAccounts && (
             <button onClick={onCommit} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-5 py-2 text-sm font-medium transition-colors">
               Import {preview.readyCount} transaction{preview.readyCount !== 1 ? 's' : ''} → {effectiveAccount?.name ?? 'account'}
             </button>
