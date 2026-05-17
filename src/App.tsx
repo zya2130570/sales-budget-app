@@ -780,17 +780,21 @@ export default function App() {
     return result
   }, [accounts, transactions])
 
-  // V9.2 — Net worth summary helpers (groundwork for future Dashboard widget)
+  // V9.2/V9.3.1 — Net worth summary helpers
+  // Debt uses raw account.balance (user-entered baseline), not computed balance,
+  // because credit card debt is what the user actually owes — the manual baseline.
+  // Cash and investments use computed balances to reflect transaction activity.
   const netWorthSummary = useMemo(() => {
     let totalCash = 0, totalDebt = 0, totalInvestments = 0
     for (const acct of accounts) {
-      const bal = computedAccountBalances[acct.id] ?? acct.balance
+      const computedBal = computedAccountBalances[acct.id] ?? acct.balance
       if (acct.type === 'credit card') {
-        totalDebt += Math.abs(Math.min(0, bal))
+        // Debt = absolute value of negative balance (manual entry is source of truth for card debt)
+        totalDebt += Math.abs(Math.min(0, acct.balance))
       } else if (acct.type === 'investment' || acct.type === 'roth ira' || acct.type === 'retirement') {
-        totalInvestments += Math.max(0, bal)
+        totalInvestments += Math.max(0, computedBal)
       } else {
-        totalCash += bal
+        totalCash += computedBal
       }
     }
     const netWorth = totalCash + totalInvestments - totalDebt
@@ -1033,7 +1037,7 @@ export default function App() {
     setAccountHint('')
   }
 
-  // V9.3 — Inline account edit helpers
+  // V9.3.1 — Inline account edit helpers
   const startInlineAccountEdit = (a: Account) => {
     setInlineAccountEditId(a.id)
     setInlineAccountEditForm({
@@ -1048,6 +1052,7 @@ export default function App() {
     const name = inlineAccountEditForm.name.trim()
     if (!name) return
     const rawBalance = parseFloat(inlineAccountEditForm.balance) || 0
+    // Credit cards: positive input saves as negative (debt convention)
     const balance = inlineAccountEditForm.type === 'credit card' && rawBalance > 0 ? -rawBalance : rawBalance
     const institution = inlineAccountEditForm.institution.trim()
     setAccountsWithHistory(prev => prev.map(a => a.id === accountId
@@ -1055,24 +1060,38 @@ export default function App() {
       : a
     ))
     setInlineAccountEditId(null)
+    showToast('Account updated.')
   }
-  const cancelInlineAccountEdit = () => setInlineAccountEditId(null)
+  const cancelInlineAccountEdit = () => {
+    setInlineAccountEditId(null)
+    // No toast on cancel
+  }
 
-  // V9.3 — Reconcile action: set startingBalance = expectedBalance so difference becomes 0
+  // V9.3.1 — Reconcile: sets startingBalance so that expectedBalance equals actualBalance,
+  // making difference = 0. Formula: startingBalance = actualBalance - txnImpact.
+  // Uses setAccountsWithHistory so Accounts Undo/Redo picks it up.
   const reconcileAccount = (accountId: string) => {
     const recon = reconciliationData[accountId]
     if (!recon) return
-    setAccountsWithHistory(prev => prev.map(a => a.id === accountId
-      ? { ...a, startingBalance: recon.actualBalance, lastReconciledAt: new Date().toISOString().slice(0, 10) } as Account & { startingBalance: number; lastReconciledAt: string }
-      : a
-    ))
+    const now = new Date().toISOString().slice(0, 10)
+    // New startingBalance = actualBalance - txnImpact so that:
+    //   expectedBalance (= newStartingBalance + txnImpact) = actualBalance → difference = 0
+    const newStartingBalance = recon.actualBalance - recon.txnImpact
+    setAccountsWithHistory(prev => prev.map(a => {
+      if (a.id !== accountId) return a
+      return {
+        ...a,
+        startingBalance: newStartingBalance,
+        lastReconciledAt: now,
+      } as Account & { startingBalance: number; lastReconciledAt: string }
+    }))
     showToast('Account reconciled.')
   }
   const createOrSaveAccount = () => {
     const name = accountForm.name.trim()
     if (!name) { setTimedAccountHint('Enter an account name before adding.'); accountNameRef.current?.focus(); return }
     const rawBalance = parseFloat(accountForm.balance) || 0
-    // Credit cards carry debt-style balances — always ≤ 0
+    // Credit cards carry debt-style balances — always ≤ 0 (positive input inverted)
     const balance = accountForm.type === 'credit card' && rawBalance > 0 ? -rawBalance : rawBalance
     const institution = accountForm.institution.trim()
     if (editAccountId) {
@@ -1080,6 +1099,7 @@ export default function App() {
         ? { ...a, name, type: accountForm.type, balance, institution }
         : a
       ))
+      showToast('Account updated.')
     } else {
       setAccountsWithHistory(prev => [
         { id: crypto.randomUUID(), name, type: accountForm.type, balance, institution, createdAt: new Date().toISOString().slice(0, 10) },
@@ -1167,10 +1187,23 @@ export default function App() {
       }
     }
 
+    // V9.3.1 — Credit card payment guard: prevent payment exceeding card balance owed
+    if (txnForm.type === 'credit card payment' && txnForm.toAccountId) {
+      const cardAcct = accounts.find(a => a.id === txnForm.toAccountId)
+      if (cardAcct && cardAcct.type === 'credit card') {
+        const amountOwed = Math.abs(Math.min(0, cardAcct.balance))
+        if (amountOwed === 0) {
+          setTimedTxnHint(`${cardAcct.name} has no balance owed — no payment needed.`)
+          return
+        }
+        if (amount > amountOwed + 0.005) {
+          setTimedTxnHint(`Payment of ${currency(amount)} exceeds ${cardAcct.name} balance owed (${currency(amountOwed)}). Reduce the amount.`)
+          return
+        }
+      }
+    }
+
    setTxnWithHistory(prev => [
-      { id: crypto.randomUUID(), date: txnForm.date, accountId: resolvedAccountId, merchant, amount, type: txnForm.type, categoryId: autoCategoryId || undefined, appliedByRule: matchedRuleId, notes: txnForm.notes.trim() || undefined, toAccountId: txnForm.toAccountId || undefined, createdAt: new Date().toISOString() },
-      ...prev,
-    ])
     // Set blur guard BEFORE moving focus so Amount's onBlur skips its format-back
     txnSubmittingRef.current = true
     resetTxnFormAfterAdd()
