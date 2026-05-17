@@ -81,6 +81,60 @@ function extractCategoryHints(rows: Array<Record<string, string>>): Record<strin
   return map
 }
 
+// ── V10.0 Category Memory ─────────────────────────────────────────────────────
+// Persists normalized-merchant → categoryId to improve future import hints.
+const CATEGORY_MEMORY_KEY = 'flow_category_memory'
+
+function loadCategoryMemory(): Record<string, string> {
+  try { const s = localStorage.getItem(CATEGORY_MEMORY_KEY); return s ? JSON.parse(s) : {} } catch { return {} }
+}
+function saveCategoryMemory(mem: Record<string, string>): void {
+  try { localStorage.setItem(CATEGORY_MEMORY_KEY, JSON.stringify(mem)) } catch { /* ignore */ }
+}
+
+type HintResult = { categoryId: string; categoryName: string; confidence: 'high' | 'medium' | 'low'; source: 'rule' | 'memory' | 'history' | 'csv' }
+
+/**
+ * Resolve the best category hint for a merchant name using priority order:
+ * 1. Rule match (High confidence)
+ * 2. Category memory (Medium)
+ * 3. CSV-provided category that matches a budget category (Low)
+ */
+function resolveHint(
+  normalizedMerchant: string,
+  csvHint: string,
+  rules: { id: string; matchText: string; matchField: string; categoryId: string }[],
+  categories: { id: string; name: string }[],
+  memory: Record<string, string>,
+): HintResult | null {
+  const key = normalizedMerchant.toLowerCase()
+
+  // Priority 1: Rule match
+  for (const rule of rules) {
+    if (rule.matchField === 'merchant') {
+      const terms = rule.matchText.split(',').map(t => t.trim().toLowerCase())
+      if (terms.some(t => t && key.includes(t))) {
+        const cat = categories.find(c => c.id === rule.categoryId)
+        if (cat) return { categoryId: cat.id, categoryName: cat.name, confidence: 'high', source: 'rule' }
+      }
+    }
+  }
+
+  // Priority 2: Category memory (previously categorized by user)
+  if (memory[key]) {
+    const cat = categories.find(c => c.id === memory[key])
+    if (cat) return { categoryId: cat.id, categoryName: cat.name, confidence: 'medium', source: 'memory' }
+  }
+
+  // Priority 3: CSV-provided hint that matches a budget category name
+  if (csvHint) {
+    const cat = categories.find(c => c.name.toLowerCase() === csvHint.toLowerCase())
+    if (cat) return { categoryId: cat.id, categoryName: cat.name, confidence: 'low', source: 'csv' }
+  }
+
+  return null
+}
+
 /** Payment/transfer merchant patterns that should be flagged for review rather than categorized. */
 const PAYMENT_PATTERNS = /payment|transfer|zelle|venmo|paypal|apple cash|e-payment|gsbank|discover e|online transfer/i
 
@@ -458,6 +512,12 @@ export default function App() {
   const [savedBudgets, setSavedBudgets] = useState<SavedBudget[]>([])
   const [savedScenarios, setSavedScenarios] = useState<SavedScenarioSet[]>([])
 
+  // ══════════════════════════════════════════════════════════════════════════════
+  // V10 ARCHITECTURE — SCENARIO ENGINE
+  // Scenarios: what-if salary/expense adjustments on top of base income model
+  // savedScenarios[], activeScenario → scenario income/budget overlay
+  // V9.13 expansion: additional scenario parameters
+  // ══════════════════════════════════════════════════════════════════════════════
   // V9.13 — Scenario engine expansion
   const [scenarioNotes, setScenarioNotes] = useState<Record<string, string>>({}) // keyed by savedScenario name
   const [editingScenarioName, setEditingScenarioName] = useState<string | null>(null)
@@ -823,8 +883,16 @@ export default function App() {
     type: 'expense' as TransactionType, categoryId: '', notes: '', toAccountId: '',
   })
 
+  // ══════════════════════════════════════════════════════════════════════════════
+  // V10 ARCHITECTURE — DATA MODELS & STATE
+  // Core state: accounts, transactions, categories, rules, targets, scenarios.
+  // All persisted to localStorage via useEffect save effects below.
+  // ══════════════════════════════════════════════════════════════════════════════
+
   // V8.3 — Transaction Rules
   const [rules, setRules]                     = useState<TransactionRule[]>([])
+  // V10.0 — Category memory: normalized merchant → categoryId, persisted to localStorage
+  const [categoryMemory, setCategoryMemory]   = useState<Record<string, string>>(loadCategoryMemory)
   const [ruleForm, setRuleForm]               = useState<{
     name: string; matchText: string; matchField: 'merchant' | 'notes'
     categoryId: string; type: TransactionType | ''
@@ -937,6 +1005,8 @@ export default function App() {
   useEffect(() => saveAccounts(accounts), [accounts])
   useEffect(() => saveTransactions(transactions), [transactions])
  useEffect(() => saveTransactionRules(rules), [rules])
+  // V10.0 — Persist category memory
+  useEffect(() => saveCategoryMemory(categoryMemory), [categoryMemory])
   // V9.9.1 — Monthly Review persistence
   useEffect(() => { try { localStorage.setItem('flow_review_month', reviewMonth) } catch { /* ignore */ } }, [reviewMonth])
   useEffect(() => { try { localStorage.setItem('flow_monthly_notes', JSON.stringify(monthlyNotes)) } catch { /* ignore */ } }, [monthlyNotes])
@@ -1030,6 +1100,12 @@ export default function App() {
 
   // ── V7.5 Actuals computations ────────────────────────────────────────────────
   // Period-aware variance coloring: small misses should not look dangerous
+  // ══════════════════════════════════════════════════════════════════════════════
+  // V10 ARCHITECTURE — BUDGET ENGINE
+  // categories[] → effectiveCatActual() → plan vs actual variance
+  // Budget health: catStatus(), budgetHealth useMemo
+  // Rollover: categoryRollovers state (flag stored, calc TBD)
+  // ══════════════════════════════════════════════════════════════════════════════
   const varianceTone = (overspendAmt: number, p: Period): 'good' | 'neutral' | 'warn' | 'danger' => {
     const threshold = p === 'weekly' ? 50 : p === 'bi-weekly' ? 100 : p === 'monthly' ? 216 : 2600
     if (overspendAmt <= 0) return 'good'
@@ -1310,6 +1386,12 @@ export default function App() {
   )
   const needsReviewTxnCount = reviewableTxns.length
 
+  // ══════════════════════════════════════════════════════════════════════════════
+  // V10 ARCHITECTURE — RECURRING / SUBSCRIPTION ENGINE
+  // detectRecurringPatterns() → recurringCandidates useMemo
+  // Manual items: manualRecurringItems state
+  // Both feed into: estimatedMonthlyRecurring + cashFlowForecast
+  // ══════════════════════════════════════════════════════════════════════════════
   // V9.7 — Recurring detection
   const recurringCandidates = useMemo(
     () => detectRecurringPatterns(transactions).filter(c => !dismissedRecurring.has(c.merchantKey)),
@@ -1375,6 +1457,11 @@ export default function App() {
     return { items, startingCash, totalIncome, totalExpenses, projectedEnd, safeToSpend, status, todayStr, endStr }
   }, [forecastPeriod, netWorthSummary.totalCash, manualRecurringItems, recurringCandidates, confirmedRecurring, cadenceMult, inc.totalMonthly])
 
+  // ══════════════════════════════════════════════════════════════════════════════
+  // V10 ARCHITECTURE — MONTHLY REVIEW ENGINE
+  // monthlyReview useMemo → category breakdown, biggest txns, checklist
+  // Persistence: reviewMonth, monthlyNotes, reviewedMonths → localStorage
+  // ══════════════════════════════════════════════════════════════════════════════
   // V9.9 — Monthly Review computed data
   const monthlyReview = useMemo(() => {
     const txns = transactions.filter(tx => tx.date.startsWith(reviewMonth))
@@ -1707,6 +1794,13 @@ export default function App() {
     accountNameRef.current?.focus()
   }
 
+  // ══════════════════════════════════════════════════════════════════════════════
+  // V10 ARCHITECTURE — TRANSACTION REVIEW CENTER
+  // txNeedsReview() → drives reviewableTxns → Needs Review UI
+  // Duplicate detection: merchant + amount + date match
+  // Rule application: applyRules() runs on every transaction save
+  // ══════════════════════════════════════════════════════════════════════════════
+
   // ── V8 Transaction helpers ────────────────────────────────────────────────────
 
   const setTxnWithHistory = (updater: (prev: Transaction[]) => Transaction[]) => {
@@ -1880,7 +1974,15 @@ txnMerchantRef.current?.focus()
     setTxnHint('')
   }
 
-  // ── V8.3 Rule helpers ─────────────────────────────────────────────────────────
+  // V10.0 — Update category memory when user manually assigns a category
+  const updateCategoryMemory = (merchant: string, categoryId: string) => {
+    const key = normalizeMerchant(merchant).toLowerCase()
+    if (!key || !categoryId) return
+    setCategoryMemory(prev => {
+      if (prev[key] === categoryId) return prev
+      return { ...prev, [key]: categoryId }
+    })
+  }
 
   // V8.5.2 — Case-insensitive, comma-separated alias matching.
   // Normalizes apostrophes (straight ' curly \u2019) so "McDonald's" matches "McDonald's",
@@ -2159,6 +2261,13 @@ txnMerchantRef.current?.focus()
     showToast(`${batch.length} sample transactions added.`)
   }
 
+  // ══════════════════════════════════════════════════════════════════════════════
+  // V10 ARCHITECTURE — IMPORT ENGINE
+  // CSV/PDF import pipeline: processCsvText → runImportPipeline → commitCsvImport
+  // Hint resolution: resolveHint() → rule > memory > CSV category
+  // Batch identity: every import creates an ImportBatch record.
+  // ══════════════════════════════════════════════════════════════════════════════
+
   // ── V9.0 CSV Import handlers ──────────────────────────────────────────────────
 
   const openCsvImport = () => {
@@ -2321,22 +2430,31 @@ txnMerchantRef.current?.focus()
       batchId,
       false,
     )
-    // Apply category hints and payment/transfer detection
+    // Apply category hints and payment/transfer detection using enriched hint resolver
     newTxns = newTxns.map(tx => {
       const amtKey = `${tx.date}|${tx.merchant.toLowerCase()}|${tx.amount.toFixed(2)}`
-      const hint   = csvCategoryHints[amtKey] ?? ''
-      // Try to match hint to an existing budget category
-      const matchedCat = hint ? categories.find(c => c.name.toLowerCase() === hint.toLowerCase()) : undefined
-      // Flag payment-like merchants as credit card payment or needs-review (don't auto-categorize)
+      const csvHint = csvCategoryHints[amtKey] ?? ''
+      const normalized = normalizeMerchant(tx.merchant)
+      const hint = resolveHint(normalized, csvHint, rules, categories, categoryMemory)
       const isPayment = PAYMENT_PATTERNS.test(tx.merchant)
       return {
         ...tx,
-        ...(hint ? { importedCategoryHint: hint } : {}),
-        ...(matchedCat && !isPayment ? { categoryId: matchedCat.id } : {}),
+        ...(csvHint ? { importedCategoryHint: csvHint } : {}),
+        ...(hint && !isPayment ? { categoryId: hint.categoryId } : {}),
         ...(isPayment && tx.type === 'expense' ? { type: 'credit card payment' as TransactionType } : {}),
         batchId,
       }
     })
+    // V10.0 — Update category memory for all auto-categorized imports
+    const memoryUpdates: Record<string, string> = {}
+    newTxns.forEach(tx => {
+      if (tx.categoryId && !PAYMENT_PATTERNS.test(tx.merchant)) {
+        memoryUpdates[normalizeMerchant(tx.merchant).toLowerCase()] = tx.categoryId
+      }
+    })
+    if (Object.keys(memoryUpdates).length > 0) {
+      setCategoryMemory(prev => ({ ...prev, ...memoryUpdates }))
+    }
     if (newTxns.length === 0) { closeCsvImport(); return }
     setTxnWithHistory(prev => [...newTxns, ...prev])
     // Record the import batch for history
@@ -2597,6 +2715,13 @@ txnMerchantRef.current?.focus()
     }
   }, [targets, pausedGoals])
 
+  // ══════════════════════════════════════════════════════════════════════════════
+  // V10 ARCHITECTURE — SAVINGS GOALS ENGINE
+  // Target[] → activeTargets / pausedTargets / fullyFundedTargets / completedTargets
+  // Contributions: addTargetContribution() → updates Target.currentSaved
+  // Pace: computeTargetStatus() + requiredForTarget() → goal cards
+  // Priority/pause: goalPriorities, pausedGoals state
+  // ══════════════════════════════════════════════════════════════════════════════
   const renderTargetCard = (t: Target) => {
     const req = requiredForTarget(t)
     const progressPct = t.goalAmount > 0 ? Math.min(100, (t.currentSaved / t.goalAmount) * 100) : 0
@@ -4753,6 +4878,7 @@ txnMerchantRef.current?.focus()
                                   setTxnWithHistory(prev => prev.map(x =>
                                     x.id === tx.id ? { ...x, categoryId: newCatId } : x
                                   ))
+                                  updateCategoryMemory(tx.merchant, newCatId)
                                   // Rule suggestion: offer to create rule if none exists for this merchant
                                   const merchant = normalizeMerchant(tx.merchant)
                                   const ruleExists = rules.some(r =>
@@ -6660,6 +6786,9 @@ txnMerchantRef.current?.focus()
           importMonth={csvImportMonth}
           isAppleCard={csvIsAppleCard}
           categoryHints={csvCategoryHints}
+          hintRules={rules}
+          hintCategories={categories}
+          hintMemory={categoryMemory}
           isPdf={csvImportIsPdf}
           pdfRows={pdfPreviewRows}
           pdfWarning={pdfParseWarning}
@@ -6873,6 +7002,9 @@ interface CsvImportModalProps {
   importMonth: string
   isAppleCard: boolean
   categoryHints: Record<string, string>
+  hintRules: { id: string; matchText: string; matchField: string; categoryId: string }[]
+  hintCategories: { id: string; name: string }[]
+  hintMemory: Record<string, string>
   isPdf: boolean
   pdfRows: PdfImportRow[]
   pdfWarning: string
@@ -6895,6 +7027,7 @@ interface CsvImportModalProps {
 function CsvImportModal({
   preview, loading, error, accounts, categories,
   importAccountId, importMonth, isAppleCard, categoryHints,
+  hintRules, hintCategories, hintMemory,
   isPdf, pdfRows, pdfWarning,
   preset, columnMapping,
   onImportAccountChange, onImportMonthChange, onPresetChange,
@@ -7160,14 +7293,21 @@ function CsvImportModal({
                         {(preview.importRows as Array<{ date?: string; merchant?: string; description?: string; amount?: number; type?: string }>).map((row, i) => {
                           const rawMerchant = row.merchant ?? row.description ?? ''
                           const amtKey      = `${row.date ?? ''}|${rawMerchant.toLowerCase()}|${Math.abs(row.amount ?? 0).toFixed(2)}`
-                          const hint        = categoryHints[amtKey] ?? ''
-                          const matchedCat  = hint ? categories.find(c => c.name.toLowerCase() === hint.toLowerCase()) : undefined
+                          const csvHint     = categoryHints[amtKey] ?? ''
+                          const normalized  = normalizeMerchant(rawMerchant)
+                          const hint        = resolveHint(normalized, csvHint, hintRules, hintCategories, hintMemory)
                           const isPayment   = /payment|transfer|zelle|venmo|paypal/i.test(rawMerchant)
+                          const confBadge   = hint?.confidence === 'high'
+                            ? 'bg-green-900/50 text-green-300 border-green-700/40'
+                            : hint?.confidence === 'medium'
+                              ? 'bg-blue-900/40 text-blue-300 border-blue-700/30'
+                              : 'bg-slate-700/60 text-slate-400 border-slate-600/40'
+                          const srcLabel    = hint?.source === 'rule' ? '⚡rule' : hint?.source === 'memory' ? '◎mem' : 'csv'
                           return (
                             <tr key={i} className={`border-b border-slate-800 ${isPayment ? 'bg-amber-950/10' : 'hover:bg-slate-800/40'}`}>
                               <td className="py-1 px-2 text-slate-300 whitespace-nowrap">{row.date ?? '—'}</td>
                               <td className="py-1 px-2 text-slate-200 max-w-[130px] truncate">
-                                {normalizeMerchant(rawMerchant) || '—'}
+                                {normalized || '—'}
                                 {isPayment && (
                                   <span className="ml-1 text-[9px] text-amber-400">
                                     {effectiveAccount?.type === 'credit card' ? 'CC Payment?' : 'Transfer?'}
@@ -7178,10 +7318,12 @@ function CsvImportModal({
                                 {row.amount != null ? `$${Math.abs(row.amount).toFixed(2)}` : '—'}
                               </td>
                               <td className="py-1 px-2">
-                                {matchedCat ? (
-                                  <span className="text-[9px] bg-blue-900/40 text-blue-300 border border-blue-700/30 px-1 py-0.5 rounded">{matchedCat.name}</span>
-                                ) : hint ? (
-                                  <span className="text-[9px] text-slate-500">{hint}</span>
+                                {hint ? (
+                                  <span className={`text-[9px] border px-1.5 py-0.5 rounded font-medium ${confBadge}`} title={`Source: ${hint.source}`}>
+                                    {hint.categoryName} <span className="opacity-60">{srcLabel}</span>
+                                  </span>
+                                ) : csvHint ? (
+                                  <span className="text-[9px] text-slate-500">{csvHint}</span>
                                 ) : null}
                               </td>
                               <td className="py-1 px-2">
