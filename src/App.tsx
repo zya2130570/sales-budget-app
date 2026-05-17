@@ -3255,6 +3255,12 @@ txnMerchantRef.current?.focus()
                     {needsReviewCount} account{needsReviewCount !== 1 ? 's need' : ' needs'} review — actual balance doesn&apos;t match expected from transactions.
                   </div>
                 )}
+                {/* V9.3.2 — Reconciliation helper text */}
+                <p className="text-xs text-slate-500 mb-3">
+                  <span className="text-slate-400 font-medium">Expected Balance</span> = starting balance plus tracked transaction impact.{' '}
+                  <span className="text-slate-400 font-medium">Actual Balance</span> is the balance you entered.{' '}
+                  Reconcile accepts the current actual balance as the new baseline.
+                </p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -3262,7 +3268,7 @@ txnMerchantRef.current?.focus()
                         <th className="pb-1.5 pr-4 font-medium">Name</th>
                         <th className="pb-1.5 pr-4 font-medium">Type</th>
                         <th className="pb-1.5 pr-4 font-medium text-right">Actual Balance</th>
-                        <th className="pb-1.5 pr-4 font-medium text-right">Expected</th>
+                        <th className="pb-1.5 pr-4 font-medium text-right">Expected Balance</th>
                         <th className="pb-1.5 pr-4 font-medium">Status</th>
                         <th className="pb-1.5 pr-4 font-medium">Institution</th>
                         <th className="pb-1.5" />
@@ -3329,14 +3335,14 @@ txnMerchantRef.current?.focus()
                                 />
                               ) : a.balance < 0 ? `−${currency(Math.abs(a.balance))}` : currency(a.balance)}
                             </td>
-                            {/* Expected (transaction-adjusted) */}
+                            {/* Expected Balance (transaction-adjusted) */}
                             <td className="py-2 pr-4 text-right text-slate-400 text-xs">
                               {recon ? (
                                 <>
                                   {recon.expectedBalance < 0 ? `−${currency(Math.abs(recon.expectedBalance))}` : currency(recon.expectedBalance)}
                                   {Math.abs(recon.txnImpact) > 0.005 && (
                                     <div className="text-[10px] text-slate-500">
-                                      {recon.txnImpact > 0 ? '+' : '−'}{currency(Math.abs(recon.txnImpact))} txns
+                                      {recon.txnImpact > 0 ? '+' : '−'}{currency(Math.abs(recon.txnImpact))} transaction impact
                                     </div>
                                   )}
                                 </>
@@ -3349,7 +3355,9 @@ txnMerchantRef.current?.focus()
                                   <span className="text-green-400 font-medium">Reconciled</span>
                                 ) : (
                                   <span className={`font-medium ${Math.abs(recon.difference) > 100 ? 'text-red-400' : 'text-amber-300'}`}>
-                                    {recon.difference > 0 ? '+' : '−'}{currency(Math.abs(recon.difference))} off
+                                    {recon.difference > 0
+                                      ? `Actual is ${currency(recon.difference)} higher than expected`
+                                      : `Actual is ${currency(Math.abs(recon.difference))} lower than expected`}
                                   </span>
                                 )
                               ) : null}
@@ -3380,8 +3388,21 @@ txnMerchantRef.current?.focus()
                               ) : (
                                 <>
                                   <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => startInlineAccountEdit(a)}>Edit</button>
-                                  {recon && !recon.isReconciled && (
-                                    <button className="text-amber-400 hover:text-amber-300 text-xs" onClick={() => reconcileAccount(a.id)}>Reconcile</button>
+                                  {recon && (
+                                    <span>
+                                      <button
+                                        className={`text-xs ${recon.isReconciled ? 'text-slate-500 hover:text-slate-300' : 'text-amber-400 hover:text-amber-300'}`}
+                                        onClick={() => reconcileAccount(a.id)}
+                                        title={recon.isReconciled ? 'Already reconciled — click to re-reconcile with current balance' : 'Accept actual balance as the new baseline'}
+                                      >
+                                        Reconcile
+                                      </button>
+                                      {(a as Account & { lastReconciledAt?: string }).lastReconciledAt && (
+                                        <span className="ml-1.5 text-[10px] text-slate-600">
+                                          Last: {formatDate((a as Account & { lastReconciledAt?: string }).lastReconciledAt)}
+                                        </span>
+                                      )}
+                                    </span>
                                   )}
                                   <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => {
                                     setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))
@@ -3613,9 +3634,16 @@ txnMerchantRef.current?.focus()
                       onChange={e => setTxnForm(v => ({ ...v, toAccountId: e.target.value }))}
                     >
                       <option value="">— optional —</option>
-                      {accounts.filter(a => a.id !== txnForm.accountId).map(a => (
-                        <option key={a.id} value={a.id}>{a.name}</option>
-                      ))}
+                      {accounts
+                        .filter(a => a.id !== txnForm.accountId)
+                        .filter(a =>
+                          txnForm.type === 'credit card payment'
+                            ? a.type === 'credit card'
+                            : a.type !== 'credit card'
+                        )
+                        .map(a => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
                     </select>
                     <p className="text-[10px] text-slate-500 mt-0.5">
                       {txnForm.type === 'credit card payment'
