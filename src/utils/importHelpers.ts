@@ -258,8 +258,11 @@ export function buildImportedTransactions(
       appliedByRule: r.appliedByRuleId,
       notes: r.notes || undefined,
       createdAt: now,
-      importedAt:    now,
+      updatedAt: now,
+      batchId: importBatchId,
       importBatchId,
-      importSource:  'csv' as const,
-    } as Transaction & { importedAt: string; importBatchId: string; importSource: 'csv' }))
+      source: 'csv',
+      importedAt: now,
+      importSource: 'csv',
+    }))
 }

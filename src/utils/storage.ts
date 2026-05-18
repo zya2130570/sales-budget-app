@@ -1,4 +1,5 @@
 import type { Tab, Period, Category, SavedBudget, SavedScenarioSet, Target, SavedTargetSet, Account, Transaction, TransactionRule, TakeHomeSettings } from '../types'
+import { CURRENT_SCHEMA_VERSION } from '../types'
 import { STORAGE_KEYS } from './storageKeys'
 
 export const KEYS = {
@@ -15,11 +16,25 @@ export const KEYS = {
   takeHome: STORAGE_KEYS.takeHomeSettings,
 } as const
 
-export const STORAGE_VERSION = 1
+export const STORAGE_VERSION = CURRENT_SCHEMA_VERSION
 export const STORAGE_VERSION_KEY = STORAGE_KEYS.schemaVersion
 
 const VALID_TABS: Tab[] = ['Dashboard', 'Income', 'Budget', 'Scenarios', 'Targets', 'Accounts', 'Transactions']
 const VALID_PERIODS: Period[] = ['weekly', 'bi-weekly', 'monthly', 'yearly']
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const cleanString = (value: unknown, fallback = ''): string =>
+  typeof value === 'string' ? value : fallback
+
+const cleanNumber = (value: unknown, fallback = 0): number => {
+  const n = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(n) ? n : fallback
+}
+
+const cleanArray = <T>(value: unknown, fallback: T[] = []): T[] =>
+  Array.isArray(value) ? value as T[] : fallback
 
 export function safeJsonParse<T>(raw: string | null, fallback: T): T {
   if (raw === null) return fallback
@@ -95,10 +110,78 @@ export function storageSetRaw(key: string, value: string): void {
 
 function normalizeTarget(raw: Record<string, unknown>): Record<string, unknown> {
   const today = new Date().toISOString().slice(0, 10)
+  raw['id'] = cleanString(raw['id'], crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`)
+  raw['name'] = cleanString(raw['name'], 'Untitled Goal')
+  raw['goalAmount'] = cleanNumber(raw['goalAmount'])
+  raw['currentSaved'] = cleanNumber(raw['currentSaved'])
+  raw['deadline'] = cleanString(raw['deadline'])
+  raw['type'] = 'savings'
+  raw['contributions'] = cleanArray<Record<string, unknown>>(raw['contributions']).map(contribution => ({
+    id: cleanString(contribution['id'], crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`),
+    date: cleanString(contribution['date'], today),
+    amount: cleanNumber(contribution['amount']),
+    note: cleanString(contribution['note']),
+  }))
   if (typeof raw['completed'] !== 'boolean') raw['completed'] = false
+  if (typeof raw['paused'] !== 'boolean' && raw['paused'] !== undefined) raw['paused'] = Boolean(raw['paused'])
   if (!raw['startDate'] || typeof raw['startDate'] !== 'string') {
-    raw['startDate'] = (raw['createdAt'] && typeof raw['createdAt'] === 'string') ? raw['createdAt'] : today
+    raw['startDate'] = cleanString(raw['createdAt'], today)
   }
+  if (!raw['createdAt'] || typeof raw['createdAt'] !== 'string') raw['createdAt'] = today
+  return raw
+}
+
+function normalizeTransaction(raw: Record<string, unknown>): Record<string, unknown> {
+  const now = new Date().toISOString()
+  raw['id'] = cleanString(raw['id'], crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`)
+  raw['date'] = cleanString(raw['date'], now.slice(0, 10))
+  raw['accountId'] = cleanString(raw['accountId'])
+  raw['merchant'] = cleanString(raw['merchant'], 'Unknown')
+  raw['amount'] = Math.abs(cleanNumber(raw['amount']))
+  raw['type'] = cleanString(raw['type'], 'expense')
+  raw['createdAt'] = cleanString(raw['createdAt'], now)
+
+  const batchId = cleanString(raw['batchId'] || raw['importBatchId'])
+  if (batchId) {
+    raw['batchId'] = batchId
+    raw['importBatchId'] = batchId
+  }
+
+  if (!raw['source']) {
+    raw['source'] = batchId ? cleanString(raw['importSource'], 'csv') : 'manual'
+  }
+  if (!raw['updatedAt']) raw['updatedAt'] = cleanString(raw['createdAt'], now)
+  return raw
+}
+
+function normalizeAccount(raw: Record<string, unknown>): Record<string, unknown> {
+  const now = new Date().toISOString()
+  raw['id'] = cleanString(raw['id'], crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`)
+  raw['name'] = cleanString(raw['name'], 'Untitled Account')
+  raw['type'] = cleanString(raw['type'], 'checking')
+  raw['balance'] = cleanNumber(raw['balance'])
+  raw['institution'] = cleanString(raw['institution'])
+  raw['createdAt'] = cleanString(raw['createdAt'], now)
+  if (!raw['updatedAt']) raw['updatedAt'] = cleanString(raw['createdAt'], now)
+  return raw
+}
+
+function normalizeImportBatch(raw: Record<string, unknown>): Record<string, unknown> {
+  const now = new Date().toISOString()
+  const skippedCount = cleanNumber(raw['skippedCount'])
+  raw['id'] = cleanString(raw['id'], crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`)
+  raw['accountId'] = cleanString(raw['accountId'])
+  raw['accountName'] = cleanString(raw['accountName'])
+  raw['importMonth'] = cleanString(raw['importMonth'], now.slice(0, 7))
+  raw['importedCount'] = cleanNumber(raw['importedCount'])
+  raw['skippedCount'] = skippedCount
+  raw['skippedDuplicateCount'] = cleanNumber(raw['skippedDuplicateCount'], skippedCount)
+  raw['failedRowCount'] = cleanNumber(raw['failedRowCount'])
+  raw['createdAt'] = cleanString(raw['createdAt'], now)
+  raw['importedAt'] = cleanString(raw['importedAt'], cleanString(raw['createdAt'], now))
+  raw['importSource'] = cleanString(raw['importSource'], cleanString(raw['source'], 'csv'))
+  raw['source'] = cleanString(raw['source'], cleanString(raw['importSource'], 'csv'))
+  raw['preset'] = cleanString(raw['preset'], 'auto')
   return raw
 }
 
@@ -117,11 +200,27 @@ export function runMigrations(): void {
       if (Array.isArray(targetSets)) {
         const migrated = targetSets.map(set => {
           if (Array.isArray(set['targets'])) {
-            return { ...set, targets: (set['targets'] as Record<string, unknown>[]).map(t => normalizeTarget({ ...t })) }
+            return { ...set, targets: (set['targets'] as Record<string, unknown>[]).filter(isRecord).map(t => normalizeTarget({ ...t })) }
           }
           return set
         })
         saveToStorage(KEYS.targetSets, migrated)
+      }
+    }
+    if (currentVersion < 2) {
+      const transactions = loadFromStorage<Array<Record<string, unknown>> | null>(KEYS.transactions, null)
+      if (Array.isArray(transactions)) {
+        saveToStorage(KEYS.transactions, transactions.filter(isRecord).map(t => normalizeTransaction({ ...t })))
+      }
+
+      const accounts = loadFromStorage<Array<Record<string, unknown>> | null>(KEYS.accounts, null)
+      if (Array.isArray(accounts)) {
+        saveToStorage(KEYS.accounts, accounts.filter(isRecord).map(a => normalizeAccount({ ...a })))
+      }
+
+      const importHistory = loadFromStorage<Array<Record<string, unknown>> | null>(STORAGE_KEYS.importHistory, null)
+      if (Array.isArray(importHistory)) {
+        saveToStorage(STORAGE_KEYS.importHistory, importHistory.filter(isRecord).map(b => normalizeImportBatch({ ...b })))
       }
     }
     saveRawToStorage(STORAGE_VERSION_KEY, String(STORAGE_VERSION))

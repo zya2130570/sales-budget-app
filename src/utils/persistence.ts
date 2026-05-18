@@ -1,6 +1,7 @@
 import { STORAGE_KEYS } from './storageKeys'
 import { loadFromStorage, loadRawFromStorage, saveRawToStorage, saveToStorage } from './storage'
 import type { CategoryMemory } from './categoryMemory'
+import type { MonthlyReview } from '../types'
 
 export function currentReviewMonth(): string {
   const n = new Date()
@@ -53,4 +54,24 @@ export function loadCategoryMemoryFromStorage(): CategoryMemory {
 
 export function saveCategoryMemoryToStorage(mem: CategoryMemory): void {
   saveToStorage(STORAGE_KEYS.categoryMemory, mem)
+}
+
+export function loadMonthlyReviews(): MonthlyReview[] {
+  const notes = loadMonthlyNotes()
+  const reviewed = loadReviewedMonths()
+  return [...new Set([...Object.keys(notes), ...Object.keys(reviewed)])]
+    .sort()
+    .map(month => ({
+      month,
+      notes: notes[month] ?? '',
+      reviewedAt: reviewed[month],
+      status: reviewed[month] ? 'reviewed' : 'draft',
+    }))
+}
+
+export function saveMonthlyReview(review: MonthlyReview): void {
+  const notes = loadMonthlyNotes()
+  const reviewed = loadReviewedMonths()
+  saveMonthlyNotes({ ...notes, [review.month]: review.notes })
+  if (review.reviewedAt) saveReviewedMonths({ ...reviewed, [review.month]: review.reviewedAt })
 }

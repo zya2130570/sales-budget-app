@@ -108,8 +108,9 @@ export function buildTransactionFromForm(params: {
     toAccountId: form.toAccountId || undefined,
     appliedByRule: matchedRuleId,
     createdAt,
-    source: 'manual' as const,
-  } as Transaction
+    source: 'manual',
+    updatedAt: createdAt,
+  }
 }
 
 export function addTransaction(transactions: Transaction[], transaction: Transaction): Transaction[] {
@@ -135,6 +136,7 @@ export function updateTransaction(transactions: Transaction[], transactionId: st
         notes: form.notes.trim() || undefined,
         toAccountId: form.toAccountId || undefined,
         appliedByRule: categoryChangedManually ? undefined : tx.appliedByRule,
+        updatedAt: new Date().toISOString(),
       }
     : tx
   )
@@ -248,7 +250,7 @@ export function updateSavingsGoal(targets: Target[], targetId: string, form: Tar
   const goalAmount = Number(form.goalAmount) || 0
   const currentSaved = Number(form.currentSaved) || 0
   return targets.map(target => target.id === targetId
-    ? { ...target, name, goalAmount, currentSaved, startDate: form.startDate, deadline: form.deadline }
+    ? { ...target, name, goalAmount, currentSaved, startDate: form.startDate, deadline: form.deadline, updatedAt: new Date().toISOString() }
     : target
   )
 }
@@ -299,11 +301,11 @@ export function deleteContribution(targets: Target[], targetId: string, contribu
 }
 
 export function pauseGoal(targets: Target[], targetId: string): Target[] {
-  return targets.map(target => target.id === targetId ? { ...target, paused: true } as Target & { paused: boolean } : target)
+  return targets.map(target => target.id === targetId ? { ...target, paused: true, updatedAt: new Date().toISOString() } : target)
 }
 
 export function resumeGoal(targets: Target[], targetId: string): Target[] {
-  return targets.map(target => target.id === targetId ? { ...target, paused: false } as Target & { paused: boolean } : target)
+  return targets.map(target => target.id === targetId ? { ...target, paused: false, updatedAt: new Date().toISOString() } : target)
 }
 
 export function saveGoalSet(savedSets: SavedTargetSet[], name: string, targets: Target[], savedAt: string): SavedTargetSet[] {
