@@ -1,5 +1,6 @@
 // ── Transaction Review Helpers ─────────────────────────────────────────────────
 import type { Transaction, TransactionType } from '../types'
+import { hasDuplicateTransaction } from './duplicateDetection'
 
 export type TxConfidence = 'high' | 'medium' | 'low'
 
@@ -10,13 +11,7 @@ export function txNeedsReview(
   dismissedDupIds?: Set<string>,
 ): boolean {
   if (tx.type === 'expense' && !tx.categoryId) return true
-  if (dismissedDupIds?.has(tx.id)) return false
-  return allTxns.some(o =>
-    o.id !== tx.id &&
-    o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
-    o.amount === tx.amount &&
-    o.date === tx.date
-  )
+  return hasDuplicateTransaction(tx, allTxns, { dismissedDupIds, includeAccount: false })
 }
 
 /** Estimates how confident we are that a transaction is properly categorized. */
