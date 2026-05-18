@@ -1,5 +1,6 @@
 import React from 'react'
 import { currency } from '../utils/formatting'
+import { Button, EmptyState, SectionToggle } from './ui'
 import { cadenceMult } from '../utils/forecastMath'
 import type { RecurringCadence, ManualRecurringItem } from '../utils/forecastMath'
 import type { RecurringCandidate } from '../utils/recurring'
@@ -32,23 +33,14 @@ export function RecurringSection({
 }: RecurringSectionProps) {
   return (
     <div className="rounded-2xl border border-teal-700/30 bg-teal-950/10 overflow-hidden">
-      <button
-        className="w-full flex items-center justify-between px-4 py-3 text-left"
-        onClick={() => setRecurringOpen(v => !v)}
-      >
-        <div className="flex items-center gap-2.5">
-          {recurringCandidates.length > 0 && (
-            <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-teal-500/25 text-teal-300 text-xs font-bold">
-              {recurringCandidates.length}
-            </span>
-          )}
-          <span className="text-teal-300 font-semibold text-sm">Subscriptions &amp; Recurring</span>
-          {estimatedMonthlyRecurring > 0 && (
-            <span className="text-slate-500 text-xs">≈ {currency(estimatedMonthlyRecurring)}/mo</span>
-          )}
-        </div>
-        <span className="text-slate-500 text-xs">{recurringOpen ? '▲' : '▼'}</span>
-      </button>
+      <SectionToggle
+        title="Subscriptions & Recurring"
+        count={recurringCandidates.length}
+        meta={estimatedMonthlyRecurring > 0 ? `≈ ${currency(estimatedMonthlyRecurring)}/mo` : undefined}
+        open={recurringOpen}
+        onToggle={() => setRecurringOpen(v => !v)}
+        tone="teal"
+      />
 
       {recurringOpen && (
         <div className="border-t border-teal-700/20 px-4 pb-4 pt-3 space-y-3">
@@ -57,10 +49,12 @@ export function RecurringSection({
               Recurring suggestions appear after the same merchant appears 2+ times with similar amounts and timing.
               {recurringCandidates.length === 0 && manualRecurringItems.length === 0 && ' Add or import repeated merchants to see suggestions.'}
             </p>
-            <button
-              className="shrink-0 text-xs text-teal-400 hover:text-teal-300 bg-teal-900/30 hover:bg-teal-900/50 border border-teal-700/30 px-2 py-1 rounded transition-colors"
+            <Button
+              tone={showAddRecurring ? 'secondary' : 'success'}
+              size="xs"
+              className="shrink-0"
               onClick={() => setShowAddRecurring(v => !v)}
-            >{showAddRecurring ? 'Cancel' : '+ Add Item'}</button>
+            >{showAddRecurring ? 'Cancel' : '+ Add Item'}</Button>
           </div>
 
           {/* Manual add form */}
@@ -106,8 +100,10 @@ export function RecurringSection({
                   onChange={e => setRecurringForm(v => ({ ...v, nextDueDate: e.target.value }))}
                 />
               </div>
-              <button
-                className="col-span-2 text-xs bg-teal-600 hover:bg-teal-500 disabled:bg-slate-700 disabled:text-slate-500 px-3 py-1.5 rounded transition-colors"
+              <Button
+                tone="success"
+                size="sm"
+                className="col-span-2"
                 disabled={!recurringForm.name.trim() || parseFloat(recurringForm.amount) <= 0}
                 onClick={() => {
                   const item: ManualRecurringItem = {
@@ -119,7 +115,7 @@ export function RecurringSection({
                   setRecurringForm({ name: '', amount: '', cadence: 'monthly', nextDueDate: new Date().toISOString().slice(0, 10), type: 'expense' })
                   setShowAddRecurring(false)
                 }}
-              >Add recurring item</button>
+              >Add recurring item</Button>
             </div>
           )}
 
@@ -150,10 +146,12 @@ export function RecurringSection({
                       <td className="py-1.5 pr-3 text-slate-500">{item.nextDueDate}</td>
                       <td className="py-1.5 pr-3 text-center text-slate-600">—</td>
                       <td className="py-1.5">
-                        <button
-                          className="text-[10px] text-red-400 hover:text-red-300 px-1.5 py-0.5 rounded"
+                        <Button
+                          tone="ghost"
+                          size="xs"
+                          className="text-red-400 hover:text-red-300"
                           onClick={() => setManualRecurringItems(prev => prev.filter(x => x.id !== item.id))}
-                        >Remove</button>
+                        >Remove</Button>
                       </td>
                     </tr>
                   ))}
@@ -175,10 +173,10 @@ export function RecurringSection({
                         <td className="py-1.5">
                           <div className="flex gap-1.5">
                             {!isConfirmed
-                              ? <button className="text-[10px] text-teal-400 hover:text-teal-300 bg-teal-900/30 hover:bg-teal-900/50 border border-teal-700/30 px-1.5 py-0.5 rounded" onClick={() => setConfirmedRecurring(prev => new Set([...prev, c.merchantKey]))}>Confirm</button>
-                              : <button className="text-[10px] text-slate-400 hover:text-slate-200 bg-slate-700/50 px-1.5 py-0.5 rounded" onClick={() => setConfirmedRecurring(prev => { const n = new Set(prev); n.delete(c.merchantKey); return n })}>Unconfirm</button>
+                              ? <Button tone="success" size="xs" onClick={() => setConfirmedRecurring(prev => new Set([...prev, c.merchantKey]))}>Confirm</Button>
+                              : <Button tone="secondary" size="xs" onClick={() => setConfirmedRecurring(prev => { const n = new Set(prev); n.delete(c.merchantKey); return n })}>Unconfirm</Button>
                             }
-                            <button className="text-[10px] text-slate-500 hover:text-slate-300 px-1.5 py-0.5 rounded" onClick={() => setDismissedRecurring(prev => new Set([...prev, c.merchantKey]))}>Dismiss</button>
+                            <Button tone="ghost" size="xs" onClick={() => setDismissedRecurring(prev => new Set([...prev, c.merchantKey]))}>Dismiss</Button>
                           </div>
                         </td>
                       </tr>
@@ -197,10 +195,11 @@ export function RecurringSection({
               </table>
             </div>
           ) : (
-            <div className="rounded-lg border border-teal-700/20 bg-teal-900/10 px-4 py-4 text-center">
-              <p className="text-sm text-teal-400/60 font-medium">No recurring transactions detected yet.</p>
-              <p className="text-xs text-slate-500 mt-1">Log or import repeated merchants like Netflix, Spotify, gym, rent, or payroll — or use + Add Item above.</p>
-            </div>
+            <EmptyState
+              title="No recurring transactions detected yet"
+              description="Log or import repeated merchants like Netflix, Spotify, gym, rent, or payroll, or use + Add Item above."
+              className="border-teal-700/20 bg-teal-900/10"
+            />
           )}
         </div>
       )}

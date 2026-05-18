@@ -1,7 +1,7 @@
 import React from 'react'
 import type { Transaction, Account, ImportBatch } from '../types'
 import { currency } from '../utils/formatting'
-import { Card } from './ui'
+import { Button, Card, SectionToggle } from './ui'
 
 export interface ImportHistorySectionProps {
   importBatches: ImportBatch[]
@@ -34,13 +34,12 @@ export function ImportHistorySection({
       {/* ── Import History ── */}
       {importBatches.length > 0 && (
         <Card title="Import History" noHover>
-          <button
-            className="w-full flex items-center justify-between text-left"
-            onClick={() => setCsvShowHistory(v => !v)}
-          >
-            <span className="text-sm font-medium text-slate-300">Import History ({importBatches.length})</span>
-            <span className="text-slate-500 text-xs">{csvShowHistory ? '▲' : '▼'}</span>
-          </button>
+          <SectionToggle
+            title="Import History"
+            count={importBatches.length}
+            open={csvShowHistory}
+            onToggle={() => setCsvShowHistory(v => !v)}
+          />
           {csvShowHistory && (
             <div className="mt-3 overflow-x-auto">
               {batchToDelete && (() => {
@@ -50,8 +49,8 @@ export function ImportHistorySection({
                   <div className="mb-3 rounded-lg bg-red-900/20 border border-red-700/40 px-3 py-2.5 text-xs text-red-300 flex items-center justify-between gap-3">
                     <span>Delete {count} transaction{count !== 1 ? 's' : ''} from &quot;{b?.accountName}&quot; ({b?.importMonth})? This action can be undone.</span>
                     <div className="flex gap-2 shrink-0">
-                      <button className="text-red-400 hover:text-red-200 bg-red-900/40 border border-red-700/50 px-2 py-0.5 rounded" onClick={() => deleteImportBatch(batchToDelete)}>Delete</button>
-                      <button className="text-slate-400 hover:text-slate-200" onClick={() => setBatchToDelete(null)}>Cancel</button>
+                      <Button tone="danger" size="xs" onClick={() => deleteImportBatch(batchToDelete)}>Delete</Button>
+                      <Button tone="ghost" size="xs" onClick={() => setBatchToDelete(null)}>Cancel</Button>
                     </div>
                   </div>
                 )
@@ -78,20 +77,24 @@ export function ImportHistorySection({
                       <td className="py-1.5 pr-3 text-right text-amber-400">{b.skippedCount > 0 ? b.skippedCount : '—'}</td>
                       <td className="py-1.5 pr-3 text-slate-500">{new Date(b.createdAt).toLocaleString()}</td>
                       <td className="py-1.5">
-                        <button
-                          className="text-[10px] text-red-400/60 hover:text-red-400 transition-colors"
+                        <Button
+                          tone="ghost"
+                          size="xs"
+                          className="text-red-400/70 hover:text-red-300"
                           onClick={() => setBatchToDelete(b.id)}
                           title="Delete this import and its transactions"
-                        >Delete</button>
+                        >Delete</Button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              <button
-                className="mt-2 text-xs text-slate-500 hover:text-red-400 transition-colors"
+              <Button
+                tone="ghost"
+                size="xs"
+                className="mt-2 hover:text-red-400"
                 onClick={() => setImportBatches([])}
-              >Clear history (keeps transactions)</button>
+              >Clear history (keeps transactions)</Button>
             </div>
           )}
         </Card>
@@ -133,7 +136,7 @@ export function ImportHistorySection({
           {deletedTxns.length > 0 && (
             <div className="mt-3 pt-3 border-t border-slate-700/60">
               <button
-                className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+                className="flex items-center gap-2 text-xs text-slate-400 hover:text-slate-200 transition-colors px-1 py-1 rounded"
                 onClick={() => setShowRecentlyDeleted(v => !v)}
               >
                 <span>Recently Deleted ({deletedTxns.length})</span>
@@ -150,8 +153,8 @@ export function ImportHistorySection({
                         <span className="flex-1 truncate text-slate-400">{tx.merchant}</span>
                         <span className="text-slate-500">{acct?.name ?? '—'}</span>
                         <span className="font-medium text-slate-300 w-16 text-right shrink-0">{currency(tx.amount)}</span>
-                        <button className="text-blue-400 hover:text-blue-300 shrink-0" onClick={() => restoreDeletedTxn(tx.id)}>Restore</button>
-                        <button className="text-red-500 hover:text-red-400 shrink-0" onClick={() => permanentlyDeleteTxn(tx.id)}>Remove</button>
+                        <Button tone="ghost" size="xs" className="text-blue-400 hover:text-blue-300 shrink-0" onClick={() => restoreDeletedTxn(tx.id)}>Restore</Button>
+                        <Button tone="ghost" size="xs" className="text-red-500 hover:text-red-400 shrink-0" onClick={() => permanentlyDeleteTxn(tx.id)}>Remove</Button>
                       </div>
                     )
                   })}

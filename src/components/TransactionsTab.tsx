@@ -13,6 +13,7 @@ import { RecurringSection } from './RecurringSection'
 import type { RecurringSectionProps } from './RecurringSection'
 import { ImportHistorySection } from './ImportHistorySection'
 import type { ImportHistorySectionProps } from './ImportHistorySection'
+import { Button, EmptyState, SectionToggle } from './ui'
 
 // ── Inline edit form shape ────────────────────────────────────────────────────
 export type InlineTxnEditForm = {
@@ -154,13 +155,12 @@ export function TransactionsTab({
       {/* ── Transaction list ── */}
       {transactions.length > 0 ? (
         <div className="rounded-2xl border border-slate-700/50 bg-slate-800/20 overflow-hidden">
-          <button
-            className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-slate-700/20 transition-colors"
-            onClick={() => setTxnListOpen(v => !v)}
-          >
-            <span className="text-lg font-semibold">Transactions ({transactions.length})</span>
-            <span className="text-slate-500 text-xs">{txnListOpen ? '▲' : '▼'}</span>
-          </button>
+          <SectionToggle
+            title="Transactions"
+            count={transactions.length}
+            open={txnListOpen}
+            onToggle={() => setTxnListOpen(v => !v)}
+          />
           {txnListOpen && (
             <div className="px-4 pb-4">
               {/* Search + account/category filters */}
@@ -182,10 +182,11 @@ export function TransactionsTab({
                   {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
                 {(txnSearch || txnAccountFilter || txnCategoryFilter) && (
-                  <button
+                  <Button
+                    tone="secondary"
+                    size="xs"
                     onClick={() => { setTxnSearch(''); setTxnAccountFilter(''); setTxnCategoryFilter('') }}
-                    className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
-                  >Clear</button>
+                  >Clear</Button>
                 )}
               </div>
 
@@ -231,22 +232,25 @@ export function TransactionsTab({
                     deleteFilteredConfirm ? (
                       <div className="flex items-center gap-2 text-xs text-red-300">
                         <span>Delete {filteredTxns.length} filtered transaction{filteredTxns.length !== 1 ? 's' : ''}?</span>
-                        <button
-                          className="bg-red-700/60 hover:bg-red-600/60 border border-red-600/40 px-2 py-0.5 rounded text-red-200"
+                        <Button
+                          tone="danger"
+                          size="xs"
                           onClick={() => {
                             const ids = new Set(filteredTxns.map(t => t.id))
                             setTxnWithHistory(prev => prev.filter(t => !ids.has(t.id)))
                             setDeleteFilteredConfirm(false)
-                            showUndoableToast(`Deleted ${ids.size} transaction${ids.size !== 1 ? 's' : ''}.`, undoTxn)
+                            showUndoableToast(`Deleted ${ids.size} transaction${ids.size !== 1 ? 's' : ''}`, undoTxn)
                           }}
-                        >Delete</button>
-                        <button className="text-slate-400 hover:text-slate-200" onClick={() => setDeleteFilteredConfirm(false)}>Cancel</button>
+                        >Delete</Button>
+                        <Button tone="ghost" size="xs" onClick={() => setDeleteFilteredConfirm(false)}>Cancel</Button>
                       </div>
                     ) : (
-                      <button
-                        className="text-[10px] text-red-400/60 hover:text-red-400 bg-slate-700/40 hover:bg-red-900/20 border border-slate-600/20 hover:border-red-700/30 px-2 py-0.5 rounded transition-colors"
+                      <Button
+                        tone="ghost"
+                        size="xs"
+                        className="text-red-400/70 hover:text-red-300"
                         onClick={() => setDeleteFilteredConfirm(true)}
-                      >Delete {filteredTxns.length} filtered result{filteredTxns.length !== 1 ? 's' : ''}…</button>
+                      >Delete {filteredTxns.length} filtered result{filteredTxns.length !== 1 ? 's' : ''}…</Button>
                     )
                   )}
                 </div>
@@ -395,8 +399,8 @@ export function TransactionsTab({
                               />
                             </td>
                             <td className="py-1.5 whitespace-nowrap space-x-2">
-                              <button className="text-blue-400 hover:text-blue-300 text-xs" onMouseDown={cancelBlurSave} onClick={saveInlineTxnEdit}>Save</button>
-                              <button className="text-slate-400 hover:text-slate-300 text-xs" onMouseDown={cancelBlurSave} onClick={cancelInlineTxnEdit}>Cancel</button>
+                              <Button tone="primary" size="xs" onMouseDown={cancelBlurSave} onClick={saveInlineTxnEdit}>Save</Button>
+                              <Button tone="ghost" size="xs" onMouseDown={cancelBlurSave} onClick={cancelInlineTxnEdit}>Cancel</Button>
                             </td>
                           </tr>
                         )
@@ -436,13 +440,13 @@ export function TransactionsTab({
                           </td>
                           <td className="py-2 pr-3 text-slate-500 text-xs max-w-[100px] truncate hidden sm:table-cell">{tx.notes ?? '—'}</td>
                           <td className="py-2 whitespace-nowrap space-x-2">
-                            <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => {
+                            <Button tone="ghost" size="xs" className="text-blue-400 hover:text-blue-300" onClick={() => {
                               setInlineTxnEditId(tx.id)
                               setInlineTxnEditForm({ date: tx.date, accountId: tx.accountId, merchant: tx.merchant, amount: String(tx.amount), type: tx.type, categoryId: tx.categoryId ?? '', notes: tx.notes ?? '', toAccountId: tx.toAccountId ?? '' })
                               setTxnDupWarning(false)
                               setTimeout(() => { inlineTxnAmountRef.current?.focus(); inlineTxnAmountRef.current?.select() }, 0)
-                            }}>Edit</button>
-                            <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => softDeleteTxn(tx.id)}>Delete</button>
+                            }}>Edit</Button>
+                            <Button tone="ghost" size="xs" className="text-red-400 hover:text-red-300" onClick={() => softDeleteTxn(tx.id)}>Delete</Button>
                           </td>
                         </tr>
                       )
@@ -454,12 +458,12 @@ export function TransactionsTab({
           )}
         </div>
       ) : (
-        <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 p-6 text-center">
-          <p className="text-slate-400 text-sm font-medium">No transactions yet</p>
-          {accounts.length === 0
-            ? <p className="text-slate-500 text-xs mt-1">Add an account first, then log your first transaction above.</p>
-            : <p className="text-slate-500 text-xs mt-1">Log your first transaction above. Use Generate Sample to try it out.</p>}
-        </div>
+        <EmptyState
+          title="No transactions yet"
+          description={accounts.length === 0
+            ? 'Add an account first, then log your first transaction above.'
+            : 'Log your first transaction above. Use Generate Sample to try it out.'}
+        />
       )}
 
       {/* ── Import History + Data Integrity ── */}

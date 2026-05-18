@@ -6,6 +6,7 @@ import { txConfidence } from '../utils/transactionHelpers'
 import { TXN_TYPE_LABELS } from '../utils/transactionHelpers'
 import { assignTransactionCategory, createMerchantRuleSuggestionForTransaction, createRulesFromSuggestionAction } from '../utils/actions'
 import { hasDuplicateTransaction } from '../utils/duplicateDetection'
+import { Button, SectionToggle } from './ui'
 
 type RuleSuggestion = { merchants: string[]; categoryId: string; txIds: string[] }
 
@@ -77,34 +78,34 @@ export function NeedsReviewSection({
       {/* ── Needs Review panel ── */}
       {reviewableTxns.length > 0 && (
         <div className="rounded-2xl border border-amber-600/30 bg-amber-950/10 overflow-hidden">
-          <button
-            className="w-full flex items-center justify-between px-4 py-3 text-left"
-            onClick={() => setReviewOpen(v => !v)}
-          >
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500/25 text-amber-300 text-xs font-bold">{reviewableTxns.length}</span>
-              <span className="text-amber-300 font-semibold text-sm">Needs Review</span>
-              <span className="text-slate-500 text-xs">
-                {reviewableTxns.filter(tx => !tx.categoryId && tx.type === 'expense').length} uncategorized
-                {dupCount > 0 ? `, ${dupCount} possible duplicate${dupCount !== 1 ? 's' : ''}` : ''}
-              </span>
-              {selectedTxnIds.size > 0 && (
-                <button
-                  className="text-[10px] text-slate-400 hover:text-slate-200 bg-slate-700/60 hover:bg-slate-600/60 px-1.5 py-0.5 rounded transition-colors"
-                  onClick={e => { e.stopPropagation(); setSelectedTxnIds(new Set()) }}
-                >Unselect all ({selectedTxnIds.size})</button>
-              )}
-              {reviewableTxns.some(tx =>
-                hasDuplicateTransaction(tx, transactions, { confirmedDupIds, includeAccount: false })
-              ) && (
-                <button
-                  className="text-[10px] text-red-400/70 hover:text-red-400 bg-slate-700/40 hover:bg-red-900/20 border border-slate-600/30 hover:border-red-700/30 px-1.5 py-0.5 rounded transition-colors"
-                  onClick={e => { e.stopPropagation(); setDeleteDupsConfirm(true) }}
-                >Delete all unresolved duplicates</button>
-              )}
-            </div>
-            <span className="text-slate-500 text-xs shrink-0">{reviewOpen ? '▲' : '▼'}</span>
-          </button>
+          <SectionToggle
+            title="Needs Review"
+            count={reviewableTxns.length}
+            meta={`${reviewableTxns.filter(tx => !tx.categoryId && tx.type === 'expense').length} uncategorized${dupCount > 0 ? `, ${dupCount} possible duplicate${dupCount !== 1 ? 's' : ''}` : ''}`}
+            open={reviewOpen}
+            onToggle={() => setReviewOpen(v => !v)}
+            tone="amber"
+            actions={
+              <>
+                {selectedTxnIds.size > 0 && (
+                  <Button
+                    tone="secondary"
+                    size="xs"
+                    onClick={e => { e.stopPropagation(); setSelectedTxnIds(new Set()) }}
+                  >Clear selection ({selectedTxnIds.size})</Button>
+                )}
+                {reviewableTxns.some(tx =>
+                  hasDuplicateTransaction(tx, transactions, { confirmedDupIds, includeAccount: false })
+                ) && (
+                  <Button
+                    tone="danger"
+                    size="xs"
+                    onClick={e => { e.stopPropagation(); setDeleteDupsConfirm(true) }}
+                  >Delete unresolved duplicates</Button>
+                )}
+              </>
+            }
+          />
 
           {reviewOpen && (
             <div className="border-t border-amber-700/20 px-4 pb-4 pt-3 space-y-2">
@@ -117,16 +118,17 @@ export function NeedsReviewSection({
                   <div className="mb-2 rounded-lg bg-red-900/20 border border-red-700/40 px-3 py-2.5 text-xs text-red-300 flex items-center justify-between gap-3">
                     <span>Delete {dupTxns.length} unresolved duplicate transaction{dupTxns.length !== 1 ? 's' : ''}? This is undoable.</span>
                     <div className="flex gap-2 shrink-0">
-                      <button
-                        className="text-red-400 hover:text-red-200 bg-red-900/40 border border-red-700/50 px-2 py-0.5 rounded"
+                      <Button
+                        tone="danger"
+                        size="xs"
                         onClick={() => {
                           const ids = new Set(dupTxns.map(t => t.id))
                           setTxnWithHistory(prev => prev.filter(tx => !ids.has(tx.id)))
                           setDeleteDupsConfirm(false)
-                          showToast(`Deleted ${dupTxns.length} duplicate transaction${dupTxns.length !== 1 ? 's' : ''}.`)
+                          showToast(`Deleted ${dupTxns.length} duplicate transaction${dupTxns.length !== 1 ? 's' : ''}`)
                         }}
-                      >Delete</button>
-                      <button className="text-slate-400 hover:text-slate-200" onClick={() => setDeleteDupsConfirm(false)}>Cancel</button>
+                      >Delete</Button>
+                      <Button tone="ghost" size="xs" onClick={() => setDeleteDupsConfirm(false)}>Cancel</Button>
                     </div>
                   </div>
                 )
@@ -144,12 +146,13 @@ export function NeedsReviewSection({
                     <option value="">Assign category…</option>
                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
-                  <button
+                  <Button
                     onClick={bulkAssign}
                     disabled={!bulkCategoryId}
-                    className="text-xs bg-blue-600 hover:bg-blue-500 disabled:bg-slate-700 disabled:text-slate-500 px-3 py-1 rounded transition-colors"
-                  >Apply</button>
-                  <button onClick={() => setSelectedTxnIds(new Set())} className="text-xs text-slate-400 hover:text-slate-200">Clear</button>
+                    tone="primary"
+                    size="xs"
+                  >Apply</Button>
+                  <Button tone="ghost" size="xs" onClick={() => setSelectedTxnIds(new Set())}>Clear</Button>
                 </div>
               )}
 
@@ -162,15 +165,17 @@ export function NeedsReviewSection({
                       : `Create rules for ${ruleSuggestion.merchants.slice(0, 3).join(', ')}${ruleSuggestion.merchants.length > 3 ? ` +${ruleSuggestion.merchants.length - 3} more` : ''} → ${categories.find(c => c.id === ruleSuggestion.categoryId)?.name}?`
                     }
                   </span>
-                  <button
-                    className="text-indigo-300 hover:text-white bg-indigo-700/50 hover:bg-indigo-600/60 px-2 py-0.5 rounded transition-colors whitespace-nowrap"
+                  <Button
+                    tone="primary"
+                    size="xs"
+                    className="whitespace-nowrap"
                     onClick={() => {
                       setRulesWithHistory(prev => createRulesFromSuggestionAction(prev, ruleSuggestion, new Date().toISOString()))
-                      showToast(`Created ${ruleSuggestion.merchants.length} rule${ruleSuggestion.merchants.length !== 1 ? 's' : ''}.`)
+                      showToast(`Created ${ruleSuggestion.merchants.length} rule${ruleSuggestion.merchants.length !== 1 ? 's' : ''}`)
                       setRuleSuggestion(null)
                     }}
-                  >Yes, create</button>
-                  <button className="text-slate-400 hover:text-slate-200 px-1" onClick={() => setRuleSuggestion(null)}>Not now</button>
+                  >Yes, create</Button>
+                  <Button tone="ghost" size="xs" onClick={() => setRuleSuggestion(null)}>Not now</Button>
                 </div>
               )}
 

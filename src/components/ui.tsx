@@ -95,3 +95,74 @@ export function Row({ l, v, valueClass = 'text-slate-100' }: { l: string; v: str
     </div>
   )
 }
+
+
+type ButtonTone = 'primary' | 'secondary' | 'danger' | 'ghost' | 'success' | 'warning'
+type ButtonSize = 'xs' | 'sm' | 'md'
+
+const buttonToneClass: Record<ButtonTone, string> = {
+  primary: 'bg-blue-600 hover:bg-blue-500 text-white border border-blue-500/40',
+  secondary: 'bg-slate-700 hover:bg-slate-600 text-slate-100 border border-slate-600/60',
+  danger: 'bg-red-900/60 hover:bg-red-800 text-red-200 border border-red-700/50',
+  ghost: 'bg-transparent hover:bg-slate-700/40 text-slate-400 hover:text-slate-200 border border-transparent',
+  success: 'bg-emerald-700/70 hover:bg-emerald-600/70 text-emerald-100 border border-emerald-600/40',
+  warning: 'bg-amber-700/60 hover:bg-amber-600/60 text-amber-100 border border-amber-600/40',
+}
+
+const buttonSizeClass: Record<ButtonSize, string> = {
+  xs: 'px-2 py-0.5 text-xs rounded',
+  sm: 'px-3 py-1.5 text-sm rounded-lg',
+  md: 'px-4 py-2 text-sm rounded-lg',
+}
+
+export function buttonClass({ tone = 'secondary', size = 'sm', className = '' }: { tone?: ButtonTone; size?: ButtonSize; className?: string } = {}) {
+  return `${buttonSizeClass[size]} ${buttonToneClass[tone]} disabled:bg-slate-800 disabled:text-slate-500 disabled:border-slate-700 disabled:cursor-not-allowed transition-colors inline-flex items-center justify-center gap-1.5 ${className}`
+}
+
+export function Button({
+  tone = 'secondary', size = 'sm', className = '', children, ...props
+}: React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: ButtonTone; size?: ButtonSize }) {
+  return (
+    <button {...props} className={buttonClass({ tone, size, className })}>
+      {children}
+    </button>
+  )
+}
+
+export function SectionToggle({
+  title, count, meta, open, onToggle, tone = 'slate', actions,
+}: {
+  title: React.ReactNode
+  count?: number
+  meta?: React.ReactNode
+  open: boolean
+  onToggle: () => void
+  tone?: 'slate' | 'amber' | 'teal' | 'blue'
+  actions?: React.ReactNode
+}) {
+  const toneClass = tone === 'amber' ? 'text-amber-300 bg-amber-500/25' : tone === 'teal' ? 'text-teal-300 bg-teal-500/25' : tone === 'blue' ? 'text-blue-300 bg-blue-500/25' : 'text-slate-300 bg-slate-600/40'
+  return (
+    <div className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-700/20 transition-colors">
+      <button className="min-w-0 flex-1 flex items-center gap-2.5 flex-wrap text-left" onClick={onToggle}>
+        {typeof count === 'number' && count > 0 && (
+          <span className={`inline-flex items-center justify-center min-w-5 h-5 px-1.5 rounded-full text-xs font-bold ${toneClass}`}>{count}</span>
+        )}
+        <span className="text-sm font-semibold text-slate-200">{title}</span>
+        {meta && <span className="text-xs text-slate-500">{meta}</span>}
+      </button>
+      <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+        {actions}
+        <button className="text-slate-500 text-xs px-1 py-1 rounded hover:text-slate-300" onClick={onToggle}>{open ? '▲' : '▼'}</button>
+      </div>
+    </div>
+  )
+}
+
+export function EmptyState({ title, description, className = '' }: { title: string; description?: string; className?: string }) {
+  return (
+    <div className={`rounded-xl border border-slate-700/50 bg-slate-800/35 px-4 py-5 text-center ${className}`}>
+      <p className="text-sm text-slate-400 font-medium">{title}</p>
+      {description && <p className="text-xs text-slate-500 mt-1 leading-relaxed">{description}</p>}
+    </div>
+  )
+}
