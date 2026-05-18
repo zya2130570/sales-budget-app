@@ -4,6 +4,8 @@ import { currency } from '../utils/formatting'
 import { normalizeMerchant } from '../utils/merchantNormalization'
 import { txConfidence } from '../utils/transactionHelpers'
 import { TXN_TYPE_LABELS } from '../utils/transactionHelpers'
+import { buildMerchantRuleSuggestion, buildRulesFromSuggestion } from '../utils/rulesEngine'
+import { hasDuplicateTransaction } from '../utils/duplicateDetection'
 
 type RuleSuggestion = { merchants: string[]; categoryId: string; txIds: string[] }
 
@@ -67,9 +69,7 @@ export function NeedsReviewSection({
   if (reviewableTxns.length === 0 && uncategorizedExpenseCount === 0) return null
 
   const dupCount = reviewableTxns.filter(tx =>
-    transactions.some(o => o.id !== tx.id &&
-      o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
-      o.amount === tx.amount && o.date === tx.date)
+    hasDuplicateTransaction(tx, transactions, { includeAccount: false })
   ).length
 
   return (
@@ -95,8 +95,7 @@ export function NeedsReviewSection({
                 >Unselect all ({selectedTxnIds.size})</button>
               )}
               {reviewableTxns.some(tx =>
-                transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date) &&
-                !confirmedDupIds.has(tx.id)
+                hasDuplicateTransaction(tx, transactions, { confirmedDupIds, includeAccount: false })
               ) && (
                 <button
                   className="text-[10px] text-red-400/70 hover:text-red-400 bg-slate-700/40 hover:bg-red-900/20 border border-slate-600/30 hover:border-red-700/30 px-1.5 py-0.5 rounded transition-colors"
@@ -112,8 +111,7 @@ export function NeedsReviewSection({
               {/* Delete duplicates confirmation */}
               {deleteDupsConfirm && (() => {
                 const dupTxns = reviewableTxns.filter(tx =>
-                  transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date) &&
-                  !confirmedDupIds.has(tx.id)
+                  hasDuplicateTransaction(tx, transactions, { confirmedDupIds, includeAccount: false })
                 )
                 return (
                   <div className="mb-2 rounded-lg bg-red-900/20 border border-red-700/40 px-3 py-2.5 text-xs text-red-300 flex items-center justify-between gap-3">
@@ -167,14 +165,8 @@ export function NeedsReviewSection({
                   <button
                     className="text-indigo-300 hover:text-white bg-indigo-700/50 hover:bg-indigo-600/60 px-2 py-0.5 rounded transition-colors whitespace-nowrap"
                     onClick={() => {
-                      ruleSuggestion.merchants.forEach(m => {
-                        setRulesWithHistory(prev => [...prev, {
-                          id: crypto.randomUUID(), name: m,
-                          matchText: m, matchField: 'merchant',
-                          categoryId: ruleSuggestion.categoryId,
-                          createdAt: new Date().toISOString(),
-                        }])
-                      })
+                      const createdRules = buildRulesFromSuggestion(ruleSuggestion, new Date().toISOString())
+                      setRulesWithHistory(prev => [...prev, ...createdRules])
                       showToast(`Created ${ruleSuggestion.merchants.length} rule${ruleSuggestion.merchants.length !== 1 ? 's' : ''}.`)
                       setRuleSuggestion(null)
                     }}
@@ -189,10 +181,7 @@ export function NeedsReviewSection({
                 const cat        = categories.find(c => c.id === tx.categoryId)
                 const isSelected = selectedTxnIds.has(tx.id)
                 const confidence = txConfidence(tx, transactions)
-                const isDup      = transactions.some(o =>
-                  o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
-                  o.amount === tx.amount && o.date === tx.date
-                )
+                const isDup      = hasDuplicateTransaction(tx, transactions, { includeAccount: false })
                 const isConfirmedDup = confirmedDupIds.has(tx.id)
                 return (
                   <div
@@ -259,8 +248,7 @@ export function NeedsReviewSection({
                             className="text-[10px] text-slate-300 hover:text-white bg-slate-700 hover:bg-slate-600 px-2 py-0.5 rounded transition-colors whitespace-nowrap"
                             onClick={() => {
                               const partnerIds = transactions.filter(o =>
-                                o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() &&
-                                o.amount === tx.amount && o.date === tx.date
+                                hasDuplicateTransaction(tx, [o], { includeAccount: false })
                               ).map(o => o.id)
                               const allIds = [tx.id, ...partnerIds]
                               setDismissedDupIds(prev => new Set([...prev, ...allIds]))
@@ -282,11 +270,8 @@ export function NeedsReviewSection({
                             setTxnWithHistory(prev => prev.map(x => x.id === tx.id ? { ...x, categoryId: newCatId } : x))
                             updateCategoryMemory(tx.merchant, newCatId)
                             const merchant = normalizeMerchant(tx.merchant)
-                            const ruleExists = rules.some(r =>
-                              r.matchField === 'merchant' && r.categoryId === newCatId &&
-                              r.matchText.split(',').some(m => m.trim().toLowerCase() === merchant.toLowerCase())
-                            )
-                            if (!ruleExists) setRuleSuggestion({ merchants: [merchant], categoryId: newCatId, txIds: [tx.id] })
+                            const suggestion = buildMerchantRuleSuggestion(merchant, newCatId, [tx.id], rules)
+                            if (suggestion) setRuleSuggestion(suggestion)
                           }}
                           className="text-xs px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none max-w-[110px]"
                         >
