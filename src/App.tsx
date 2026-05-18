@@ -40,6 +40,18 @@ import {
   saveTransactionRules,
   runMigrations,
 } from './utils/storage'
+import {
+  loadBudgetActuals,
+  saveBudgetActuals,
+  loadScenarioNotes,
+  saveScenarioNotes,
+  loadReviewMonth,
+  saveReviewMonth,
+  loadMonthlyNotes,
+  saveMonthlyNotes,
+  loadReviewedMonths,
+  saveReviewedMonths,
+} from './utils/persistence'
 // V9.0 — CSV import pipeline
 import { runImportPipeline, buildImportedTransactions } from './utils/importHelpers'
 import type { ImportPipelineResult } from './utils/importHelpers'
@@ -338,18 +350,11 @@ export default function App() {
   // Keyed by category id → raw string so blank stays blank, never forced to "0".
   // Lazy-initialized from localStorage so the save effect can't overwrite stored
   // data with the empty default on the first render (effects fire after render).
-  const [actuals, setActuals] = useState<Record<string, string>>(() => {
-    try {
-      const raw = localStorage.getItem('flow_actuals')
-      return raw ? (JSON.parse(raw) as Record<string, string>) : {}
-    } catch {
-      return {}
-    }
-  })
+  const [actuals, setActuals] = useState<Record<string, string>>(loadBudgetActuals)
 
   // Persist actuals — save effect defined after lazy init; no ordering race
   useEffect(() => {
-    try { localStorage.setItem('flow_actuals', JSON.stringify(actuals)) } catch { /* ignore */ }
+    saveBudgetActuals(actuals)
   }, [actuals])
 
   // Target edit state
@@ -638,16 +643,9 @@ export default function App() {
   // V9.8 — Cash Flow Forecast period in days
   const [forecastPeriod, setForecastPeriod]             = useState<7 | 14 | 30 | 60>(30)
   // V9.9 — Monthly Review
-  const [reviewMonth, setReviewMonth]     = useState(() => {
-    try { const s = localStorage.getItem('flow_review_month'); if (s) return s } catch { /* ignore */ }
-    const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
-  })
-  const [monthlyNotes, setMonthlyNotes]   = useState<Record<string, string>>(() => {
-    try { const s = localStorage.getItem('flow_monthly_notes'); return s ? JSON.parse(s) : {} } catch { return {} }
-  })
-  const [reviewedMonths, setReviewedMonths] = useState<Record<string, string>>(() => {
-    try { const s = localStorage.getItem('flow_reviewed_months'); return s ? JSON.parse(s) : {} } catch { return {} }
-  })
+  const [reviewMonth, setReviewMonth]     = useState(loadReviewMonth)
+  const [monthlyNotes, setMonthlyNotes]   = useState<Record<string, string>>(loadMonthlyNotes)
+  const [reviewedMonths, setReviewedMonths] = useState<Record<string, string>>(loadReviewedMonths)
   // V9.7 — Rule suggestion after category assign from Review Center
   const [ruleSuggestion, setRuleSuggestion]       = useState<{
     merchants: string[]; categoryId: string; txIds: string[]
@@ -674,7 +672,7 @@ export default function App() {
   // ══════════════════════════════════════════════════════════════════════════════
   // V10 ARCHITECTURE — DATA MODELS & STATE
   // Core state: accounts, transactions, categories, rules, targets, scenarios.
-  // All persisted to localStorage via useEffect save effects below.
+  // All persisted to storage helpers via useEffect save effects below.
   // ══════════════════════════════════════════════════════════════════════════════
 
   // V8.3 — Transaction Rules
@@ -772,7 +770,7 @@ export default function App() {
     const c = loadCategories(); if (c) setCategories(c)
     const b = loadSavedBudgets(); if (b) setSavedBudgets(b)
     const s = loadSavedScenarios(); if (s) setSavedScenarios(s)
-    try { const sn = localStorage.getItem('flow_scenario_notes'); if (sn) setScenarioNotes(JSON.parse(sn)) } catch { /* ignore */ }
+    setScenarioNotes(loadScenarioNotes())
     const t = loadTargets(); if (t) setTargets(t)
     const ts = loadSavedTargetSets(); if (ts) setSavedTargetSets(ts)
     const ac = loadAccounts(); if (ac) setAccounts(ac)
@@ -786,7 +784,7 @@ export default function App() {
   useEffect(() => saveSavedScenarios(savedScenarios), [savedScenarios])
   // V9.13 — persist scenario notes
   useEffect(() => {
-    try { localStorage.setItem('flow_scenario_notes', JSON.stringify(scenarioNotes)) } catch { /* ignore */ }
+    saveScenarioNotes(scenarioNotes)
   }, [scenarioNotes])
   useEffect(() => saveTargets(targets), [targets])
   useEffect(() => saveSavedTargetSets(savedTargetSets), [savedTargetSets])
@@ -796,9 +794,9 @@ export default function App() {
   // V10.0 — Persist category memory
   useEffect(() => saveCategoryMemory(categoryMemory), [categoryMemory])
   // V9.9.1 — Monthly Review persistence
-  useEffect(() => { try { localStorage.setItem('flow_review_month', reviewMonth) } catch { /* ignore */ } }, [reviewMonth])
-  useEffect(() => { try { localStorage.setItem('flow_monthly_notes', JSON.stringify(monthlyNotes)) } catch { /* ignore */ } }, [monthlyNotes])
-  useEffect(() => { try { localStorage.setItem('flow_reviewed_months', JSON.stringify(reviewedMonths)) } catch { /* ignore */ } }, [reviewedMonths])
+  useEffect(() => saveReviewMonth(reviewMonth), [reviewMonth])
+  useEffect(() => saveMonthlyNotes(monthlyNotes), [monthlyNotes])
+  useEffect(() => saveReviewedMonths(reviewedMonths), [reviewedMonths])
 
   // V9.0.1 — Back-to-top: show button once user scrolls down 400px
   useEffect(() => {
