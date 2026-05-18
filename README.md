@@ -1,5 +1,6 @@
 # Sales Budget App
 
+
 Personal sales income and budget scenario planner built with React + TypeScript + Vite + Tailwind.
 
 ## Run locally
