@@ -636,7 +636,7 @@ export default function App() {
     if (!tx) return
     setTxnWithHistory(prev => restoreTransaction(prev, tx))
     setDeletedTxns(prev => prev.filter(t => t.id !== txId))
-    showToast(`Restored "${tx.merchant}".`)
+    showToast(`Restored "${tx.merchant}"`)
   }
   const permanentlyDeleteTxn = (txId: string) => {
     setDeletedTxns(prev => prev.filter(t => t.id !== txId))
@@ -1191,7 +1191,7 @@ export default function App() {
     if (suggestion) setRuleSuggestion(suggestion)
     setSelectedTxnIds(new Set())
     setBulkCategoryId('')
-    showToast(`Assigned category to ${selectedTxnIds.size} transaction${selectedTxnIds.size !== 1 ? 's' : ''}.`)
+    showToast(`Assigned category to ${selectedTxnIds.size} transaction${selectedTxnIds.size !== 1 ? 's' : ''}`)
   }
   // Re-arm the glow whenever the count grows above the previous watermark
   if (uncategorizedExpenseCount > prevUncategorizedCountRef.current) {
@@ -1410,7 +1410,7 @@ export default function App() {
     if (!name) return
     setAccountsWithHistory(prev => updateAccount(prev, accountId, inlineAccountEditForm))
     setInlineAccountEditId(null)
-    showToast('Account updated.')
+    showToast('Account updated')
   }
   const cancelInlineAccountEdit = () => {
     setInlineAccountEditId(null)
@@ -1427,14 +1427,14 @@ export default function App() {
     // New startingBalance = actualBalance - txnImpact so that:
     //   expectedBalance (= newStartingBalance + txnImpact) = actualBalance → difference = 0
     setAccountsWithHistory(prev => reconcileAccountAction(prev, accountId, recon.actualBalance, recon.txnImpact, now))
-    showToast('Account reconciled.')
+    showToast('Account reconciled')
   }
   const createOrSaveAccount = () => {
     const name = accountForm.name.trim()
     if (!name) { setTimedAccountHint('Enter an account name before adding.'); accountNameRef.current?.focus(); return }
     if (editAccountId) {
       setAccountsWithHistory(prev => updateAccount(prev, editAccountId, accountForm))
-      showToast('Account updated.')
+      showToast('Account updated')
     } else {
       setAccountsWithHistory(prev => addAccount(prev, accountForm, crypto.randomUUID(), new Date().toISOString().slice(0, 10)))
     }
@@ -1808,7 +1808,7 @@ txnMerchantRef.current?.focus()
     setTxnWithHistory(prev => [...batch, ...prev])
     // Highlight the first generated row so the user knows where to look
     flashHighlight(firstId, setHighlightedTxnId, highlightTxnTimerRef)
-    showToast(`${batch.length} sample transactions added.`)
+    showToast(`${batch.length} sample transactions added`)
   }
 
   // ══════════════════════════════════════════════════════════════════════════════
@@ -2025,7 +2025,7 @@ txnMerchantRef.current?.focus()
     if (newTxns[0]) flashHighlight(newTxns[0].id, setHighlightedTxnId, highlightTxnTimerRef)
     const skipped = csvImportPreview.duplicateCount ?? 0
     const dupNote = skipped > 0 ? ` Skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''}.` : ''
-    showUndoableToast(`Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''} to ${acct?.name ?? 'account'}.${dupNote}`, undoTxn)
+    showUndoableToast(`Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''} to ${acct?.name ?? 'account'}${dupNote}`, undoTxn)
   }
   const downloadSampleCsv = () => {
     const text = generateSampleCsvString()
@@ -2972,7 +2972,7 @@ txnMerchantRef.current?.focus()
               <div className="mt-2 flex gap-2">
                 <button onClick={undoBudget} disabled={!budgetHistory.length} className={`rounded-lg px-3 py-1.5 ${budgetHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoBudget} disabled={!budgetRedo.length} className={`rounded-lg px-3 py-1.5 ${budgetRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
-                <button onClick={() => { if (!categories.length) return; pushBudgetHistory(); setCategories([]); showUndoableToast('Budget reset.', undoBudget) }} className="rounded-lg px-3 py-1.5 bg-slate-700 hover:bg-slate-600">Reset Budget</button>
+                <button onClick={() => { if (!categories.length) return; pushBudgetHistory(); setCategories([]); showUndoableToast('Budget reset', undoBudget) }} className="rounded-lg px-3 py-1.5 bg-slate-700 hover:bg-slate-600">Reset Budget</button>
                 <button onClick={generateSampleCategory} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample budget category">Generate Sample</button>
               </div>
               {budgetFormHint && <p className="mt-2 text-sm text-amber-300">{budgetFormHint}</p>}
@@ -3455,7 +3455,7 @@ txnMerchantRef.current?.focus()
                 <button onClick={undoAccount} disabled={!accountHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoAccount} disabled={!accountRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 {accounts.length > 0 && (
-                  <button onClick={() => { if (!accounts.length) return; setAccountsWithHistory(() => []); showUndoableToast(`${accounts.length} account${accounts.length !== 1 ? 's' : ''} cleared.`, undoAccount) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                  <button onClick={() => { if (!accounts.length) return; setAccountsWithHistory(() => []); showUndoableToast(`${accounts.length} account${accounts.length !== 1 ? 's' : ''} cleared`, undoAccount) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
                 <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
               </div>
@@ -3654,7 +3654,7 @@ txnMerchantRef.current?.focus()
                                   </button>
                                   <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => {
                                     setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))
-                                    showUndoableToast(`Deleted "${a.name}".`, undoAccount)
+                                    showUndoableToast(`Deleted "${a.name}"`, undoAccount)
                                   }}>Delete</button>
                                 </>
                               )}
@@ -4014,7 +4014,7 @@ txnMerchantRef.current?.focus()
                 <button onClick={undoTxn} disabled={!txnHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoTxn} disabled={!txnRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 {transactions.length > 0 && (
-                  <button onClick={() => { if (!transactions.length) return; setTxnWithHistory(() => []); showUndoableToast(`${transactions.length} transaction${transactions.length !== 1 ? 's' : ''} cleared.`, undoTxn) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                  <button onClick={() => { if (!transactions.length) return; setTxnWithHistory(() => []); showUndoableToast(`${transactions.length} transaction${transactions.length !== 1 ? 's' : ''} cleared`, undoTxn) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
                 <button onClick={generateSampleTransaction} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a random sample transaction">Generate Sample</button>
                 <button onClick={generateTenSamples} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Add 10 varied samples — mixed categories, some uncategorized, some duplicate-like">Generate 10 Samples</button>
@@ -4095,7 +4095,7 @@ txnMerchantRef.current?.focus()
                 <button onClick={undoRule} disabled={!ruleHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoRule} disabled={!ruleRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 {rules.length > 0 && (
-                  <button onClick={() => { if (!rules.length) return; setRulesWithHistory(() => []); showUndoableToast(`${rules.length} rule${rules.length !== 1 ? 's' : ''} cleared.`, undoRule) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                  <button onClick={() => { if (!rules.length) return; setRulesWithHistory(() => []); showUndoableToast(`${rules.length} rule${rules.length !== 1 ? 's' : ''} cleared`, undoRule) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
                 <button onClick={generateSampleRule} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample rule">Generate Sample</button>
               </div>
@@ -4710,7 +4710,7 @@ txnMerchantRef.current?.focus()
                 Redo
               </button>
               <button
-                onClick={() => { if (!targets.length) return; setTargetsWithHistory(() => []); showUndoableToast(`${targets.length} savings goal${targets.length !== 1 ? 's' : ''} cleared.`, undoTarget) }}
+                onClick={() => { if (!targets.length) return; setTargetsWithHistory(() => []); showUndoableToast(`${targets.length} savings goal${targets.length !== 1 ? 's' : ''} cleared`, undoTarget) }}
                 className="rounded-lg px-3 py-1.5 text-sm bg-red-900 hover:bg-red-800 text-red-200"
               >
                 Clear Savings Goals
@@ -4725,7 +4725,7 @@ txnMerchantRef.current?.focus()
                   if (!n) return
                   pushSetHistory(savedTargetSets)
                   setSavedTargetSets(prev => saveGoalSet(prev, n, targets, new Date().toISOString()))
-                  showToast('Savings goal set saved.')
+                  showToast('Savings goal set saved')
                 }}>Save</button>
                 <div className="flex items-center gap-2">
                   <div className="text-xs text-slate-400">Saved locally</div>
@@ -4751,7 +4751,7 @@ txnMerchantRef.current?.focus()
                             if (newName && newName !== s.name) {
                               pushSetHistory(savedTargetSets)
                               setSavedTargetSets(prev => renameGoalSet(prev, idx, newName, new Date().toISOString()))
-                              showToast('Savings goal set renamed.')
+                              showToast('Savings goal set renamed')
                             }
                             setEditingSetIdx(null)
                           }
@@ -4767,7 +4767,7 @@ txnMerchantRef.current?.focus()
                               if (!newName) return
                               pushSetHistory(savedTargetSets)
                               setSavedTargetSets(prev => renameGoalSet(prev, idx, newName, new Date().toISOString()))
-                              showToast('Savings goal set renamed.')
+                              showToast('Savings goal set renamed')
                               setEditingSetIdx(null)
                             }
                             if (e.key === 'Escape') setEditingSetIdx(null)
@@ -4781,7 +4781,7 @@ txnMerchantRef.current?.focus()
                             if (!newName) return
                             pushSetHistory(savedTargetSets)
                             setSavedTargetSets(prev => renameGoalSet(prev, idx, newName, new Date().toISOString()))
-                            showToast('Savings goal set renamed.')
+                            showToast('Savings goal set renamed')
                             setEditingSetIdx(null)
                           }}>Save</button>
                           <button className="text-slate-400 hover:text-slate-300 text-sm" onMouseDown={e => { e.preventDefault(); setEditingSetIdx(null) }}>Cancel</button>
@@ -4799,7 +4799,7 @@ txnMerchantRef.current?.focus()
                             if (!same) {
                               pushTargetHistory(targets)
                               setTargets(loadGoalSet(s))
-                              showToast('Savings goal set loaded.')
+                              showToast('Savings goal set loaded')
                             }
                           }}>Load</button>
                           <button className="text-slate-400 hover:text-slate-300 text-sm" onClick={() => { setEditingSetIdx(idx); setRenameSetValue(s.name) }}>Rename</button>
