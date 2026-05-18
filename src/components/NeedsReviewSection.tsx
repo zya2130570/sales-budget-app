@@ -4,7 +4,7 @@ import { currency } from '../utils/formatting'
 import { normalizeMerchant } from '../utils/merchantNormalization'
 import { txConfidence } from '../utils/transactionHelpers'
 import { TXN_TYPE_LABELS } from '../utils/transactionHelpers'
-import { buildMerchantRuleSuggestion, buildRulesFromSuggestion } from '../utils/rulesEngine'
+import { assignTransactionCategory, createMerchantRuleSuggestionForTransaction, createRulesFromSuggestionAction } from '../utils/actions'
 import { hasDuplicateTransaction } from '../utils/duplicateDetection'
 
 type RuleSuggestion = { merchants: string[]; categoryId: string; txIds: string[] }
@@ -165,8 +165,7 @@ export function NeedsReviewSection({
                   <button
                     className="text-indigo-300 hover:text-white bg-indigo-700/50 hover:bg-indigo-600/60 px-2 py-0.5 rounded transition-colors whitespace-nowrap"
                     onClick={() => {
-                      const createdRules = buildRulesFromSuggestion(ruleSuggestion, new Date().toISOString())
-                      setRulesWithHistory(prev => [...prev, ...createdRules])
+                      setRulesWithHistory(prev => createRulesFromSuggestionAction(prev, ruleSuggestion, new Date().toISOString()))
                       showToast(`Created ${ruleSuggestion.merchants.length} rule${ruleSuggestion.merchants.length !== 1 ? 's' : ''}.`)
                       setRuleSuggestion(null)
                     }}
@@ -267,10 +266,9 @@ export function NeedsReviewSection({
                           onChange={e => {
                             const newCatId = e.target.value
                             if (!newCatId) return
-                            setTxnWithHistory(prev => prev.map(x => x.id === tx.id ? { ...x, categoryId: newCatId } : x))
+                            setTxnWithHistory(prev => assignTransactionCategory(prev, tx.id, newCatId))
                             updateCategoryMemory(tx.merchant, newCatId)
-                            const merchant = normalizeMerchant(tx.merchant)
-                            const suggestion = buildMerchantRuleSuggestion(merchant, newCatId, [tx.id], rules)
+                            const suggestion = createMerchantRuleSuggestionForTransaction(tx.merchant, newCatId, tx.id, rules)
                             if (suggestion) setRuleSuggestion(suggestion)
                           }}
                           className="text-xs px-1.5 py-0.5 rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none max-w-[110px]"
