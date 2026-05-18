@@ -78,12 +78,32 @@ import { Card, Pill, Metric, Info, ActionCard, Row } from './components/ui'
 import { txNeedsReview } from './utils/transactionHelpers'
 import { TXN_TYPE_LABELS, TXN_FILTER_OPTIONS } from './utils/transactionHelpers'
 import { TransactionsTab } from './components/TransactionsTab'
+import { detectRuleConflict } from './utils/rulesEngine'
 import {
-  applyRulesToTransactions,
-  buildBulkMerchantRuleSuggestion,
-  detectRuleConflict,
-  findMatchingRule,
-} from './utils/rulesEngine'
+  addAccount,
+  updateAccount,
+  reconcileAccountAction,
+  addTransaction,
+  buildTransactionFromForm,
+  updateTransaction,
+  deleteTransaction,
+  restoreTransaction,
+  assignTransactionCategoryBulk,
+  applyTransactionRulesAction,
+  buildRuleFromForm,
+  addRule,
+  updateRule,
+  createBulkMerchantRuleSuggestionForTransactions,
+  addSavingsGoal,
+  buildTargetFromForm,
+  updateSavingsGoal,
+  addContribution,
+  updateContribution,
+  saveGoalSet,
+  loadGoalSet,
+  renameGoalSet,
+  deleteGoalSet,
+} from './utils/actions'
 import { hasDuplicateTransaction } from './utils/duplicateDetection'
 import { GoalPlanningSummary } from './components/GoalPlanningSummary'
 import { GoalCard } from './components/GoalCard'
@@ -608,13 +628,13 @@ export default function App() {
   const softDeleteTxn = (txId: string) => {
     const tx = transactions.find(t => t.id === txId)
     if (!tx) return
-    setTxnWithHistory(prev => prev.filter(t => t.id !== txId))
+    setTxnWithHistory(prev => deleteTransaction(prev, txId))
     setDeletedTxns(prev => [{ ...tx }, ...prev.slice(0, 29)]) // keep last 30
   }
   const restoreDeletedTxn = (txId: string) => {
     const tx = deletedTxns.find(t => t.id === txId)
     if (!tx) return
-    setTxnWithHistory(prev => [tx, ...prev])
+    setTxnWithHistory(prev => restoreTransaction(prev, tx))
     setDeletedTxns(prev => prev.filter(t => t.id !== txId))
     showToast(`Restored "${tx.merchant}".`)
   }
@@ -1160,14 +1180,12 @@ export default function App() {
   const bulkAssign = () => {
     if (!bulkCategoryId || selectedTxnIds.size === 0) return
     const affectedTxns = transactions.filter(tx => selectedTxnIds.has(tx.id) && tx.type === 'expense')
-    setTxnWithHistory(prev => prev.map(tx =>
-      selectedTxnIds.has(tx.id) ? { ...tx, categoryId: bulkCategoryId } : tx
-    ))
+    setTxnWithHistory(prev => assignTransactionCategoryBulk(prev, selectedTxnIds, bulkCategoryId))
     // Offer rule creation for unique merchants without existing rules
-    const suggestion = buildBulkMerchantRuleSuggestion(
-      affectedTxns.map(tx => normalizeMerchant(tx.merchant)),
+    const suggestion = createBulkMerchantRuleSuggestionForTransactions(
+      affectedTxns,
       bulkCategoryId,
-      [...selectedTxnIds],
+      selectedTxnIds,
       rules,
     )
     if (suggestion) setRuleSuggestion(suggestion)
@@ -1390,14 +1408,7 @@ export default function App() {
   const saveInlineAccountEdit = (accountId: string) => {
     const name = inlineAccountEditForm.name.trim()
     if (!name) return
-    const rawBalance = parseFloat(inlineAccountEditForm.balance) || 0
-    // Credit cards: positive input saves as negative (debt convention)
-    const balance = inlineAccountEditForm.type === 'credit card' && rawBalance > 0 ? -rawBalance : rawBalance
-    const institution = inlineAccountEditForm.institution.trim()
-    setAccountsWithHistory(prev => prev.map(a => a.id === accountId
-      ? { ...a, name, type: inlineAccountEditForm.type, balance, institution }
-      : a
-    ))
+    setAccountsWithHistory(prev => updateAccount(prev, accountId, inlineAccountEditForm))
     setInlineAccountEditId(null)
     showToast('Account updated.')
   }
@@ -1415,35 +1426,17 @@ export default function App() {
     const now = new Date().toISOString().slice(0, 10)
     // New startingBalance = actualBalance - txnImpact so that:
     //   expectedBalance (= newStartingBalance + txnImpact) = actualBalance → difference = 0
-    const newStartingBalance = recon.actualBalance - recon.txnImpact
-    setAccountsWithHistory(prev => prev.map(a => {
-      if (a.id !== accountId) return a
-      return {
-        ...a,
-        startingBalance: newStartingBalance,
-        lastReconciledAt: now,
-      } as Account & { startingBalance: number; lastReconciledAt: string }
-    }))
+    setAccountsWithHistory(prev => reconcileAccountAction(prev, accountId, recon.actualBalance, recon.txnImpact, now))
     showToast('Account reconciled.')
   }
   const createOrSaveAccount = () => {
     const name = accountForm.name.trim()
     if (!name) { setTimedAccountHint('Enter an account name before adding.'); accountNameRef.current?.focus(); return }
-    const rawBalance = parseFloat(accountForm.balance) || 0
-    // Credit cards carry debt-style balances — always ≤ 0 (positive input inverted)
-    const balance = accountForm.type === 'credit card' && rawBalance > 0 ? -rawBalance : rawBalance
-    const institution = accountForm.institution.trim()
     if (editAccountId) {
-      setAccountsWithHistory(prev => prev.map(a => a.id === editAccountId
-        ? { ...a, name, type: accountForm.type, balance, institution }
-        : a
-      ))
+      setAccountsWithHistory(prev => updateAccount(prev, editAccountId, accountForm))
       showToast('Account updated.')
     } else {
-      setAccountsWithHistory(prev => [
-        { id: crypto.randomUUID(), name, type: accountForm.type, balance, institution, createdAt: new Date().toISOString().slice(0, 10) },
-        ...prev,
-      ])
+      setAccountsWithHistory(prev => addAccount(prev, accountForm, crypto.randomUUID(), new Date().toISOString().slice(0, 10)))
     }
     clearAccountForm()
     accountNameRef.current?.focus()
@@ -1517,20 +1510,6 @@ export default function App() {
     }
     setTxnDupWarning(false)
 
-    // Auto-fill category from rules; track which rule matched
-    let autoCategoryId = txnForm.categoryId
-    let matchedRuleId: string | undefined
-    if (!txnForm.categoryId) {
-      const matchingRule = findMatchingRule(
-        { merchant, notes: txnForm.notes, type: txnForm.type },
-        rules,
-      )
-      if (matchingRule) {
-        autoCategoryId = matchingRule.categoryId
-        matchedRuleId = matchingRule.id
-      }
-    }
-
     // V9.3.1 — Credit card payment guard: prevent payment exceeding card balance owed
     if (txnForm.type === 'credit card payment' && txnForm.toAccountId) {
       const cardAcct = accounts.find(a => a.id === txnForm.toAccountId)
@@ -1547,23 +1526,15 @@ export default function App() {
       }
     }
 
- setTxnWithHistory(prev => [
-  {
-    id: crypto.randomUUID(),
-    date: txnForm.date,
-    accountId: resolvedAccountId,
-    merchant,
-    amount,
-    type: txnForm.type,
-    categoryId: autoCategoryId || undefined,
-    notes: txnForm.notes.trim() || undefined,
-    toAccountId: txnForm.toAccountId || undefined,
-    appliedByRule: matchedRuleId,
-    createdAt: new Date().toISOString(),
-    source: 'manual' as const,
-  },
-  ...prev,
-])
+ setTxnWithHistory(prev => addTransaction(prev, buildTransactionFromForm({
+  form: txnForm,
+  id: crypto.randomUUID(),
+  createdAt: new Date().toISOString(),
+  resolvedAccountId,
+  merchant,
+  amount,
+  rules,
+})))
 
 // Set blur guard BEFORE moving focus so Amount's onBlur skips format-back
 txnSubmittingRef.current = true
@@ -1596,27 +1567,7 @@ txnMerchantRef.current?.focus()
 
     // V8.6.1 — Determine the original transaction to detect manual category changes
     const originalTx = transactions.find(x => x.id === inlineTxnEditId)
-    const categoryChangedManually =
-      originalTx?.appliedByRule &&
-      inlineTxnEditForm.categoryId !== (originalTx.categoryId ?? '')
-
-    setTxnWithHistory(prev => prev.map(x => {
-      if (x.id !== inlineTxnEditId) return x
-      return {
-        ...x,
-        date: inlineTxnEditForm.date,
-        accountId: inlineTxnEditForm.accountId,
-        merchant,
-        amount,
-        type: inlineTxnEditForm.type,
-        categoryId: inlineTxnEditForm.categoryId || undefined,
-        notes: inlineTxnEditForm.notes.trim() || undefined,
-        toAccountId: inlineTxnEditForm.toAccountId || undefined,
-        // V8.6.1 — If user manually changed the category, strip rule ownership
-        // so deleting the rule later won't clear this user-owned category.
-        appliedByRule: categoryChangedManually ? undefined : x.appliedByRule,
-      }
-    }))
+    setTxnWithHistory(prev => updateTransaction(prev, inlineTxnEditId, inlineTxnEditForm, originalTx))
     setInlineTxnEditId(null)
   }
   const cancelInlineTxnEdit = () => {
@@ -1686,10 +1637,7 @@ txnMerchantRef.current?.focus()
 
 
     setRuleHint('')
-    setRulesWithHistory(prev => [
-      { id: crypto.randomUUID(), name, matchText, matchField: ruleForm.matchField, categoryId: ruleForm.categoryId, type: ruleForm.type || undefined, createdAt: new Date().toISOString() },
-      ...prev,
-    ])
+    setRulesWithHistory(prev => addRule(prev, buildRuleFromForm(ruleForm, crypto.randomUUID(), new Date().toISOString())))
     clearRuleForm()
     ruleNameRef.current?.focus()
   }
@@ -1712,20 +1660,14 @@ txnMerchantRef.current?.focus()
     }
 
 
-    setRulesWithHistory(prev => prev.map(r => r.id === inlineRuleEditId
-      ? { ...r, name, matchText, matchField: inlineRuleEditForm.matchField, categoryId: inlineRuleEditForm.categoryId, type: inlineRuleEditForm.type || undefined }
-      : r
-    ))
+    setRulesWithHistory(prev => updateRule(prev, inlineRuleEditId, inlineRuleEditForm))
     setInlineRuleEditId(null)
   }
   const cancelInlineRuleEdit = () => setInlineRuleEditId(null)
  const applyAllRules = () => {
     let count = 0
     setTxnWithHistory(prev => {
-      const result = applyRulesToTransactions(prev, rules, {
-        overwriteCategories,
-        clearStaleRuleOwnership: true,
-      })
+      const result = applyTransactionRulesAction(prev, rules, overwriteCategories)
       count = result.updatedCount
       return result.transactions
     })
@@ -2165,17 +2107,12 @@ txnMerchantRef.current?.focus()
 
   const addTargetContribution = (targetId: string, amount: number, date: string, note: string) => {
     if (amount <= 0) return
-    setTargetsWithHistory(prev => prev.map((t) => t.id === targetId
-      ? { ...t, currentSaved: t.currentSaved + amount, contributions: [{ id: crypto.randomUUID(), amount, date, note }, ...t.contributions] }
-      : t
-    ))
+    setTargetsWithHistory(prev => addContribution(prev, targetId, amount, date, note, crypto.randomUUID()))
   }
 
   const createTarget = () => {
     const name = targetForm.name.trim()
     const goalAmount = Number(targetForm.goalAmount) || 0
-    const currentSaved = Number(targetForm.currentSaved) || 0
-    const startDate = targetForm.startDate
     const deadline = targetForm.deadline
     if (!name || goalAmount <= 0 || !deadline) return
 
@@ -2195,10 +2132,7 @@ txnMerchantRef.current?.focus()
     }
 
     const today = new Date().toISOString().slice(0, 10)
-    setTargetsWithHistory(prev => [
-      { id: crypto.randomUUID(), name, goalAmount, currentSaved, startDate: startDate || today, deadline, createdAt: today, type: 'savings', contributions: [], completed: false },
-      ...prev,
-    ])
+    setTargetsWithHistory(prev => addSavingsGoal(prev, buildTargetFromForm(targetForm, crypto.randomUUID(), today)))
     setTargetFormHint('')
     setTargetForm({ name: '', goalAmount: '', currentSaved: '', startDate: new Date().toISOString().slice(0, 10), deadline: '' })
     setTimeout(() => targetNameRef.current?.focus(), 0)
@@ -2207,8 +2141,6 @@ txnMerchantRef.current?.focus()
   const saveEditTarget = (targetId: string) => {
     const name = editTargetForm.name.trim()
     const goalAmount = Number(editTargetForm.goalAmount) || 0
-    const currentSaved = Number(editTargetForm.currentSaved) || 0
-    const startDate = editTargetForm.startDate
     const deadline = editTargetForm.deadline
     if (!name || goalAmount <= 0 || !deadline) return
     const other = (t: Target) => t.id !== targetId
@@ -2226,10 +2158,7 @@ txnMerchantRef.current?.focus()
       return
     }
     setEditTargetHint('')
-    setTargetsWithHistory(prev => prev.map(t => t.id === targetId
-      ? { ...t, name, goalAmount, currentSaved, startDate, deadline }
-      : t
-    ))
+    setTargetsWithHistory(prev => updateSavingsGoal(prev, targetId, editTargetForm))
     setEditTargetId(null)
     setEditTargetOriginal(null)
   }
@@ -2253,19 +2182,7 @@ txnMerchantRef.current?.focus()
   const saveEditContribution = () => {
     if (!editContributionId || !editContributionTargetId) return
     const newAmount = Number(editContributionForm.amount) || 0
-    setTargetsWithHistory(prev => prev.map(x => {
-      if (x.id !== editContributionTargetId) return x
-      const oldContrib = x.contributions.find(k => k.id === editContributionId)
-      const oldAmount = oldContrib ? oldContrib.amount : 0
-      return {
-        ...x,
-        currentSaved: Math.max(0, x.currentSaved - oldAmount + newAmount),
-        contributions: x.contributions.map(k => k.id === editContributionId
-          ? { ...k, date: editContributionForm.date, amount: newAmount, note: editContributionForm.note }
-          : k
-        ),
-      }
-    }))
+    setTargetsWithHistory(prev => updateContribution(prev, editContributionTargetId, editContributionId, newAmount, editContributionForm.date, editContributionForm.note))
     setEditContributionId(null)
     setEditContributionTargetId(null)
     setEditContributionForm({ date: '', amount: '', note: '' })
@@ -4807,7 +4724,7 @@ txnMerchantRef.current?.focus()
                   const n = targetSetName.trim()
                   if (!n) return
                   pushSetHistory(savedTargetSets)
-                  setSavedTargetSets([{ name: n, targets, savedAt: new Date().toISOString() }, ...savedTargetSets.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
+                  setSavedTargetSets(prev => saveGoalSet(prev, n, targets, new Date().toISOString()))
                   showToast('Savings goal set saved.')
                 }}>Save</button>
                 <div className="flex items-center gap-2">
@@ -4833,7 +4750,7 @@ txnMerchantRef.current?.focus()
                             const newName = renameSetValue.trim()
                             if (newName && newName !== s.name) {
                               pushSetHistory(savedTargetSets)
-                              setSavedTargetSets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName, savedAt: new Date().toISOString() } : x))
+                              setSavedTargetSets(prev => renameGoalSet(prev, idx, newName, new Date().toISOString()))
                               showToast('Savings goal set renamed.')
                             }
                             setEditingSetIdx(null)
@@ -4849,7 +4766,7 @@ txnMerchantRef.current?.focus()
                               const newName = renameSetValue.trim()
                               if (!newName) return
                               pushSetHistory(savedTargetSets)
-                              setSavedTargetSets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName, savedAt: new Date().toISOString() } : x))
+                              setSavedTargetSets(prev => renameGoalSet(prev, idx, newName, new Date().toISOString()))
                               showToast('Savings goal set renamed.')
                               setEditingSetIdx(null)
                             }
@@ -4863,7 +4780,7 @@ txnMerchantRef.current?.focus()
                             const newName = renameSetValue.trim()
                             if (!newName) return
                             pushSetHistory(savedTargetSets)
-                            setSavedTargetSets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName, savedAt: new Date().toISOString() } : x))
+                            setSavedTargetSets(prev => renameGoalSet(prev, idx, newName, new Date().toISOString()))
                             showToast('Savings goal set renamed.')
                             setEditingSetIdx(null)
                           }}>Save</button>
@@ -4881,12 +4798,12 @@ txnMerchantRef.current?.focus()
                             const same = JSON.stringify(targets) === JSON.stringify(s.targets)
                             if (!same) {
                               pushTargetHistory(targets)
-                              setTargets(s.targets)
+                              setTargets(loadGoalSet(s))
                               showToast('Savings goal set loaded.')
                             }
                           }}>Load</button>
                           <button className="text-slate-400 hover:text-slate-300 text-sm" onClick={() => { setEditingSetIdx(idx); setRenameSetValue(s.name) }}>Rename</button>
-                          <button className="text-red-300 hover:text-red-200 text-sm" onClick={() => { pushSetHistory(savedTargetSets); setSavedTargetSets(prev => prev.filter(x => x.name !== s.name)) }}>Delete</button>
+                          <button className="text-red-300 hover:text-red-200 text-sm" onClick={() => { pushSetHistory(savedTargetSets); setSavedTargetSets(prev => deleteGoalSet(prev, s.name)) }}>Delete</button>
                         </div>
                       </>
                     )}
