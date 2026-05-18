@@ -66,10 +66,15 @@ import { Card, Pill, Metric, Info, ActionCard, Row } from './components/ui'
 import { txNeedsReview } from './utils/transactionHelpers'
 import { TXN_TYPE_LABELS, TXN_FILTER_OPTIONS } from './utils/transactionHelpers'
 import { TransactionsTab } from './components/TransactionsTab'
+import {
+  applyRulesToTransactions,
+  buildBulkMerchantRuleSuggestion,
+  detectRuleConflict,
+  findMatchingRule,
+} from './utils/rulesEngine'
+import { hasDuplicateTransaction } from './utils/duplicateDetection'
 import { GoalPlanningSummary } from './components/GoalPlanningSummary'
 import { GoalCard } from './components/GoalCard'
-import { SavingsGoalSetManager } from './components/SavingsGoalSetManager'
-import { SavingsGoalForm } from './components/SavingsGoalForm'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -1144,8 +1149,9 @@ export default function App() {
 
     // Checklist
     const uncatExpenses = txns.filter(t => t.type === 'expense' && !t.categoryId).length
-    const unresolvedDups = txns.filter(t => txNeedsReview(t, transactions, dismissedDupIds) &&
-      transactions.some(o => o.id !== t.id && o.merchant.toLowerCase() === t.merchant.toLowerCase() && o.amount === t.amount && o.date === t.date)
+    const unresolvedDups = txns.filter(t =>
+      txNeedsReview(t, transactions, dismissedDupIds) &&
+      hasDuplicateTransaction(t, transactions, { dismissedDupIds, includeAccount: false })
     ).length
     const recurringReviewed = recurringCandidates.length === 0 ||
       recurringCandidates.every(c => confirmedRecurring.has(c.merchantKey) || dismissedRecurring.has(c.merchantKey))
@@ -1160,13 +1166,13 @@ export default function App() {
       selectedTxnIds.has(tx.id) ? { ...tx, categoryId: bulkCategoryId } : tx
     ))
     // Offer rule creation for unique merchants without existing rules
-    const uniqueMerchants = [...new Set(affectedTxns.map(tx => normalizeMerchant(tx.merchant)))]
-      .filter(m => !rules.some(r => r.matchField === 'merchant' && r.categoryId === bulkCategoryId &&
-        r.matchText.split(',').some(t => t.trim().toLowerCase() === m.toLowerCase())
-      ))
-    if (uniqueMerchants.length > 0) {
-      setRuleSuggestion({ merchants: uniqueMerchants, categoryId: bulkCategoryId, txIds: [...selectedTxnIds] })
-    }
+    const suggestion = buildBulkMerchantRuleSuggestion(
+      affectedTxns.map(tx => normalizeMerchant(tx.merchant)),
+      bulkCategoryId,
+      [...selectedTxnIds],
+      rules,
+    )
+    if (suggestion) setRuleSuggestion(suggestion)
     setSelectedTxnIds(new Set())
     setBulkCategoryId('')
     showToast(`Assigned category to ${selectedTxnIds.size} transaction${selectedTxnIds.size !== 1 ? 's' : ''}.`)
@@ -1501,10 +1507,10 @@ export default function App() {
     if (amount <= 0) { setTimedTxnHint('Enter a transaction amount before logging.'); txnAmountRef.current?.focus(); return }
 
     // Duplicate detection — same merchant + amount + date
-    const isDup = transactions.some(x =>
-      x.merchant.toLowerCase() === merchant.toLowerCase() &&
-      x.amount === amount &&
-      x.date === txnForm.date
+    const isDup = hasDuplicateTransaction(
+      { id: '__new__', date: txnForm.date, accountId: resolvedAccountId, merchant, amount },
+      transactions,
+      { includeAccount: false },
     )
     if (isDup && !txnDupWarning) {
       setTxnDupWarning(true)
@@ -1517,15 +1523,13 @@ export default function App() {
     let autoCategoryId = txnForm.categoryId
     let matchedRuleId: string | undefined
     if (!txnForm.categoryId) {
-      const mLower = normalizeAlias(merchant)
-      const nLower = normalizeAlias(txnForm.notes)
-      for (const rule of rules) {
-        const haystack = rule.matchField === 'merchant' ? mLower : nLower
-        if (matchesAnyAlias(haystack, rule.matchText)) {
-          autoCategoryId = rule.categoryId
-          matchedRuleId = rule.id
-          break
-        }
+      const matchingRule = findMatchingRule(
+        { merchant, notes: txnForm.notes, type: txnForm.type },
+        rules,
+      )
+      if (matchingRule) {
+        autoCategoryId = matchingRule.categoryId
+        matchedRuleId = matchingRule.id
       }
     }
 
@@ -1579,11 +1583,10 @@ txnMerchantRef.current?.focus()
     if (amount <= 0) { setTimedTxnHint('Enter a valid amount greater than zero.'); return }
 
     // V8.5.2 — Duplicate detection: same merchant + amount + date, excluding self
-    const isDup = transactions.some(x =>
-      x.id !== inlineTxnEditId &&
-      x.merchant.toLowerCase() === merchant.toLowerCase() &&
-      x.amount === amount &&
-      x.date === inlineTxnEditForm.date
+    const isDup = hasDuplicateTransaction(
+      { id: inlineTxnEditId, date: inlineTxnEditForm.date, accountId: inlineTxnEditForm.accountId, merchant, amount },
+      transactions,
+      { includeAccount: false },
     )
     if (isDup && !txnDupWarning) {
       setTxnDupWarning(true)
@@ -1635,25 +1638,6 @@ txnMerchantRef.current?.focus()
     })
   }
 
-  // V8.5.2 — Case-insensitive, comma-separated alias matching.
-  // Normalizes apostrophes (straight ' curly \u2019) so "McDonald's" matches "McDonald's",
-  // "McDonalds", "mcdonalds", etc. Strips surrounding quotes/spaces, ignores empty fragments.
-  const normalizeAlias = (s: string): string =>
-    s.replace(/[\u2018\u2019\u02BC]/g, "'").toLowerCase()
-  const matchesAnyAlias = (haystack: string, matchText: string): boolean => {
-    const normHaystack = normalizeAlias(haystack)
-    const normHaystackNoApos = normHaystack.replace(/'/g, '')
-    const aliases = matchText
-      .split(',')
-      .map(a => a.replace(/^['"\u2018\u2019\s]+|['"\u2018\u2019\s]+$/g, ''))
-      .filter(Boolean)
-    return aliases.some(alias => {
-      const normAlias = normalizeAlias(alias)
-      const normAliasNoApos = normAlias.replace(/'/g, '')
-      return normHaystack.includes(normAlias) || normHaystackNoApos.includes(normAliasNoApos)
-    })
-  }
-
   const setRulesWithHistory = (updater: (prev: TransactionRule[]) => TransactionRule[]) => {
     setRules(prev => {
       setRuleHistory(h => [...h.slice(-19), prev])
@@ -1691,22 +1675,17 @@ txnMerchantRef.current?.focus()
     if (!ruleForm.categoryId) { setRuleHint('Choose a budget category before adding this rule.'); return }
 
     // V8.5.2 — Conflict detection: same field + overlapping alias + overlapping type → different category
-    const newAliases = matchText.split(',').map(a => normalizeAlias(a.replace(/^['"\u2018\u2019\s]+|['"\u2018\u2019\s]+$/g, ''))).filter(Boolean)
-    const newTypeIsAny = !ruleForm.type
-    for (const existing of rules) {
-      if (existing.matchField !== ruleForm.matchField) continue
-      const existingAliases = existing.matchText.split(',').map(a => normalizeAlias(a.replace(/^['"\u2018\u2019\s]+|['"\u2018\u2019\s]+$/g, ''))).filter(Boolean)
-      const hasOverlapAlias = newAliases.some(a => existingAliases.includes(a))
-      if (!hasOverlapAlias) continue
-      const existingTypeIsAny = !existing.type
-      const typesOverlap = newTypeIsAny || existingTypeIsAny || ruleForm.type === existing.type
-      if (!typesOverlap) continue
-      if (existing.categoryId !== ruleForm.categoryId) {
-        const overlapAlias = newAliases.find(a => existingAliases.includes(a)) ?? matchText
-        setRuleHint(`This rule conflicts with an existing rule for "${overlapAlias}". Change the match text or choose the same category.`)
-        return
-      }
+    const conflict = detectRuleConflict(rules, {
+      matchText,
+      matchField: ruleForm.matchField,
+      categoryId: ruleForm.categoryId,
+      type: ruleForm.type,
+    })
+    if (conflict) {
+      setRuleHint(`This rule conflicts with an existing rule for "${conflict.overlapAlias}". Change the match text or choose the same category.`)
+      return
     }
+
 
     setRuleHint('')
     setRulesWithHistory(prev => [
@@ -1723,23 +1702,17 @@ txnMerchantRef.current?.focus()
     if (!name || !matchText || !inlineRuleEditForm.categoryId) return
 
     // V8.5.2 — Conflict detection (exclude self)
-    const newAliases = matchText.split(',').map(a => normalizeAlias(a.replace(/^['"\u2018\u2019\s]+|['"\u2018\u2019\s]+$/g, ''))).filter(Boolean)
-    const newTypeIsAny = !inlineRuleEditForm.type
-    for (const existing of rules) {
-      if (existing.id === inlineRuleEditId) continue
-      if (existing.matchField !== inlineRuleEditForm.matchField) continue
-      const existingAliases = existing.matchText.split(',').map(a => normalizeAlias(a.replace(/^['"\u2018\u2019\s]+|['"\u2018\u2019\s]+$/g, ''))).filter(Boolean)
-      const hasOverlapAlias = newAliases.some(a => existingAliases.includes(a))
-      if (!hasOverlapAlias) continue
-      const existingTypeIsAny = !existing.type
-      const typesOverlap = newTypeIsAny || existingTypeIsAny || inlineRuleEditForm.type === existing.type
-      if (!typesOverlap) continue
-      if (existing.categoryId !== inlineRuleEditForm.categoryId) {
-        const overlapAlias = newAliases.find(a => existingAliases.includes(a)) ?? matchText
-        setRuleHint(`This rule conflicts with an existing rule for "${overlapAlias}". Change the match text or choose the same category.`)
-        return
-      }
+    const conflict = detectRuleConflict(rules, {
+      matchText,
+      matchField: inlineRuleEditForm.matchField,
+      categoryId: inlineRuleEditForm.categoryId,
+      type: inlineRuleEditForm.type,
+    }, inlineRuleEditId)
+    if (conflict) {
+      setRuleHint(`This rule conflicts with an existing rule for "${conflict.overlapAlias}". Change the match text or choose the same category.`)
+      return
     }
+
 
     setRulesWithHistory(prev => prev.map(r => r.id === inlineRuleEditId
       ? { ...r, name, matchText, matchField: inlineRuleEditForm.matchField, categoryId: inlineRuleEditForm.categoryId, type: inlineRuleEditForm.type || undefined }
@@ -1749,29 +1722,15 @@ txnMerchantRef.current?.focus()
   }
   const cancelInlineRuleEdit = () => setInlineRuleEditId(null)
  const applyAllRules = () => {
-    const activeRuleIds = new Set(rules.map(r => r.id))
     let count = 0
-    setTxnWithHistory(prev => prev.map(tx => {
-      // V8.6.1 — Strip stale badge AND category for deleted-rule transactions.
-      // Only clears if the category is still rule-owned (appliedByRule points to
-      // a deleted rule). User-manually-changed categories already have appliedByRule
-      // cleared (via saveInlineTxnEdit), so they are untouched here.
-      const isStaleRule = tx.appliedByRule && !activeRuleIds.has(tx.appliedByRule)
-      const baseTx = isStaleRule
-        ? { ...tx, categoryId: undefined, appliedByRule: undefined }
-        : tx
-      if (!overwriteCategories && baseTx.categoryId) return baseTx
-      const mLower = normalizeAlias(baseTx.merchant)
-      const nLower = normalizeAlias(baseTx.notes ?? '')
-      for (const rule of rules) {
-        const haystack = rule.matchField === 'merchant' ? mLower : nLower
-        if (matchesAnyAlias(haystack, rule.matchText)) {
-          if (baseTx.categoryId !== rule.categoryId) count++
-          return { ...baseTx, categoryId: rule.categoryId, appliedByRule: rule.id }
-        }
-      }
-      return baseTx
-    }))
+    setTxnWithHistory(prev => {
+      const result = applyRulesToTransactions(prev, rules, {
+        overwriteCategories,
+        clearStaleRuleOwnership: true,
+      })
+      count = result.updatedCount
+      return result.transactions
+    })
     setApplyRulesMsg(`${count} transaction${count !== 1 ? 's' : ''} updated.`)
     setTimeout(() => setApplyRulesMsg(''), 5000)
   }
@@ -4637,30 +4596,187 @@ txnMerchantRef.current?.focus()
         {/* ── SAVINGS GOALS ── */}
         {tab === 'Targets' && (
           <section className="space-y-4">
-            <SavingsGoalForm
-              targetForm={targetForm}
-              setTargetForm={setTargetForm}
-              targetFormHint={targetFormHint}
-              setTargetFormHint={setTargetFormHint}
-              editTargetHint={editTargetHint}
-              targetSuggestionList={targetSuggestionList}
-              showTargetSuggestions={showTargetSuggestions}
-              setShowTargetSuggestions={setShowTargetSuggestions}
-              targetSuggestionIndex={targetSuggestionIndex}
-              setTargetSuggestionIndex={setTargetSuggestionIndex}
-              targetAutocompleteWrapRef={targetAutocompleteWrapRef}
-              targetNameRef={targetNameRef}
-              targetGoalRef={targetGoalRef}
-              targetSavedRef={targetSavedRef}
-              targetStartDateRef={targetStartDateRef}
-              targetDeadlineRef={targetDeadlineRef}
-              startDateArrowCount={startDateArrowCount}
-              deadlineArrowCount={deadlineArrowCount}
-              startDateLeftArrowCount={startDateLeftArrowCount}
-              deadlineLeftArrowCount={deadlineLeftArrowCount}
-              createTarget={createTarget}
-              generateSampleGoal={generateSampleGoal}
-            />
+            <Card title="Create Savings Goal" noHover>
+              <div className="grid md:grid-cols-3 lg:grid-cols-6 gap-3 items-end">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Goal Name</label>
+                  <div ref={targetAutocompleteWrapRef} className="relative">
+                    <input
+                      ref={targetNameRef}
+                      className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600"
+                      value={targetForm.name}
+                      placeholder="e.g. Emergency Fund"
+                      onFocus={() => setShowTargetSuggestions(true)}
+                      onChange={(e) => { setTargetForm((v) => ({ ...v, name: e.target.value })); setTargetSuggestionIndex(-1); setShowTargetSuggestions(true); setTargetFormHint('') }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault()
+                          if (targetSuggestionList.length) { setTargetSuggestionIndex((v) => Math.min(v + 1, targetSuggestionList.length - 1)); setShowTargetSuggestions(true) }
+                          return
+                        }
+                        if (e.key === 'ArrowUp') {
+                          e.preventDefault()
+                          if (targetSuggestionList.length) { setTargetSuggestionIndex((v) => Math.max(v - 1, 0)); setShowTargetSuggestions(true) }
+                          return
+                        }
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          if (targetSuggestionIndex >= 0 && targetSuggestionList.length) {
+                            setTargetForm((v) => ({ ...v, name: targetSuggestionList[targetSuggestionIndex] }))
+                            setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus(); return
+                          }
+                          if (targetSuggestionList.length === 1) {
+                            setTargetForm((v) => ({ ...v, name: targetSuggestionList[0] }))
+                            setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus(); return
+                          }
+                          if (targetForm.name.trim()) { setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus() }
+                        }
+                      }}
+                    />
+                    {showTargetSuggestions && targetSuggestionList.length > 0 && (
+                      <div className="absolute z-10 w-full mt-1 max-h-48 overflow-y-auto bg-slate-800 border border-slate-600 rounded-lg">
+                        {targetSuggestionList.map((preset, i) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            className={`w-full text-left px-2 py-1 text-sm ${i === targetSuggestionIndex ? 'bg-slate-700' : 'hover:bg-slate-700'}`}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => { setTargetForm((v) => ({ ...v, name: preset })); setShowTargetSuggestions(false); setTargetSuggestionIndex(-1); targetGoalRef.current?.focus() }}
+                          >
+                            {preset}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Goal Amount</label>
+                  <input
+                    ref={targetGoalRef}
+                    type="number"
+                    min={0}
+                    step={25}
+                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600"
+                    value={targetForm.goalAmount}
+                    onChange={(e) => setTargetForm((v) => ({ ...v, goalAmount: e.target.value }))}
+                    onFocus={e => e.target.select()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); targetSavedRef.current?.focus() }
+                    }}
+                    placeholder="e.g. 1000"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Current Saved</label>
+                  <input
+                    ref={targetSavedRef}
+                    type="number"
+                    min={0}
+                    step={25}
+                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600"
+                    value={targetForm.currentSaved}
+                    onChange={(e) => setTargetForm((v) => ({ ...v, currentSaved: e.target.value }))}
+                    onFocus={e => e.target.select()}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); targetStartDateRef.current?.focus() }
+                      if (e.key === 'ArrowLeft') { e.preventDefault(); targetGoalRef.current?.focus() }
+                    }}
+                    placeholder="e.g. 250"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Start Date (when you began saving)</label>
+                  <input
+                    ref={targetStartDateRef}
+                    type="date"
+                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600"
+                    value={targetForm.startDate}
+                    onChange={(e) => setTargetForm((v) => ({ ...v, startDate: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'ArrowRight') {
+                        startDateLeftArrowCount.current = 0
+                        startDateArrowCount.current += 1
+                        if (startDateArrowCount.current > 2) {
+                          e.preventDefault()
+                          startDateArrowCount.current = 0
+                          targetDeadlineRef.current?.focus()
+                        }
+                      } else if (e.key === 'ArrowLeft') {
+                        startDateArrowCount.current = 0
+                        startDateLeftArrowCount.current += 1
+                        if (startDateLeftArrowCount.current > 2) {
+                          e.preventDefault()
+                          startDateLeftArrowCount.current = 0
+                          targetSavedRef.current?.focus()
+                        }
+                      } else if (e.key === 'Enter') {
+                        e.preventDefault()
+                        startDateArrowCount.current = 0
+                        startDateLeftArrowCount.current = 0
+                        targetDeadlineRef.current?.focus()
+                      } else {
+                        startDateArrowCount.current = 0
+                        startDateLeftArrowCount.current = 0
+                      }
+                    }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Deadline (when the goal is due)</label>
+                  <input
+                    ref={targetDeadlineRef}
+                    type="date"
+                    className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600"
+                    value={targetForm.deadline}
+                    onChange={(e) => setTargetForm((v) => ({ ...v, deadline: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === 'ArrowRight') {
+                        deadlineLeftArrowCount.current = 0
+                        deadlineArrowCount.current += 1
+                        if (deadlineArrowCount.current > 2) {
+                          e.preventDefault()
+                          deadlineArrowCount.current = 0
+                          createTarget()
+                        }
+                      } else if (e.key === 'ArrowLeft') {
+                        deadlineArrowCount.current = 0
+                        deadlineLeftArrowCount.current += 1
+                        if (deadlineLeftArrowCount.current > 2) {
+                          e.preventDefault()
+                          deadlineLeftArrowCount.current = 0
+                          targetStartDateRef.current?.focus()
+                        }
+                      } else if (e.key === 'Enter') {
+                        e.preventDefault()
+                        deadlineArrowCount.current = 0
+                        deadlineLeftArrowCount.current = 0
+                        createTarget()
+                      } else {
+                        deadlineArrowCount.current = 0
+                        deadlineLeftArrowCount.current = 0
+                      }
+                    }}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <button className="w-full px-3 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 transition-colors" onClick={createTarget}>Create Savings Goal</button>
+                  <button
+                    className="w-full px-3 py-1 text-xs rounded bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors"
+                    title="Instantly add a randomized sample savings goal"
+                    onClick={generateSampleGoal}
+                  >Generate Sample</button>
+                </div>
+              </div>
+              {targetFormHint && (
+                <p className="mt-2 text-sm text-amber-300">{targetFormHint}</p>
+              )}
+              {editTargetHint && (
+  <p className="text-xs text-yellow-300 mt-1">
+    {editTargetHint}
+  </p>
+)}
+            </Card>
 
             {/* Target Undo / Redo / Clear row */}
             <div className="flex gap-2 items-center">
@@ -4686,26 +4802,100 @@ txnMerchantRef.current?.focus()
               </button>
             </div>
 
-            <SavingsGoalSetManager
-              targetSetName={targetSetName}
-              setTargetSetName={setTargetSetName}
-              targets={targets}
-              setTargets={setTargets}
-              savedTargetSets={savedTargetSets}
-              setSavedTargetSets={setSavedTargetSets}
-              savedTargetSetsHistory={savedTargetSetsHistory}
-              savedTargetSetsRedo={savedTargetSetsRedo}
-              editingSetIdx={editingSetIdx}
-              setEditingSetIdx={setEditingSetIdx}
-              renameSetValue={renameSetValue}
-              setRenameSetValue={setRenameSetValue}
-              renameSetRowRef={renameSetRowRef}
-              pushSetHistory={pushSetHistory}
-              pushTargetHistory={pushTargetHistory}
-              undoSavedSets={undoSavedSets}
-              redoSavedSets={redoSavedSets}
-              showToast={showToast}
-            />
+            <Card title="Savings Goal Sets" noHover>
+              <div className="grid md:grid-cols-3 gap-2">
+                <input className="p-2 rounded bg-slate-800 border border-slate-600" value={targetSetName} onChange={(e) => setTargetSetName(e.target.value)} placeholder="Savings goal set name" />
+                <button className="rounded bg-blue-600" onClick={() => {
+                  const n = targetSetName.trim()
+                  if (!n) return
+                  pushSetHistory(savedTargetSets)
+                  setSavedTargetSets([{ name: n, targets, savedAt: new Date().toISOString() }, ...savedTargetSets.filter(s => s.name.toLowerCase() !== n.toLowerCase())])
+                  showToast('Savings goal set saved.')
+                }}>Save</button>
+                <div className="flex items-center gap-2">
+                  <div className="text-xs text-slate-400">Saved locally</div>
+                  {savedTargetSetsHistory.length > 0 && (
+                    <button onClick={undoSavedSets} className="text-xs text-slate-400 hover:text-slate-200 underline">Undo</button>
+                  )}
+                  {savedTargetSetsRedo.length > 0 && (
+                    <button onClick={redoSavedSets} className="text-xs text-slate-400 hover:text-slate-200 underline">Redo</button>
+                  )}
+                </div>
+              </div>
+              <div className="space-y-2 mt-2">
+                {savedTargetSets.map((s, idx) => (
+                  <div key={s.name} className="rounded border border-slate-700 p-2 flex justify-between items-center gap-2">
+                    {editingSetIdx === idx ? (
+                      <div
+                        ref={el => { renameSetRowRef.current = el }}
+                        className="flex flex-1 items-center gap-2"
+                        onBlur={e => {
+                          // Blur-save only when focus leaves the entire rename container
+                          if (!renameSetRowRef.current?.contains(e.relatedTarget as Node)) {
+                            const newName = renameSetValue.trim()
+                            if (newName && newName !== s.name) {
+                              pushSetHistory(savedTargetSets)
+                              setSavedTargetSets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName, savedAt: new Date().toISOString() } : x))
+                              showToast('Savings goal set renamed.')
+                            }
+                            setEditingSetIdx(null)
+                          }
+                        }}
+                      >
+                        <input
+                          className="flex-1 p-1 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                          value={renameSetValue}
+                          onChange={e => setRenameSetValue(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              const newName = renameSetValue.trim()
+                              if (!newName) return
+                              pushSetHistory(savedTargetSets)
+                              setSavedTargetSets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName, savedAt: new Date().toISOString() } : x))
+                              showToast('Savings goal set renamed.')
+                              setEditingSetIdx(null)
+                            }
+                            if (e.key === 'Escape') setEditingSetIdx(null)
+                          }}
+                          autoFocus
+                        />
+                        <div className="flex gap-2 shrink-0">
+                          <button className="text-blue-300 hover:text-blue-200 text-sm" onMouseDown={e => {
+                            e.preventDefault()
+                            const newName = renameSetValue.trim()
+                            if (!newName) return
+                            pushSetHistory(savedTargetSets)
+                            setSavedTargetSets(prev => prev.map((x, i) => i === idx ? { ...x, name: newName, savedAt: new Date().toISOString() } : x))
+                            showToast('Savings goal set renamed.')
+                            setEditingSetIdx(null)
+                          }}>Save</button>
+                          <button className="text-slate-400 hover:text-slate-300 text-sm" onMouseDown={e => { e.preventDefault(); setEditingSetIdx(null) }}>Cancel</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <div className="text-sm font-medium">{s.name}</div>
+                          <div className="text-xs text-slate-400">{new Date(s.savedAt).toLocaleString()}</div>
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button className="text-blue-300 hover:text-blue-200 text-sm" onClick={() => {
+                            const same = JSON.stringify(targets) === JSON.stringify(s.targets)
+                            if (!same) {
+                              pushTargetHistory(targets)
+                              setTargets(s.targets)
+                              showToast('Savings goal set loaded.')
+                            }
+                          }}>Load</button>
+                          <button className="text-slate-400 hover:text-slate-300 text-sm" onClick={() => { setEditingSetIdx(idx); setRenameSetValue(s.name) }}>Rename</button>
+                          <button className="text-red-300 hover:text-red-200 text-sm" onClick={() => { pushSetHistory(savedTargetSets); setSavedTargetSets(prev => prev.filter(x => x.name !== s.name)) }}>Delete</button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
 
             {/* V9.12 — Goal Planning Summary */}
             {targets.length > 0 && <GoalPlanningSummary summary={goalPlanSummary} />}
