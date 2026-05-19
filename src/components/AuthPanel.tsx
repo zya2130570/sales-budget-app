@@ -1,161 +1,132 @@
+/**
+ * AuthPanel.tsx — V12.2
+ *
+ * Compact auth widget rendered in the app header.
+ * - Shows "Guest mode" if Supabase is not configured.
+ * - Shows email/password sign-in + sign-up form if configured but signed out.
+ * - Shows user email + sign-out button if signed in.
+ * - Never blocks the app from rendering.
+ * - Auth errors appear only inside this panel.
+ */
+
 import { useState } from 'react'
 import { useAuth } from '../hooks/useAuth'
 
 export function AuthPanel() {
-  const {
-    user,
-    status,
-    error,
-    isConfigured,
-    isLoading,
-    isSignedIn,
-    signIn,
-    signUp,
-    signOut,
-  } = useAuth()
-
-  const [mode, setMode] = useState<'collapsed' | 'sign-in' | 'sign-up'>('collapsed')
+  const { user, loading, error, isConfigured, signIn, signUp, signOut } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [message, setMessage] = useState('')
+  const [expanded, setExpanded] = useState(false)
+  const [mode, setMode] = useState<'signin' | 'signup'>('signin')
 
-  const resetForm = () => {
-    setEmail('')
-    setPassword('')
-    setMessage('')
-    setSubmitting(false)
-  }
-
-  const handleSubmit = async () => {
-    if (!email.trim() || !password) {
-      setMessage('Enter an email and password.')
-      return
-    }
-
-    setSubmitting(true)
-    setMessage('')
-
-    const result = mode === 'sign-up'
-      ? await signUp(email.trim(), password)
-      : await signIn(email.trim(), password)
-
-    setSubmitting(false)
-
-    if (result.error) {
-      setMessage(result.error.message)
-      return
-    }
-
-    setMessage(mode === 'sign-up' ? 'Account created. Check your email if confirmation is required.' : 'Signed in.')
-    if (mode === 'sign-in') {
-      resetForm()
-      setMode('collapsed')
-    }
-  }
-
+  // Not configured — show guest badge, no UI blocker
   if (!isConfigured) {
     return (
-      <div className="rounded-xl border border-slate-700 bg-slate-900/70 px-3 py-2 text-xs text-slate-400">
-        Guest mode
+      <div className="flex items-center gap-2 text-xs text-slate-500 select-none">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800 px-3 py-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-slate-500" />
+          Guest mode
+        </span>
       </div>
     )
   }
 
-  if (isLoading) {
+  // Loading — brief spinner, never hung
+  if (loading) {
     return (
-      <div className="rounded-xl border border-slate-700 bg-slate-900/70 px-3 py-2 text-xs text-slate-400">
-        Checking session...
+      <div className="flex items-center gap-2 text-xs text-slate-500 select-none">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800 px-3 py-1">
+          <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+          Connecting…
+        </span>
       </div>
     )
   }
 
-  if (isSignedIn) {
+  // Signed in — show email and sign-out
+  if (user) {
     return (
-      <div className="rounded-xl border border-slate-700 bg-slate-900/70 p-3 text-sm">
-        <div className="text-slate-300 truncate max-w-64">{user?.email}</div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-green-700/60 bg-green-900/30 px-3 py-1 text-xs text-green-300">
+          <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
+          {user.email}
+        </span>
         <button
-          type="button"
-          onClick={() => void signOut()}
-          className="mt-2 rounded-lg bg-slate-700 px-3 py-1.5 text-xs text-slate-100 hover:bg-slate-600"
+          onClick={signOut}
+          className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-400 transition-colors hover:bg-slate-700 hover:text-slate-200"
         >
           Sign out
         </button>
+        {error && <span className="text-xs text-red-400">{error}</span>}
       </div>
     )
   }
 
-  if (mode === 'collapsed') {
-    return (
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => setMode('sign-in')}
-          className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500"
-        >
-          Sign in
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode('sign-up')}
-          className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600"
-        >
-          Create account
-        </button>
-      </div>
-    )
-  }
-
+  // Signed out — toggle form
   return (
-    <div className="w-full max-w-sm rounded-xl border border-slate-700 bg-slate-900/70 p-3 text-sm md:w-80">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="font-semibold text-slate-100">{mode === 'sign-up' ? 'Create account' : 'Sign in'}</div>
-        <button
-          type="button"
-          onClick={() => {
-            resetForm()
-            setMode('collapsed')
-          }}
-          className="text-xs text-slate-400 hover:text-slate-200"
-        >
-          Cancel
-        </button>
-      </div>
+    <div className="relative">
+      <button
+        onClick={() => setExpanded(v => !v)}
+        className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-1 text-xs text-slate-400 transition-colors hover:bg-slate-700 hover:text-slate-200"
+      >
+        {expanded ? 'Cancel' : 'Sign in'}
+      </button>
 
-      <div className="space-y-2">
-        <input
-          value={email}
-          onChange={e => setEmail(e.target.value)}
-          placeholder="Email"
-          type="email"
-          className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-blue-500"
-        />
-        <input
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          placeholder="Password"
-          type="password"
-          className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-blue-500"
-        />
-        <button
-          type="button"
-          disabled={submitting}
-          onClick={() => void handleSubmit()}
-          className="w-full rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {submitting ? 'Working...' : mode === 'sign-up' ? 'Create account' : 'Sign in'}
-        </button>
-      </div>
+      {expanded && (
+        <div className="absolute right-0 top-full mt-2 z-50 w-72 rounded-xl border border-slate-700 bg-slate-800 p-4 shadow-2xl space-y-3">
+          <div className="flex gap-2">
+            <button
+              onClick={() => setMode('signin')}
+              className={`flex-1 rounded-lg py-1 text-xs font-medium transition-colors ${mode === 'signin' ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
+            >
+              Sign in
+            </button>
+            <button
+              onClick={() => setMode('signup')}
+              className={`flex-1 rounded-lg py-1 text-xs font-medium transition-colors ${mode === 'signup' ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}
+            >
+              Sign up
+            </button>
+          </div>
 
-      {(message || error || status === 'error') && (
-        <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
-          {message || error || 'Authentication is unavailable right now.'}
+          <input
+            type="email"
+            placeholder="Email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') {
+                mode === 'signin' ? signIn(email, password) : signUp(email, password)
+              }
+            }}
+            className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+
+          <button
+            onClick={() => mode === 'signin' ? signIn(email, password) : signUp(email, password)}
+            className="w-full rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-2 text-xs font-medium text-white transition-colors"
+          >
+            {mode === 'signin' ? 'Sign in' : 'Create account'}
+          </button>
+
+          {error && (
+            <p className="text-xs text-red-400 break-words">{error}</p>
+          )}
+
+          {mode === 'signup' && (
+            <p className="text-xs text-slate-500">
+              Check your email to confirm your account after sign up.
+            </p>
+          )}
         </div>
       )}
-
-      <div className="mt-2 text-xs text-slate-500">
-        Local guest data stays on this device. Cloud sync comes in a later version.
-      </div>
     </div>
   )
 }
