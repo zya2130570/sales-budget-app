@@ -1,132 +1,109 @@
-import { useEffect, useState } from 'react'
-import type { Session, User } from '@supabase/supabase-js'
-import { isSupabaseConfigured, supabase } from '../lib/supabaseClient'
+/**
+ * useAuth.ts — V12.2
+ *
+ * Provides auth state for the app.
+ * - Resolves immediately if Supabase is not configured (loading = false, user = null).
+ * - Applies a 5-second timeout guard so auth never hangs indefinitely.
+ * - Never crashes or blocks the rest of the app.
+ */
 
-type AuthStatus = 'guest' | 'loading' | 'signed-in' | 'signed-out' | 'error'
+import { useState, useEffect, useCallback } from 'react'
+import type { User, Session } from '@supabase/supabase-js'
+import { supabase, isSupabaseConfigured } from '../lib/supabaseClient'
 
-const SESSION_TIMEOUT_MS = 2500
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => {
-      reject(new Error('Supabase session check timed out. Continuing in guest/local mode.'))
-    }, ms)
-
-    promise
-      .then(value => {
-        window.clearTimeout(timer)
-        resolve(value)
-      })
-      .catch(error => {
-        window.clearTimeout(timer)
-        reject(error)
-      })
-  })
+export interface AuthState {
+  user: User | null
+  session: Session | null
+  loading: boolean
+  error: string | null
+  isConfigured: boolean
+  signIn: (email: string, password: string) => Promise<void>
+  signUp: (email: string, password: string) => Promise<void>
+  signOut: () => Promise<void>
 }
 
-export function useAuth() {
-  const [session, setSession] = useState<Session | null>(null)
+export function useAuth(): AuthState {
   const [user, setUser] = useState<User | null>(null)
-  const [status, setStatus] = useState<AuthStatus>(isSupabaseConfigured ? 'loading' : 'guest')
-  const [error, setError] = useState('')
+  const [session, setSession] = useState<Session | null>(null)
+  const [loading, setLoading] = useState<boolean>(isSupabaseConfigured)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!supabase) {
-      setStatus('guest')
-      setSession(null)
-      setUser(null)
-      setError('')
+    // Not configured — stay in guest mode immediately
+    if (!isSupabaseConfigured || !supabase) {
+      setLoading(false)
       return
     }
 
-    let mounted = true
-    const fallbackTimer = window.setTimeout(() => {
-      if (!mounted) return
-      setStatus(current => current === 'loading' ? 'signed-out' : current)
-    }, SESSION_TIMEOUT_MS + 500)
+    let cancelled = false
 
-    withTimeout(supabase.auth.getSession(), SESSION_TIMEOUT_MS)
-      .then(({ data, error: sessionError }) => {
-        if (!mounted) return
-        if (sessionError) {
-          setError(sessionError.message)
-          setStatus('signed-out')
-          return
-        }
-        setSession(data.session)
-        setUser(data.session?.user ?? null)
-        setStatus(data.session ? 'signed-in' : 'signed-out')
-      })
-      .catch(err => {
-        if (!mounted) return
-        setError(err instanceof Error ? err.message : 'Authentication is unavailable. Guest/local mode is still active.')
-        setStatus('signed-out')
-      })
+    // Timeout guard: resolve after 5 s no matter what
+    const timer = setTimeout(() => {
+      if (!cancelled) setLoading(false)
+    }, 5000)
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      if (!mounted) return
-      setSession(nextSession)
-      setUser(nextSession?.user ?? null)
-      setStatus(nextSession ? 'signed-in' : 'signed-out')
-      setError('')
+    // Fetch current session
+    supabase.auth.getSession().then(({ data, error: err }) => {
+      if (cancelled) return
+      clearTimeout(timer)
+      if (err) setError(err.message)
+      setSession(data.session ?? null)
+      setUser(data.session?.user ?? null)
+      setLoading(false)
+    }).catch((err: unknown) => {
+      if (cancelled) return
+      clearTimeout(timer)
+      setError(err instanceof Error ? err.message : 'Auth check failed')
+      setLoading(false)
+    })
+
+    // Subscribe to auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      if (cancelled) return
+      setSession(newSession ?? null)
+      setUser(newSession?.user ?? null)
+      setError(null)
     })
 
     return () => {
-      mounted = false
-      window.clearTimeout(fallbackTimer)
-      listener.subscription.unsubscribe()
+      cancelled = true
+      clearTimeout(timer)
+      subscription.unsubscribe()
     }
   }, [])
 
-  const signUp = async (email: string, password: string) => {
-    if (!supabase) {
-      setStatus('guest')
-      setError('Supabase is not configured yet.')
-      return { error: new Error('Supabase is not configured yet.') }
+  const signIn = useCallback(async (email: string, password: string) => {
+    if (!isSupabaseConfigured || !supabase) return
+    setError(null)
+    try {
+      const { error: err } = await supabase.auth.signInWithPassword({ email, password })
+      if (err) setError(err.message)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Sign in failed')
     }
+  }, [])
 
-    setError('')
-    const result = await supabase.auth.signUp({ email, password })
-    if (result.error) setError(result.error.message)
-    return result
-  }
-
-  const signIn = async (email: string, password: string) => {
-    if (!supabase) {
-      setStatus('guest')
-      setError('Supabase is not configured yet.')
-      return { error: new Error('Supabase is not configured yet.') }
+  const signUp = useCallback(async (email: string, password: string) => {
+    if (!isSupabaseConfigured || !supabase) return
+    setError(null)
+    try {
+      const { error: err } = await supabase.auth.signUp({ email, password })
+      if (err) setError(err.message)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Sign up failed')
     }
+  }, [])
 
-    setError('')
-    const result = await supabase.auth.signInWithPassword({ email, password })
-    if (result.error) setError(result.error.message)
-    return result
-  }
-
-  const signOut = async () => {
-    if (!supabase) {
-      setStatus('guest')
-      setError('')
-      return { error: null }
+  const signOut = useCallback(async () => {
+    if (!isSupabaseConfigured || !supabase) return
+    setError(null)
+    try {
+      const { error: err } = await supabase.auth.signOut()
+      if (err) setError(err.message)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Sign out failed')
     }
+  }, [])
 
-    setError('')
-    const result = await supabase.auth.signOut()
-    if (result.error) setError(result.error.message)
-    return result
-  }
-
-  return {
-    session,
-    user,
-    status,
-    error,
-    isConfigured: isSupabaseConfigured,
-    isLoading: status === 'loading',
-    isSignedIn: status === 'signed-in',
-    signUp,
-    signIn,
-    signOut,
-  }
+  return { user, session, loading, error, isConfigured: isSupabaseConfigured, signIn, signUp, signOut }
 }
