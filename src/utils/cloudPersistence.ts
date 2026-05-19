@@ -36,6 +36,11 @@ export type CloudPersistSummary = {
   lastSyncedAt?: string
 }
 
+export type CloudConnectionTestResult = {
+  ok: boolean
+  error?: string
+}
+
 type Client = SupabaseClient
 
 type MaybeRecord = Record<string, unknown>
@@ -45,6 +50,53 @@ const nowIso = () => new Date().toISOString()
 const safeNumber = (value: unknown, fallback = 0): number => {
   const n = Number(value)
   return Number.isFinite(n) ? n : fallback
+}
+
+/**
+ * Performs a minimal, non-destructive read to verify Supabase connectivity
+ * and that the authenticated user has permission to access their data.
+ *
+ * This is intentionally tiny: a single SELECT with limit(1). It does NOT
+ * write, delete, or modify any data. If this returns a 403 / RLS error,
+ * full sync will also fail, so we surface the error here before attempting
+ * a bulk write.
+ */
+export async function testCloudConnection(
+  supabase: Client,
+  userId: string,
+): Promise<CloudConnectionTestResult> {
+  try {
+    const { error } = await supabase
+      .from('accounts')
+      .select('id')
+      .eq('user_id', userId)
+      .limit(1)
+
+    if (error) {
+      const msg = error.message ?? String(error)
+      const status = (error as { status?: number }).status
+      if (status === 403 || msg.toLowerCase().includes('forbidden') || msg.toLowerCase().includes('rls')) {
+        return {
+          ok: false,
+          error: `Access denied (${status ?? 403}): Row-level security policy blocked the request. Check your Supabase RLS rules or API key.`,
+        }
+      }
+      if (status === 401 || msg.toLowerCase().includes('unauthorized') || msg.toLowerCase().includes('jwt')) {
+        return {
+          ok: false,
+          error: `Not authenticated (${status ?? 401}): Your session may have expired. Try signing out and back in.`,
+        }
+      }
+      return { ok: false, error: `Supabase error: ${msg}` }
+    }
+
+    return { ok: true }
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Connection test failed — unknown error.',
+    }
+  }
 }
 
 async function findCloudId(
