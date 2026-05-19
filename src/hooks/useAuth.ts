@@ -4,6 +4,26 @@ import { isSupabaseConfigured, supabase } from '../lib/supabaseClient'
 
 type AuthStatus = 'guest' | 'loading' | 'signed-in' | 'signed-out' | 'error'
 
+const SESSION_TIMEOUT_MS = 2500
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      reject(new Error('Supabase session check timed out. Continuing in guest/local mode.'))
+    }, ms)
+
+    promise
+      .then(value => {
+        window.clearTimeout(timer)
+        resolve(value)
+      })
+      .catch(error => {
+        window.clearTimeout(timer)
+        reject(error)
+      })
+  })
+}
+
 export function useAuth() {
   const [session, setSession] = useState<Session | null>(null)
   const [user, setUser] = useState<User | null>(null)
@@ -20,13 +40,17 @@ export function useAuth() {
     }
 
     let mounted = true
+    const fallbackTimer = window.setTimeout(() => {
+      if (!mounted) return
+      setStatus(current => current === 'loading' ? 'signed-out' : current)
+    }, SESSION_TIMEOUT_MS + 500)
 
-    supabase.auth.getSession()
+    withTimeout(supabase.auth.getSession(), SESSION_TIMEOUT_MS)
       .then(({ data, error: sessionError }) => {
         if (!mounted) return
         if (sessionError) {
           setError(sessionError.message)
-          setStatus('error')
+          setStatus('signed-out')
           return
         }
         setSession(data.session)
@@ -35,8 +59,8 @@ export function useAuth() {
       })
       .catch(err => {
         if (!mounted) return
-        setError(err instanceof Error ? err.message : 'Unable to load auth session')
-        setStatus('error')
+        setError(err instanceof Error ? err.message : 'Authentication is unavailable. Guest/local mode is still active.')
+        setStatus('signed-out')
       })
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
@@ -49,6 +73,7 @@ export function useAuth() {
 
     return () => {
       mounted = false
+      window.clearTimeout(fallbackTimer)
       listener.subscription.unsubscribe()
     }
   }, [])
