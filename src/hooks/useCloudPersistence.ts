@@ -39,6 +39,14 @@ const writeLastSyncedAt = (value: string) => {
   try { localStorage.setItem(LAST_SYNC_KEY, value) } catch { /* ignore */ }
 }
 
+/**
+ * Local-first cloud persistence coordinator.
+ *
+ * Important behavior:
+ * - localStorage remains the source of truth.
+ * - failed syncs do not enqueue duplicate pending work on every retry.
+ * - pendingCount represents the latest failed-write estimate, not a cumulative retry counter.
+ */
 export function useCloudPersistence(data: UseCloudPersistenceArgs) {
   const auth = useAuth()
   const [status, setStatus] = useState<CloudPersistenceStatus>('guest')
@@ -49,6 +57,7 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true)
   const syncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const syncInFlightRef = useRef(false)
+  const lastAttemptedFingerprintRef = useRef<string | null>(null)
 
   const canSync = Boolean(auth.isConfigured && auth.user && supabase)
 
@@ -62,14 +71,25 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
     savedScenarios: data.savedScenarios.map(item => [item.name, item.savedAt]),
   }), [data.accounts, data.categories, data.transactions, data.rules, data.targets, data.savedTargetSets, data.savedScenarios])
 
-  const runSyncNow = useCallback(async () => {
+  const setPendingSafely = useCallback((count: number) => {
+    const next = Math.max(0, count)
+    setPendingCount(next)
+    writePendingCount(next)
+  }, [])
+
+  const runSyncNow = useCallback(async (force = false) => {
     if (!canSync || !auth.user || !supabase) {
       setStatus('guest')
       return
     }
     if (syncInFlightRef.current) return
 
+    if (!force && lastAttemptedFingerprintRef.current === fingerprint && (status === 'pending' || status === 'error')) {
+      return
+    }
+
     syncInFlightRef.current = true
+    lastAttemptedFingerprintRef.current = fingerprint
     setStatus('syncing')
     setError(null)
 
@@ -82,29 +102,25 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
 
       setLastResult(result)
       if (result.failed > 0) {
-        const nextPending = pendingCount + result.failed
-        setPendingCount(nextPending)
-        writePendingCount(nextPending)
+        const failedCount = Math.max(1, result.failed)
+        setPendingSafely(failedCount)
         setStatus('pending')
-        setError(`${result.failed} cloud write${result.failed === 1 ? '' : 's'} need retry.`)
+        setError(`${failedCount} cloud write${failedCount === 1 ? '' : 's'} need retry.`)
       } else {
         const syncedAt = result.lastSyncedAt ?? new Date().toISOString()
-        setPendingCount(0)
-        writePendingCount(0)
+        setPendingSafely(0)
         setLastSyncedAt(syncedAt)
         writeLastSyncedAt(syncedAt)
         setStatus('synced')
       }
     } catch (err) {
-      const nextPending = pendingCount + 1
-      setPendingCount(nextPending)
-      writePendingCount(nextPending)
+      setPendingSafely(Math.max(1, pendingCount))
       setStatus('error')
       setError(err instanceof Error ? err.message : 'Cloud sync failed. Local data is still saved.')
     } finally {
       syncInFlightRef.current = false
     }
-  }, [auth.user, canSync, data, pendingCount])
+  }, [auth.user, canSync, data, fingerprint, pendingCount, setPendingSafely, status])
 
   useEffect(() => {
     if (!canSync) {
@@ -118,13 +134,17 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
 
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
     syncTimerRef.current = setTimeout(() => {
-      void runSyncNow()
+      void runSyncNow(false)
     }, 1500)
 
     return () => {
       if (syncTimerRef.current) clearTimeout(syncTimerRef.current)
     }
-  }, [autoSyncEnabled, canSync, fingerprint, pendingCount, runSyncNow])
+  }, [autoSyncEnabled, canSync, fingerprint, runSyncNow])
+
+  const retryNow = useCallback(() => {
+    void runSyncNow(true)
+  }, [runSyncNow])
 
   return {
     status,
@@ -135,6 +155,6 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
     canSync,
     autoSyncEnabled,
     setAutoSyncEnabled,
-    retryNow: runSyncNow,
+    retryNow,
   }
 }
