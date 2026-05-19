@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, SavedScenarioSet, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule, ImportBatch, ImportPreset } from './types'
+import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule, ImportBatch, ImportPreset } from './types'
 
 import { currency, labelPeriod } from './utils/formatting'
 import {
   BASE_SALARY,
   HOURS_PER_WEEK,
   BUMP_THRESHOLDS,
-  scenarioDefaults,
   convertFromMonthly,
   convertToMonthly,
   remainingTierFromPeriodValue,
@@ -22,7 +21,6 @@ import {
   loadPeriod,
   loadCategories,
   loadSavedBudgets,
-  loadSavedScenarios,
   loadTargets,
   loadSavedTargetSets,
   loadAccounts,
@@ -32,7 +30,6 @@ import {
   savePeriod,
   saveCategories,
   saveSavedBudgets,
-  saveSavedScenarios,
   saveTargets,
   saveSavedTargetSets,
   saveAccounts,
@@ -43,8 +40,6 @@ import {
 import {
   loadBudgetActuals,
   saveBudgetActuals,
-  loadScenarioNotes,
-  saveScenarioNotes,
   loadReviewMonth,
   saveReviewMonth,
   loadMonthlyNotes,
@@ -68,11 +63,7 @@ import {
   computeNetWorth, computeBalanceCheckData, computeReconciliationData,
 } from './utils/accountMath'
 import type { BalanceCheckEntry, ReconciliationEntry } from './utils/accountMath'
-import {
-  cadenceMult,
-  projectManualItems, projectRecurringCandidates,
-} from './utils/forecastMath'
-import type { RecurringCadence, ManualRecurringItem, ForecastLineItem } from './utils/forecastMath'
+import type { RecurringCadence, ManualRecurringItem } from './utils/forecastMath'
 // V10.3 — extracted UI components and helpers
 import { Card, Pill, Metric, Info, ActionCard, Row } from './components/ui'
 import { txNeedsReview } from './utils/transactionHelpers'
@@ -107,6 +98,8 @@ import {
 import { hasDuplicateTransaction } from './utils/duplicateDetection'
 import { GoalPlanningSummary } from './components/GoalPlanningSummary'
 import { GoalCard } from './components/GoalCard'
+import { useScenarios } from './hooks/useScenarios'
+import { useForecast } from './hooks/useForecast'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -205,9 +198,7 @@ function parsePdfText(raw: string): { rows: PdfImportRow[]; warning: string } {
 }
 
 // ── V9.7 Recurring detection ──────────────────────────────────────────────────
-// RecurringCadence, ManualRecurringItem, ForecastLineItem types imported from forecastMath.ts
-// ForecastItem alias for backward compatibility within this file
-type ForecastItem = ForecastLineItem
+// RecurringCadence and ManualRecurringItem types imported from forecastMath.ts
 
 // ── V9.5 Review classification ────────────────────────────────────────────────
 // txNeedsReview and txConfidence imported from utils/transactionHelpers
@@ -326,22 +317,31 @@ export default function App() {
   const [period, setPeriod] = useState<Period>('weekly')
   const [gpInput, setGpInput] = useState('0')
   const [categories, setCategories] = useState<Category[]>([])
-  const [scenario, setScenario] = useState<Record<ScenarioName, number>>(scenarioDefaults)
   const [savedBudgets, setSavedBudgets] = useState<SavedBudget[]>([])
-  const [savedScenarios, setSavedScenarios] = useState<SavedScenarioSet[]>([])
 
   // ══════════════════════════════════════════════════════════════════════════════
-  // V10 ARCHITECTURE — SCENARIO ENGINE
-  // Scenarios: what-if salary/expense adjustments on top of base income model
-  // savedScenarios[], activeScenario → scenario income/budget overlay
-  // V9.13 expansion: additional scenario parameters
+  // V11.3 — Scenario state/workflows extracted to useScenarios()
   // ══════════════════════════════════════════════════════════════════════════════
-  // V9.13 — Scenario engine expansion
-  const [scenarioNotes, setScenarioNotes] = useState<Record<string, string>>({}) // keyed by savedScenario name
-  const [editingScenarioName, setEditingScenarioName] = useState<string | null>(null)
-  const [renameScenarioValue, setRenameScenarioValue] = useState('')
-  const [scenarioStressMode, setScenarioStressMode] = useState<'none' | 'commission-25' | 'commission-50' | 'extra-expense' | 'higher-bills'>('none')
-  const [showStressTest, setShowStressTest] = useState(false)
+  const {
+    scenario,
+    setScenario,
+    savedScenarios,
+    setSavedScenarios,
+    scenarioNotes,
+    setScenarioNotes,
+    editingScenarioName,
+    setEditingScenarioName,
+    renameScenarioValue,
+    setRenameScenarioValue,
+    scenarioStressMode,
+    setScenarioStressMode,
+    showStressTest,
+    setShowStressTest,
+    scenarioTitle,
+    setScenarioTitle,
+    saveScenarioSet,
+    renameScenarioSet,
+  } = useScenarios()
   const [targets, setTargets] = useState<Target[]>([])
   const [savedTargetSets, setSavedTargetSets] = useState<SavedTargetSet[]>([])
   const [targetSetName, setTargetSetName] = useState('')
@@ -352,7 +352,6 @@ export default function App() {
   const [dashboardQuickAmount, setDashboardQuickAmount] = useState('')
   const [baseBumpsAchieved, setBaseBumpsAchieved] = useState(0)
   const [budgetTitle, setBudgetTitle] = useState('')
-  const [scenarioTitle, setScenarioTitle] = useState('')
   const [changeSummary, setChangeSummary] = useState<string[]>([])
   const [editId, setEditId] = useState<string | null>(null)
   const [sIndex, setSIndex] = useState(-1)
@@ -660,8 +659,6 @@ export default function App() {
   const [recurringForm, setRecurringForm]               = useState<{
     name: string; amount: string; cadence: RecurringCadence; nextDueDate: string; type: 'expense' | 'income'
   }>({ name: '', amount: '', cadence: 'monthly', nextDueDate: new Date().toISOString().slice(0, 10), type: 'expense' })
-  // V9.8 — Cash Flow Forecast period in days
-  const [forecastPeriod, setForecastPeriod]             = useState<7 | 14 | 30 | 60>(30)
   // V9.9 — Monthly Review
   const [reviewMonth, setReviewMonth]     = useState(loadReviewMonth)
   const [monthlyNotes, setMonthlyNotes]   = useState<Record<string, string>>(loadMonthlyNotes)
@@ -789,8 +786,6 @@ export default function App() {
     const savedPeriod = loadPeriod(); if (savedPeriod) setPeriod(savedPeriod)
     const c = loadCategories(); if (c) setCategories(c)
     const b = loadSavedBudgets(); if (b) setSavedBudgets(b)
-    const s = loadSavedScenarios(); if (s) setSavedScenarios(s)
-    setScenarioNotes(loadScenarioNotes())
     const t = loadTargets(); if (t) setTargets(t)
     const ts = loadSavedTargetSets(); if (ts) setSavedTargetSets(ts)
     const ac = loadAccounts(); if (ac) setAccounts(ac)
@@ -801,11 +796,6 @@ export default function App() {
   useEffect(() => savePeriod(period), [period])
   useEffect(() => saveCategories(categories), [categories])
   useEffect(() => saveSavedBudgets(savedBudgets), [savedBudgets])
-  useEffect(() => saveSavedScenarios(savedScenarios), [savedScenarios])
-  // V9.13 — persist scenario notes
-  useEffect(() => {
-    saveScenarioNotes(scenarioNotes)
-  }, [scenarioNotes])
   useEffect(() => saveTargets(targets), [targets])
   useEffect(() => saveSavedTargetSets(savedTargetSets), [savedTargetSets])
   useEffect(() => saveAccounts(accounts), [accounts])
@@ -1088,48 +1078,19 @@ export default function App() {
     () => detectRecurringPatterns(transactions).filter(c => !dismissedRecurring.has(c.merchantKey)),
     [transactions, dismissedRecurring]
   )
-  // cadenceMult imported from utils/forecastMath
-  const manualMonthlyExpenses = manualRecurringItems
-    .filter(i => i.type === 'expense')
-    .reduce((s, i) => s + i.amount * cadenceMult(i.cadence), 0)
-  const estimatedMonthlyRecurring = recurringCandidates
-    .filter(c => c.confidence === 'high' || confirmedRecurring.has(c.merchantKey))
-    .reduce((s, c) => s + c.estimatedMonthlyAmount, 0) + manualMonthlyExpenses
-
-  // V9.8 — Cash Flow Forecast (projection helpers extracted to utils/forecastMath)
-  const cashFlowForecast = useMemo(() => {
-    const today    = new Date()
-    const todayStr = today.toISOString().slice(0, 10)
-    const end      = new Date(today.getTime() + forecastPeriod * 86_400_000)
-    const endStr   = end.toISOString().slice(0, 10)
-    const startingCash = netWorthSummary.totalCash
-
-    // Project recurring items using extracted pure helpers
-    const confirmedCandidates = recurringCandidates.filter(
-      rc => rc.confidence === 'high' || confirmedRecurring.has(rc.merchantKey)
-    )
-    const items: ForecastItem[] = [
-      ...projectManualItems(manualRecurringItems, todayStr, end),
-      ...projectRecurringCandidates(confirmedCandidates, todayStr, end),
-    ].sort((a, b) => a.date.localeCompare(b.date))
-
-    // Inject income-tab take-home estimate when no manual income items exist
-    const hasManualIncome    = manualRecurringItems.some(i => i.type === 'income')
-    const hasDetectedIncome  = confirmedCandidates.length > 0
-    if (!hasManualIncome && !hasDetectedIncome && inc.totalMonthly > 0) {
-      const estimatedIncome = inc.totalMonthly * (forecastPeriod / 30)
-      const daysLabel = forecastPeriod === 7 ? '~1 week' : forecastPeriod === 14 ? '~2 weeks' : forecastPeriod === 30 ? '~1 month' : '~2 months'
-      items.unshift({ date: todayStr, name: `Est. take-home (${daysLabel})`, amount: Math.round(estimatedIncome * 100) / 100, type: 'income', source: 'manual' })
-    }
-
-    const totalIncome   = items.filter(i => i.type === 'income').reduce((s, i) => s + i.amount, 0)
-    const totalExpenses = items.filter(i => i.type === 'expense').reduce((s, i) => s + i.amount, 0)
-    const projectedEnd  = startingCash + totalIncome - totalExpenses
-    const safeToSpend   = Math.max(0, projectedEnd - 250)
-    const status: 'comfortable' | 'tight' | 'risk' =
-      projectedEnd < 0 ? 'risk' : projectedEnd < 250 ? 'tight' : 'comfortable'
-    return { items, startingCash, totalIncome, totalExpenses, projectedEnd, safeToSpend, status, todayStr, endStr }
-  }, [forecastPeriod, netWorthSummary.totalCash, manualRecurringItems, recurringCandidates, confirmedRecurring, inc.totalMonthly])
+  // V11.3 — Forecast period state and cash-flow calculations extracted to useForecast().
+  const {
+    forecastPeriod,
+    setForecastPeriod,
+    estimatedMonthlyRecurring,
+    cashFlowForecast,
+  } = useForecast({
+    totalCash: netWorthSummary.totalCash,
+    manualRecurringItems,
+    recurringCandidates,
+    confirmedRecurring,
+    estimatedMonthlyIncome: inc.totalMonthly,
+  })
 
   // ══════════════════════════════════════════════════════════════════════════════
   // V10 ARCHITECTURE — MONTHLY REVIEW ENGINE
@@ -4337,15 +4298,9 @@ txnMerchantRef.current?.focus()
               {/* Save / Load */}
               <div className="grid md:grid-cols-3 gap-2 mt-3">
                 <input className="p-2 rounded bg-slate-800 border border-slate-600" placeholder="Scenario set name" value={scenarioTitle} onChange={e => setScenarioTitle(e.target.value)}
-                  onKeyDown={e => { if (e.key === 'Enter') { const n = scenarioTitle.trim(); if (!n) return; const ex = savedScenarios.find(x => x.name.toLowerCase() === n.toLowerCase()); if (ex && !window.confirm('Overwrite existing set?')) return; setSavedScenarios([{ name: n, scenarios: scenario, period: period, savedAt: new Date().toISOString() }, ...savedScenarios.filter(x => x.name.toLowerCase() !== n.toLowerCase())]); setScenarioTitle('') } }}
+                  onKeyDown={e => { if (e.key === 'Enter') saveScenarioSet(scenarioTitle, period) }}
                 />
-                <button className="rounded bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm transition-colors" onClick={() => {
-                  const n = scenarioTitle.trim(); if (!n) return
-                  const ex = savedScenarios.find(x => x.name.toLowerCase() === n.toLowerCase())
-                  if (ex && !window.confirm('Overwrite existing set?')) return
-                  setSavedScenarios([{ name: n, scenarios: scenario, period: period, savedAt: new Date().toISOString() }, ...savedScenarios.filter(x => x.name.toLowerCase() !== n.toLowerCase())])
-                  setScenarioTitle('')
-                }}>Save Scenario Set</button>
+                <button className="rounded bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm transition-colors" onClick={() => saveScenarioSet(scenarioTitle, period)}>Save Scenario Set</button>
                 <div className="text-xs text-slate-400 self-center">Saved locally · Enter to save</div>
               </div>
 
@@ -4364,12 +4319,7 @@ txnMerchantRef.current?.focus()
                               autoFocus
                               onKeyDown={e => {
                                 if (e.key === 'Enter') {
-                                  const nn = renameScenarioValue.trim()
-                                  if (nn && nn !== s.name) {
-                                    setSavedScenarios(prev => prev.map(x => x.name === s.name ? { ...x, name: nn, savedAt: new Date().toISOString() } : x))
-                                    setScenarioNotes(prev => { const n = { ...prev }; if (n[s.name]) { n[nn] = n[s.name]; delete n[s.name] } return n })
-                                  }
-                                  setEditingScenarioName(null)
+                                  renameScenarioSet(s.name, renameScenarioValue)
                                 }
                                 if (e.key === 'Escape') setEditingScenarioName(null)
                               }}
