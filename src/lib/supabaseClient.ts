@@ -1,41 +1,39 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+/**
+ * supabaseClient.ts — V12.2
+ *
+ * Safe Supabase client initialisation.
+ * - Never throws during module load.
+ * - Exports `supabase` (SupabaseClient | null) and `isSupabaseConfigured` (boolean).
+ * - If env vars are absent / invalid the app runs normally in guest/local mode.
+ */
 
-const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
-const rawSupabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+import { createClient } from '@supabase/supabase-js'
+import type { SupabaseClient } from '@supabase/supabase-js'
 
-const supabaseUrl = rawSupabaseUrl?.trim()
-const supabaseAnonKey = rawSupabaseAnonKey?.trim()
-
-const hasRealSupabaseUrl = Boolean(
-  supabaseUrl &&
-  supabaseUrl.startsWith('https://') &&
-  supabaseUrl.includes('.supabase.co') &&
-  !supabaseUrl.includes('your-project-id')
-)
-
-const hasRealSupabaseKey = Boolean(
-  supabaseAnonKey &&
-  supabaseAnonKey.length > 20 &&
-  !supabaseAnonKey.includes('your-anon') &&
-  !supabaseAnonKey.includes('your-publishable')
-)
-
-export const isSupabaseConfigured = hasRealSupabaseUrl && hasRealSupabaseKey
-
-const createSupabaseClient = (): SupabaseClient | null => {
-  if (!isSupabaseConfigured || !supabaseUrl || !supabaseAnonKey) return null
-
+function initSupabase(): { client: SupabaseClient | null; configured: boolean } {
   try {
-    return createClient(supabaseUrl, supabaseAnonKey, {
+    const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
+    const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+
+    if (!url || !key) return { client: null, configured: false }
+    if (typeof url !== 'string' || !url.startsWith('http')) return { client: null, configured: false }
+    if (typeof key !== 'string' || key.trim() === '') return { client: null, configured: false }
+
+    const client = createClient(url.trim(), key.trim(), {
       auth: {
-        persistSession: true,
         autoRefreshToken: true,
+        persistSession: true,
         detectSessionInUrl: true,
       },
     })
+
+    return { client, configured: true }
   } catch {
-    return null
+    return { client: null, configured: false }
   }
 }
 
-export const supabase: SupabaseClient | null = createSupabaseClient()
+const { client, configured } = initSupabase()
+
+export const supabase = client
+export const isSupabaseConfigured = configured
