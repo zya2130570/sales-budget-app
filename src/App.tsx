@@ -16,7 +16,6 @@ import {
 } from './utils/calculations'
 import type { DashboardStatus } from './utils/calculations'
 import {
-  loadTab,
   loadPeriod,
   loadCategories,
   loadSavedBudgets,
@@ -25,7 +24,6 @@ import {
   loadAccounts,
   loadTransactions,
   loadTransactionRules,
-  saveTab,
   savePeriod,
   saveCategories,
   saveSavedBudgets,
@@ -101,6 +99,8 @@ import { useScenarios } from './hooks/useScenarios'
 import { useForecast } from './hooks/useForecast'
 import { useImportPipeline } from './hooks/useImportPipeline'
 import { useDashboardMetrics } from './hooks/useDashboardMetrics'
+import { useToastSystem } from './hooks/useToastSystem'
+import { useUiState } from './hooks/useUiState'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -314,7 +314,19 @@ export default function App() {
   const startDateLeftArrowCount = useRef(0)
   const deadlineLeftArrowCount = useRef(0)
 
-  const [tab, setTab] = useState<Tab>('Dashboard')
+  const {
+    tab,
+    setTab,
+    showScrollTop,
+    fullyFundedOpen,
+    setFullyFundedOpen,
+    completedOpen,
+    setCompletedOpen,
+    showRecentlyDeleted,
+    setShowRecentlyDeleted,
+    reviewOpen,
+    setReviewOpen,
+  } = useUiState()
   const [period, setPeriod] = useState<Period>('weekly')
   const [gpInput, setGpInput] = useState('0')
   const [categories, setCategories] = useState<Category[]>([])
@@ -395,19 +407,20 @@ export default function App() {
   const [targetFormHistory, setTargetFormHistory] = useState<Array<{ name: string; goalAmount: string; currentSaved: string; startDate: string; deadline: string }>>([])
   const [targetFormRedo, setTargetFormRedo] = useState<Array<{ name: string; goalAmount: string; currentSaved: string; startDate: string; deadline: string }>>([])
 
-  // Collapsible sections for Fully Funded and Completed
-  const [fullyFundedOpen, setFullyFundedOpen] = useState(true)
-  const [completedOpen, setCompletedOpen] = useState(true)
-
   // Track which targets have already been shown the deadline-passed popup
   const [deadlinePassedPrompted, setDeadlinePassedPrompted] = useState<Set<string>>(new Set())
 
   // Track which goal cards have expanded details visible
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set())
 
-  // Toast notification state — optional onUndo for undoable clear/reset actions
-  const [toast, setToast] = useState<{ message: string; visible: boolean; onUndo?: () => void } | null>(null)
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // V11.5 — Toast notification state/helpers extracted to useToastSystem()
+  const {
+    toast,
+    showToast,
+    showUndoableToast,
+    dismissToast,
+    runToastUndo,
+  } = useToastSystem()
 
   // Highlighted budget category (after Add to Current Budget)
   const [highlightedCategoryId, setHighlightedCategoryId] = useState<string | null>(null)
@@ -430,17 +443,6 @@ export default function App() {
   // V7.7.1: Parallel undo/redo stacks for actuals (mirrors budget history timing)
   const [, setActualsHistory] = useState<Array<Record<string, string>>>([])
   const [, setActualsRedo] = useState<Array<Record<string, string>>>([])
-
-  const showToast = (message: string) => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-    setToast({ message, visible: true })
-    toastTimerRef.current = setTimeout(() => setToast(null), 5000)
-  }
-  const showUndoableToast = (message: string, onUndo: () => void) => {
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-    setToast({ message, visible: true, onUndo })
-    toastTimerRef.current = setTimeout(() => setToast(null), 5000)
-  }
 
   // Refs for edit-mode fields inside target cards
   const editCurrentSavedRef = useRef<HTMLInputElement>(null)
@@ -634,10 +636,6 @@ export default function App() {
 
   // V9.14 — Soft-delete: recently deleted transactions (recoverable within session)
   const [deletedTxns, setDeletedTxns]               = useState<Transaction[]>([])
-  const [showRecentlyDeleted, setShowRecentlyDeleted] = useState(false)
-  // V9.5 — Review Center open/collapsed
-  const [reviewOpen, setReviewOpen]                 = useState(true)
-
   // Soft-delete helper: moves transaction to deletedTxns instead of permanent removal
   const softDeleteTxn = (txId: string) => {
     const tx = transactions.find(t => t.id === txId)
@@ -686,9 +684,6 @@ export default function App() {
   const lastReviewSelectIdxRef = useRef<number>(-1)
   // V9.7.1 — Collapsible main transaction list
   const [txnListOpen, setTxnListOpen]             = useState(true)
-
-  // V9.0.1 — Back to top
-  const [showScrollTop, setShowScrollTop] = useState(false)
 
   // V8.6.3 — Uncategorized glow: suppressed once the user clicks the pill; re-arms on new items
   const uncategorizedGlowSeenRef  = useRef(false)
@@ -797,7 +792,6 @@ export default function App() {
   // localStorage
   useEffect(() => {
     runMigrations()
-    const savedTab = loadTab(); if (savedTab) setTab(savedTab)
     const savedPeriod = loadPeriod(); if (savedPeriod) setPeriod(savedPeriod)
     const c = loadCategories(); if (c) setCategories(c)
     const b = loadSavedBudgets(); if (b) setSavedBudgets(b)
@@ -807,7 +801,6 @@ export default function App() {
     const tx = loadTransactions(); if (tx) setTransactions(tx)
     const rl = loadTransactionRules(); if (rl) setRules(rl)
   }, [])
-  useEffect(() => saveTab(tab), [tab])
   useEffect(() => savePeriod(period), [period])
   useEffect(() => saveCategories(categories), [categories])
   useEffect(() => saveSavedBudgets(savedBudgets), [savedBudgets])
@@ -822,13 +815,6 @@ export default function App() {
   useEffect(() => saveReviewMonth(reviewMonth), [reviewMonth])
   useEffect(() => saveMonthlyNotes(monthlyNotes), [monthlyNotes])
   useEffect(() => saveReviewedMonths(reviewedMonths), [reviewedMonths])
-
-  // V9.0.1 — Back-to-top: show button once user scrolls down 400px
-  useEffect(() => {
-    const onScroll = () => setShowScrollTop(window.scrollY > 400)
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
-  }, [])
 
   // V8.7 — auto-select the only account in the transaction form
   useEffect(() => {
@@ -4879,7 +4865,7 @@ txnMerchantRef.current?.focus()
         <div
           className="fixed top-5 left-5 z-50 flex items-center gap-3 rounded-xl border border-amber-600/60 bg-amber-950/90 px-4 py-3 shadow-2xl text-sm text-amber-100 transition-all duration-300 cursor-pointer max-w-sm"
           style={{ opacity: toast.visible ? 1 : 0 }}
-          onClick={() => { if (toastTimerRef.current) clearTimeout(toastTimerRef.current); setToast(null) }}
+          onClick={dismissToast}
         >
           <span className="flex-1">{toast.message}</span>
           {toast.onUndo && (
@@ -4887,9 +4873,7 @@ txnMerchantRef.current?.focus()
               className="ml-1 rounded bg-amber-700 hover:bg-amber-600 px-2 py-0.5 text-xs font-semibold transition-colors shrink-0"
               onClick={e => {
                 e.stopPropagation()
-                if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
-                toast.onUndo?.()
-                setToast(null)
+                runToastUndo()
               }}
             >
               Undo
