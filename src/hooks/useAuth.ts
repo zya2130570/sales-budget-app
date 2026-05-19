@@ -1,35 +1,50 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { User } from '@supabase/supabase-js'
+import { useEffect, useState } from 'react'
+import type { Session, User } from '@supabase/supabase-js'
 import { isSupabaseConfigured, supabase } from '../lib/supabaseClient'
 
-export type AuthMode = 'guest' | 'authenticated'
-export type AuthStatus = 'checking' | 'guest' | 'authenticated'
+type AuthStatus = 'guest' | 'loading' | 'signed-in' | 'signed-out' | 'error'
 
 export function useAuth() {
+  const [session, setSession] = useState<Session | null>(null)
   const [user, setUser] = useState<User | null>(null)
-  const [status, setStatus] = useState<AuthStatus>('checking')
-  const [authError, setAuthError] = useState('')
+  const [status, setStatus] = useState<AuthStatus>(isSupabaseConfigured ? 'loading' : 'guest')
+  const [error, setError] = useState('')
 
   useEffect(() => {
     if (!supabase) {
       setStatus('guest')
+      setSession(null)
+      setUser(null)
+      setError('')
       return
     }
 
     let mounted = true
 
-    supabase.auth.getSession().then(({ data, error }) => {
-      if (!mounted) return
-      if (error) setAuthError(error.message)
-      const sessionUser = data.session?.user ?? null
-      setUser(sessionUser)
-      setStatus(sessionUser ? 'authenticated' : 'guest')
-    })
+    supabase.auth.getSession()
+      .then(({ data, error: sessionError }) => {
+        if (!mounted) return
+        if (sessionError) {
+          setError(sessionError.message)
+          setStatus('error')
+          return
+        }
+        setSession(data.session)
+        setUser(data.session?.user ?? null)
+        setStatus(data.session ? 'signed-in' : 'signed-out')
+      })
+      .catch(err => {
+        if (!mounted) return
+        setError(err instanceof Error ? err.message : 'Unable to load auth session')
+        setStatus('error')
+      })
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      const sessionUser = session?.user ?? null
-      setUser(sessionUser)
-      setStatus(sessionUser ? 'authenticated' : 'guest')
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      if (!mounted) return
+      setSession(nextSession)
+      setUser(nextSession?.user ?? null)
+      setStatus(nextSession ? 'signed-in' : 'signed-out')
+      setError('')
     })
 
     return () => {
@@ -38,56 +53,55 @@ export function useAuth() {
     }
   }, [])
 
-  const signUp = useCallback(async (email: string, password: string) => {
-    setAuthError('')
+  const signUp = async (email: string, password: string) => {
     if (!supabase) {
-      setAuthError('Supabase is not configured yet. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
-      return false
+      setStatus('guest')
+      setError('Supabase is not configured yet.')
+      return { error: new Error('Supabase is not configured yet.') }
     }
 
-    const { error } = await supabase.auth.signUp({ email, password })
-    if (error) {
-      setAuthError(error.message)
-      return false
-    }
+    setError('')
+    const result = await supabase.auth.signUp({ email, password })
+    if (result.error) setError(result.error.message)
+    return result
+  }
 
-    return true
-  }, [])
-
-  const signIn = useCallback(async (email: string, password: string) => {
-    setAuthError('')
+  const signIn = async (email: string, password: string) => {
     if (!supabase) {
-      setAuthError('Supabase is not configured yet. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
-      return false
+      setStatus('guest')
+      setError('Supabase is not configured yet.')
+      return { error: new Error('Supabase is not configured yet.') }
     }
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) {
-      setAuthError(error.message)
-      return false
+    setError('')
+    const result = await supabase.auth.signInWithPassword({ email, password })
+    if (result.error) setError(result.error.message)
+    return result
+  }
+
+  const signOut = async () => {
+    if (!supabase) {
+      setStatus('guest')
+      setError('')
+      return { error: null }
     }
 
-    return true
-  }, [])
-
-  const signOut = useCallback(async () => {
-    setAuthError('')
-    if (!supabase) return
-    const { error } = await supabase.auth.signOut()
-    if (error) setAuthError(error.message)
-  }, [])
-
-  const clearAuthError = useCallback(() => setAuthError(''), [])
+    setError('')
+    const result = await supabase.auth.signOut()
+    if (result.error) setError(result.error.message)
+    return result
+  }
 
   return {
+    session,
     user,
     status,
-    authMode: (user ? 'authenticated' : 'guest') as AuthMode,
-    authError,
-    isSupabaseConfigured,
+    error,
+    isConfigured: isSupabaseConfigured,
+    isLoading: status === 'loading',
+    isSignedIn: status === 'signed-in',
     signUp,
     signIn,
     signOut,
-    clearAuthError,
   }
 }
