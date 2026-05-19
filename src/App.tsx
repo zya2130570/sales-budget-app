@@ -2280,16 +2280,19 @@ txnMerchantRef.current?.focus()
         </header>
 
         <CloudSyncPanel />
-        <CloudPersistenceStatus
-          status={cloudPersistence.status}
-          canSync={cloudPersistence.canSync}
-          autoSyncEnabled={cloudPersistence.autoSyncEnabled}
-          pendingCount={cloudPersistence.pendingCount}
-          lastSyncedAt={cloudPersistence.lastSyncedAt}
-          error={cloudPersistence.error}
-          onRetry={cloudPersistence.retryNow}
-          onToggleAutoSync={cloudPersistence.setAutoSyncEnabled}
-        />
+      <CloudPersistenceStatus
+  status={cloudPersistence.status}
+  canSync={cloudPersistence.canSync}
+  connectionTested={cloudPersistence.connectionTested}
+  connectionTestError={cloudPersistence.connectionTestError}
+  autoSyncEnabled={cloudPersistence.autoSyncEnabled}
+  pendingCount={cloudPersistence.pendingCount}
+  lastSyncedAt={cloudPersistence.lastSyncedAt}
+  error={cloudPersistence.error}
+  onTestConnection={cloudPersistence.runConnectionTest}
+  onSyncNow={cloudPersistence.syncNow}
+  onToggleAutoSync={cloudPersistence.setAutoSyncEnabled}
+/>
 
         {/* ── DASHBOARD ── */}
         {tab === 'Dashboard' && (
