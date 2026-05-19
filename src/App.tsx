@@ -101,6 +101,8 @@ import { useImportPipeline } from './hooks/useImportPipeline'
 import { useDashboardMetrics } from './hooks/useDashboardMetrics'
 import { useToastSystem } from './hooks/useToastSystem'
 import { useUiState } from './hooks/useUiState'
+import { useInlineEditTimer } from './hooks/useInlineEdit'
+import { useNeedsReview } from './hooks/useNeedsReview'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -327,6 +329,17 @@ export default function App() {
     reviewOpen,
     setReviewOpen,
   } = useUiState()
+  const {
+    selectedTxnIds,
+    setSelectedTxnIds,
+    bulkCategoryId,
+    setBulkCategoryId,
+    ruleSuggestion,
+    setRuleSuggestion,
+    lastReviewSelectIdxRef,
+    clearReviewSelection,
+  } = useNeedsReview()
+
   const [period, setPeriod] = useState<Period>('weekly')
   const [gpInput, setGpInput] = useState('0')
   const [categories, setCategories] = useState<Category[]>([])
@@ -453,7 +466,7 @@ export default function App() {
   const editStartDateLeftArrowCount = useRef(0)
   const editDeadlineLeftArrowCount = useRef(0)
   // Blur-save timer: delays save so focus moving between edit fields doesn't trigger premature save
-  const editBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { timerRef: editBlurTimerRef } = useInlineEditTimer()
 
   // Auto-clear timers for inline hint/warning messages
   const budgetHintTimerRef       = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -528,7 +541,7 @@ export default function App() {
   const inlineRuleTypeRef   = useRef<HTMLSelectElement>(null)
   const inlineRuleSaveRef   = useRef<HTMLButtonElement>(null)
   // V8.6.1 — Blur-save: timer lets focus move between inline fields without premature save
-  const inlineEditBlurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { timerRef: inlineEditBlurTimerRef, cancel: cancelInlineEditBlur, schedule: scheduleInlineEditBlurSave } = useInlineEditTimer()
 
   // Refs for Log Contribution fields per target card (keyed by target id)
   const logDateRefs = useRef<Record<string, HTMLInputElement | null>>({})
@@ -653,8 +666,6 @@ export default function App() {
   const permanentlyDeleteTxn = (txId: string) => {
     setDeletedTxns(prev => prev.filter(t => t.id !== txId))
   }
-  const [selectedTxnIds, setSelectedTxnIds]     = useState<Set<string>>(new Set())
-  const [bulkCategoryId, setBulkCategoryId]     = useState('')
   const [txnSearch, setTxnSearch]               = useState('')
   const [txnAccountFilter, setTxnAccountFilter] = useState('')
   const [txnCategoryFilter, setTxnCategoryFilter] = useState('')
@@ -676,12 +687,6 @@ export default function App() {
   const [reviewMonth, setReviewMonth]     = useState(loadReviewMonth)
   const [monthlyNotes, setMonthlyNotes]   = useState<Record<string, string>>(loadMonthlyNotes)
   const [reviewedMonths, setReviewedMonths] = useState<Record<string, string>>(loadReviewedMonths)
-  // V9.7 — Rule suggestion after category assign from Review Center
-  const [ruleSuggestion, setRuleSuggestion]       = useState<{
-    merchants: string[]; categoryId: string; txIds: string[]
-  } | null>(null)
-  // V9.7 — Shift-click multi-select in Review Center
-  const lastReviewSelectIdxRef = useRef<number>(-1)
   // V9.7.1 — Collapsible main transaction list
   const [txnListOpen, setTxnListOpen]             = useState(true)
 
@@ -1151,8 +1156,7 @@ export default function App() {
       rules,
     )
     if (suggestion) setRuleSuggestion(suggestion)
-    setSelectedTxnIds(new Set())
-    setBulkCategoryId('')
+    clearReviewSelection()
     showToast(`Assigned category to ${selectedTxnIds.size} transaction${selectedTxnIds.size !== 1 ? 's' : ''}`)
   }
   // Re-arm the glow whenever the count grows above the previous watermark
@@ -4069,13 +4073,8 @@ txnMerchantRef.current?.focus()
                         const cat = categories.find(c => c.id === r.categoryId)
                         const isInlineEdit = inlineRuleEditId === r.id
                         if (isInlineEdit) {
-                          const blurSave = () => {
-                            if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
-                            inlineEditBlurTimerRef.current = setTimeout(saveInlineRuleEdit, 150)
-                          }
-                          const blurCancel = () => {
-                            if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
-                          }
+                          const blurSave = () => scheduleInlineEditBlurSave(saveInlineRuleEdit)
+                          const blurCancel = () => cancelInlineEditBlur()
                           return (
                             <tr key={r.id} className="border-b border-slate-700 bg-blue-950/20">
                               {/* Rule Name — normal text editing, no arrow nav override */}
