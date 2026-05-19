@@ -13,7 +13,6 @@ import {
   estimateTaxBreakdown,
   computeTargetStatus,
   requiredForTarget,
-  computeDashboardStatus,
 } from './utils/calculations'
 import type { DashboardStatus } from './utils/calculations'
 import {
@@ -100,6 +99,8 @@ import { GoalPlanningSummary } from './components/GoalPlanningSummary'
 import { GoalCard } from './components/GoalCard'
 import { useScenarios } from './hooks/useScenarios'
 import { useForecast } from './hooks/useForecast'
+import { useImportPipeline } from './hooks/useImportPipeline'
+import { useDashboardMetrics } from './hooks/useDashboardMetrics'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -579,27 +580,45 @@ export default function App() {
   const [accountHint, setAccountHint]         = useState('')
   const [txnHint, setTxnHint]                 = useState('')
 
-  // V9.0 — CSV import state
-  const [csvImportOpen, setCsvImportOpen]       = useState(false)
-  const [csvImportPreview, setCsvImportPreview] = useState<ImportPipelineResult | null>(null)
-  const [csvImportLoading, setCsvImportLoading] = useState(false)
-  const [csvImportError, setCsvImportError]     = useState('')
-  const csvFileInputRef                         = useRef<HTMLInputElement>(null)
+  // V11.4 — Import pipeline state/orchestration hook
+  const csvFileInputRef = useRef<HTMLInputElement>(null)
+  const {
+    csvImportOpen,
+    setCsvImportOpen,
+    csvImportPreview,
+    setCsvImportPreview,
+    csvImportLoading,
+    setCsvImportLoading,
+    csvImportError,
+    setCsvImportError,
+    csvImportAccountId,
+    setCsvImportAccountId,
+    csvImportMonth,
+    setCsvImportMonth,
+    csvIsAppleCard,
+    setCsvIsAppleCard,
+    csvCategoryHints,
+    setCsvCategoryHints,
+    importBatches,
+    setImportBatches,
+    csvShowHistory,
+    setCsvShowHistory,
+    csvImportPreset,
+    setCsvImportPreset,
+    csvColumnMapping,
+    setCsvColumnMapping,
+    batchToDelete,
+    setBatchToDelete,
+    csvImportIsPdf,
+    setCsvImportIsPdf,
+    pdfPreviewRows,
+    setPdfPreviewRows,
+    pdfParseWarning,
+    setPdfParseWarning,
+    resetImportPreview,
+    resetImportSession,
+  } = useImportPipeline()
 
-  // V9.6 — Account-aware CSV import upgrade
-  const [csvImportAccountId, setCsvImportAccountId]   = useState('')
-  const [csvImportMonth, setCsvImportMonth]           = useState(() => {
-    const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}`
-  })
-  const [csvIsAppleCard, setCsvIsAppleCard]           = useState(false)
-  const [csvCategoryHints, setCsvCategoryHints]       = useState<Record<string, string>>({})
-  const [importBatches, setImportBatches]             = useState<ImportBatch[]>([])
-  const [csvShowHistory, setCsvShowHistory]           = useState(false)
-  // V9.10 — Import preset and column mapping preview
-  const [csvImportPreset, setCsvImportPreset]         = useState<ImportPreset>('auto')
-  const [csvColumnMapping, setCsvColumnMapping]       = useState<Record<string, string> | null>(null)
-  // V9.10 — Batch deletion confirmation
-  const [batchToDelete, setBatchToDelete]             = useState<string | null>(null)
   // V9.11 — Budget evolution state
   const [categoryRollovers, setCategoryRollovers]     = useState<Record<string, boolean>>({})
   const [budgetFilter, setBudgetFilter]               = useState<'all' | 'over-budget' | 'no-activity'>('all')
@@ -612,10 +631,6 @@ export default function App() {
   const [pausedGoals, setPausedGoals]                 = useState<Set<string>>(new Set())
   // V9.12 — Delete filtered transactions confirmation
   const [deleteFilteredConfirm, setDeleteFilteredConfirm] = useState(false)
-  // V9.9 — PDF import state (parallel to CSV flow)
-  const [csvImportIsPdf, setCsvImportIsPdf]           = useState(false)
-  const [pdfPreviewRows, setPdfPreviewRows]           = useState<PdfImportRow[]>([])
-  const [pdfParseWarning, setPdfParseWarning]         = useState('')
 
   // V9.14 — Soft-delete: recently deleted transactions (recoverable within session)
   const [deletedTxns, setDeletedTxns]               = useState<Transaction[]>([])
@@ -1162,41 +1177,21 @@ export default function App() {
   // Glow is active when there are uncategorized expenses and the pill hasn't been clicked yet
   const showUncategorizedGlow = uncategorizedExpenseCount > 0 && !uncategorizedGlowSeenRef.current
 
-  const dashboardStatus: DashboardStatus = useMemo(() => {
-    const base = computeDashboardStatus({
-      totalMonthly: inc.totalMonthly,
-      monthlyBudget,
-      monthlyLeft,
-      savingsRate,
-      fixedRatio,
-      commissionPct: inc.commissionPct,
-      categories,
-      activeTargets,
-      period,
-      budgetHealthTier: !hasBudgetData ? 'No Data' : selectedPeriodRemaining < 0 ? 'Over Budget' : remainingTier.label,
-    })
-    // Fix hardcoded "/month" wording to match selected period
-    const periodWord = period === 'weekly' ? 'week' : period === 'bi-weekly' ? 'pay period' : period === 'yearly' ? 'year' : 'month'
-    const periodExplanation = monthlyLeft < 0 && base.explanation.includes('/month')
-      ? base.explanation
-          .replace(/\$[\d,]+(\.\d+)?\/month/, `${currency(Math.abs(convertFromMonthly(monthlyLeft, period)))}/${periodWord}`)
-      : base.explanation
-    // If actuals show meaningful overspend, surface it in the dashboard explanation
-    if (actualOverspendPct > 5 && base.tone !== 'danger') {
-      const severity: DashboardStatus['tone'] = actualOverspendPct > 20 ? 'risk' : 'warn'
-      const toneOrder: DashboardStatus['tone'][] = ['excellent', 'good', 'warn', 'risk', 'danger']
-      const baseIdx = toneOrder.indexOf(base.tone)
-      const sevIdx  = toneOrder.indexOf(severity)
-      return {
-        ...base,
-        explanation: periodExplanation,
-        tone: sevIdx > baseIdx ? severity : base.tone,
-        context: `Actuals are running ${actualOverspendPct.toFixed(0)}% over plan this period. ${base.context}`,
-      }
-    }
-    return { ...base, explanation: periodExplanation }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inc.totalMonthly, monthlyBudget, monthlyLeft, savingsRate, fixedRatio, inc.commissionPct, categories, activeTargets, period, hasBudgetData, selectedPeriodRemaining, remainingTier.label, actualOverspendPct])
+  const dashboardStatus = useDashboardMetrics({
+    totalMonthly: inc.totalMonthly,
+    monthlyBudget,
+    monthlyLeft,
+    savingsRate,
+    fixedRatio,
+    commissionPct: inc.commissionPct,
+    categories,
+    activeTargets,
+    period,
+    hasBudgetData,
+    selectedPeriodRemaining,
+    remainingTierLabel: remainingTier.label,
+    actualOverspendPct,
+  })
 
   const createSnapshot = (): BudgetSnapshot => ({ categories: categories.map((c) => ({ ...c })), form: { ...form }, editId })
 
@@ -1782,16 +1777,12 @@ txnMerchantRef.current?.focus()
   // ── V9.0 CSV Import handlers ──────────────────────────────────────────────────
 
   const openCsvImport = () => {
-    setCsvImportOpen(true); setCsvImportPreview(null); setCsvImportError('')
-    setCsvCategoryHints({}); setCsvIsAppleCard(false)
-    setCsvImportIsPdf(false); setPdfPreviewRows([]); setPdfParseWarning('')
-    setCsvColumnMapping(null)
+    setCsvImportOpen(true)
+    resetImportSession()
   }
   const closeCsvImport = () => {
-    setCsvImportOpen(false); setCsvImportPreview(null); setCsvImportError('')
-    setCsvCategoryHints({}); setCsvIsAppleCard(false)
-    setCsvImportIsPdf(false); setPdfPreviewRows([]); setPdfParseWarning('')
-    setCsvColumnMapping(null)
+    setCsvImportOpen(false)
+    resetImportSession()
   }
   const processCsvText = (text: string) => {
     setCsvImportLoading(true)
@@ -4862,7 +4853,7 @@ txnMerchantRef.current?.focus()
           onCommit={commitCsvImport}
           onCommitPdf={commitPdfImport}
           onCancel={closeCsvImport}
-          onResetPreview={() => { setCsvImportPreview(null); setCsvImportError(''); setCsvImportIsPdf(false); setPdfPreviewRows([]); setPdfParseWarning(''); setCsvColumnMapping(null) }}
+          onResetPreview={resetImportPreview}
           onDownloadSample={downloadSampleCsv}
           onUseSampleData={() => processCsvText(generateSampleCsvString())}
           fileInputRef={csvFileInputRef}
