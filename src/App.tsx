@@ -105,6 +105,7 @@ import { useInlineEditTimer } from './hooks/useInlineEdit'
 import { useNeedsReview } from './hooks/useNeedsReview'
 // V12.2 — Supabase auth foundation
 import { AuthPanel } from './components/AuthPanel'
+import { CloudSyncPanel } from './components/CloudSyncPanel'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -2264,6 +2265,8 @@ txnMerchantRef.current?.focus()
             <AuthPanel />
           </div>
         </header>
+
+        <CloudSyncPanel />
 
         {/* ── DASHBOARD ── */}
         {tab === 'Dashboard' && (
