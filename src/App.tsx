@@ -106,6 +106,8 @@ import { useNeedsReview } from './hooks/useNeedsReview'
 // V12.2 — Supabase auth foundation
 import { AuthPanel } from './components/AuthPanel'
 import { CloudSyncPanel } from './components/CloudSyncPanel'
+import { CloudPersistenceStatus } from './components/CloudPersistenceStatus'
+import { useCloudPersistence } from './hooks/useCloudPersistence'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -2239,6 +2241,17 @@ txnMerchantRef.current?.focus()
     }
   }
 
+  // V12.4 — Local-first cloud persistence. localStorage remains runtime source of truth.
+  const cloudPersistence = useCloudPersistence({
+    accounts,
+    categories,
+    transactions,
+    rules,
+    targets,
+    savedTargetSets,
+    savedScenarios,
+  })
+
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
 
   return (
@@ -2267,6 +2280,16 @@ txnMerchantRef.current?.focus()
         </header>
 
         <CloudSyncPanel />
+        <CloudPersistenceStatus
+          status={cloudPersistence.status}
+          canSync={cloudPersistence.canSync}
+          autoSyncEnabled={cloudPersistence.autoSyncEnabled}
+          pendingCount={cloudPersistence.pendingCount}
+          lastSyncedAt={cloudPersistence.lastSyncedAt}
+          error={cloudPersistence.error}
+          onRetry={cloudPersistence.retryNow}
+          onToggleAutoSync={cloudPersistence.setAutoSyncEnabled}
+        />
 
         {/* ── DASHBOARD ── */}
         {tab === 'Dashboard' && (
