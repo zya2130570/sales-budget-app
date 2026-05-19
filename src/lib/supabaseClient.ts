@@ -1,21 +1,41 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined
+const rawSupabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 
-export const isSupabaseConfigured = Boolean(
+const supabaseUrl = rawSupabaseUrl?.trim()
+const supabaseAnonKey = rawSupabaseAnonKey?.trim()
+
+const hasRealSupabaseUrl = Boolean(
   supabaseUrl &&
-  supabaseAnonKey &&
   supabaseUrl.startsWith('https://') &&
-  supabaseAnonKey.length > 20
+  supabaseUrl.includes('.supabase.co') &&
+  !supabaseUrl.includes('your-project-id')
 )
 
-export const supabase: SupabaseClient | null = isSupabaseConfigured
-  ? createClient(supabaseUrl as string, supabaseAnonKey as string, {
+const hasRealSupabaseKey = Boolean(
+  supabaseAnonKey &&
+  supabaseAnonKey.length > 20 &&
+  !supabaseAnonKey.includes('your-anon') &&
+  !supabaseAnonKey.includes('your-publishable')
+)
+
+export const isSupabaseConfigured = hasRealSupabaseUrl && hasRealSupabaseKey
+
+const createSupabaseClient = (): SupabaseClient | null => {
+  if (!isSupabaseConfigured || !supabaseUrl || !supabaseAnonKey) return null
+
+  try {
+    return createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
       },
     })
-  : null
+  } catch {
+    return null
+  }
+}
+
+export const supabase: SupabaseClient | null = createSupabaseClient()
