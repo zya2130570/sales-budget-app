@@ -103,6 +103,8 @@ import { useToastSystem } from './hooks/useToastSystem'
 import { useUiState } from './hooks/useUiState'
 import { useInlineEditTimer } from './hooks/useInlineEdit'
 import { useNeedsReview } from './hooks/useNeedsReview'
+import { useAuth } from './hooks/useAuth'
+import { AuthPanel } from './components/AuthPanel'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -434,6 +436,18 @@ export default function App() {
     dismissToast,
     runToastUndo,
   } = useToastSystem()
+
+  // V12.2 — Supabase auth foundation. Local app data still remains local-first.
+  const {
+    user: authUser,
+    status: authStatus,
+    authError,
+    isSupabaseConfigured,
+    signIn,
+    signUp,
+    signOut,
+    clearAuthError,
+  } = useAuth()
 
   // Highlighted budget category (after Add to Current Budget)
   const [highlightedCategoryId, setHighlightedCategoryId] = useState<string | null>(null)
@@ -2247,7 +2261,7 @@ txnMerchantRef.current?.focus()
             <h1 className="text-3xl font-bold tracking-tight">Flow</h1>
             <p className="text-slate-400">Personal Finance Dashboard</p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {(['Dashboard', 'Income', 'Budget', 'Accounts', 'Transactions', 'Scenarios', 'Targets'] as Tab[]).map(t => (
               <button
                 title={tabTips[t]}
@@ -2258,6 +2272,16 @@ txnMerchantRef.current?.focus()
                 {t === 'Targets' ? 'Savings Goals' : t}
               </button>
             ))}
+            <AuthPanel
+              user={authUser}
+              status={authStatus}
+              authError={authError}
+              isSupabaseConfigured={isSupabaseConfigured}
+              onSignIn={signIn}
+              onSignUp={signUp}
+              onSignOut={signOut}
+              onClearError={clearAuthError}
+            />
           </div>
         </header>
 
