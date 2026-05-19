@@ -304,6 +304,7 @@ const periods: Period[] = ['weekly', 'bi-weekly', 'monthly', 'yearly']
 
 export default function App() {
   const incomeRef = useRef<HTMLInputElement>(null)
+  const budgetCategoryTableRef = useRef<HTMLDivElement>(null)
   const budgetNameRef = useRef<HTMLInputElement>(null)
   const autocompleteWrapRef = useRef<HTMLDivElement>(null)
   const budgetAmountRef = useRef<HTMLInputElement>(null)
@@ -2730,15 +2731,15 @@ txnMerchantRef.current?.focus()
                     <div className="flex gap-1.5">
                       <button
                         className={`text-[10px] px-2 py-0.5 rounded transition-colors ${budgetFilter === 'all' ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
-                        onClick={() => setBudgetFilter('all')}
+                        onClick={() => { setBudgetFilter('all'); budgetCategoryTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
                       >All</button>
                       <button
                         className={`text-[10px] px-2 py-0.5 rounded transition-colors ${budgetFilter === 'over-budget' ? 'bg-red-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
-                        onClick={() => setBudgetFilter(v => v === 'over-budget' ? 'all' : 'over-budget')}
+                        onClick={() => { setBudgetFilter(v => v === 'over-budget' ? 'all' : 'over-budget'); budgetCategoryTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
                       >Over Budget {budgetHealth.overBudget.length > 0 && `(${budgetHealth.overBudget.length})`}</button>
                       <button
                         className={`text-[10px] px-2 py-0.5 rounded transition-colors ${budgetFilter === 'no-activity' ? 'bg-slate-500 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
-                        onClick={() => setBudgetFilter(v => v === 'no-activity' ? 'all' : 'no-activity')}
+                        onClick={() => { setBudgetFilter(v => v === 'no-activity' ? 'all' : 'no-activity'); budgetCategoryTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
                       >No Activity {budgetHealth.noActivity.length > 0 && `(${budgetHealth.noActivity.length})`}</button>
                     </div>
                   </div>
@@ -2863,7 +2864,7 @@ txnMerchantRef.current?.focus()
                 </div>
               </div>
             </Card>
-            <Card title="Budget Categories">
+            <div ref={budgetCategoryTableRef} className="scroll-mt-4"><Card title="Budget Categories">
               <div className="grid md:grid-cols-4 gap-2">
                 <div ref={autocompleteWrapRef} className="relative">
                   <input
@@ -3326,7 +3327,7 @@ txnMerchantRef.current?.focus()
                   })}
                 </tbody>
               </table>
-            </Card>
+            </Card></div>
           </section>
         )}
 
