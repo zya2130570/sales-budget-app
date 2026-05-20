@@ -14,7 +14,7 @@
  */
 
 export type CloudPersistenceStatusProps = {
-  status: 'guest' | 'idle' | 'testing' | 'ready' | 'syncing' | 'synced' | 'pending' | 'error'
+  status: 'guest' | 'idle' | 'testing' | 'ready' | 'syncing' | 'synced' | 'pending' | 'error' | 'conflicts'
   canSync: boolean
   connectionTested: boolean
   connectionTestError: string | null
@@ -32,6 +32,7 @@ function StatusDot({ status }: { status: CloudPersistenceStatusProps['status'] }
     status === 'synced' ? 'bg-emerald-400' :
     status === 'syncing' || status === 'testing' ? 'bg-blue-400 animate-pulse' :
     status === 'pending' ? 'bg-amber-400' :
+    status === 'conflicts' ? 'bg-purple-400 animate-pulse' :
     status === 'error' ? 'bg-red-400' :
     status === 'ready' ? 'bg-emerald-400/60' :
     'bg-slate-500'
@@ -62,6 +63,7 @@ export function CloudPersistenceStatus({
     status === 'syncing'  ? 'Syncing to cloud…' :
     status === 'synced'   ? 'Cloud synced' :
     status === 'pending'  ? 'Sync incomplete — some writes failed' :
+    status === 'conflicts'? 'Conflicts found — review required' :
     status === 'error'    ? 'Cloud error' :
     status === 'ready'    ? 'Connection verified — ready to sync' :
     'Cloud ready'
