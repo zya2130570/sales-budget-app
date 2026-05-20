@@ -1,20 +1,14 @@
 /**
- * useCloudPersistence.ts — V12.4C
+ * useCloudPersistence.ts — V12.5
  *
- * Safe, non-aggressive cloud persistence coordinator.
- *
- * Key guarantees:
- * - Auto-sync is OFF by default. User must explicitly enable it.
- * - Cloud writes never run automatically on page load or after login.
- * - A connection test MUST pass before any full sync is allowed.
- * - Failed syncs do NOT requeue or retry automatically.
- * - pendingCount reflects the last failure count only — it never accumulates
- *   across retries, so 25 failed records stays 25, not 50 or 75.
- * - localStorage is always the source of truth; cloud is secondary.
- * - Console is not spammed: sync is only attempted when explicitly triggered.
+ * Coordinator for local→cloud sync with:
+ * - Batch upsert (no more N+1)
+ * - Conflict detection and resolution
+ * - New entities: savedBudgets, actuals
+ * - Soft delete awareness (schema supports deleted_at; local delete propagation in V12.6)
  */
 import { useCallback, useMemo, useRef, useState } from 'react'
-import type { Account, Category, SavedScenarioSet, SavedTargetSet, Target, Transaction, TransactionRule } from '../types'
+import type { Account, Category, SavedBudget, SavedScenarioSet, SavedTargetSet, Target, Transaction, TransactionRule } from '../types'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from './useAuth'
 import {
@@ -22,17 +16,20 @@ import {
   testCloudConnection,
   type CloudConnectionTestResult,
   type CloudPersistSummary,
+  type ConflictRecord,
+  type ConflictResolutions,
 } from '../utils/cloudPersistence'
 
 export type CloudPersistenceStatus =
-  | 'guest'      // Supabase not configured or no user
-  | 'idle'       // Logged in, no test run yet
-  | 'testing'    // Connection test in progress
-  | 'ready'      // Test passed, sync available
-  | 'syncing'    // Full sync in progress
-  | 'synced'     // Last sync completed successfully
-  | 'pending'    // Last sync completed with failures
-  | 'error'      // Connection test failed or sync threw
+  | 'guest'       // not logged in / Supabase not configured
+  | 'idle'        // logged in, no test run yet
+  | 'testing'     // connection test in progress
+  | 'ready'       // test passed, sync available
+  | 'syncing'     // full sync in progress
+  | 'synced'      // last sync completed with no failures
+  | 'pending'     // last sync had write failures
+  | 'conflicts'   // sync paused — conflicts need user resolution
+  | 'error'       // connection test failed or sync threw
 
 export type UseCloudPersistenceArgs = {
   accounts: Account[]
@@ -42,76 +39,61 @@ export type UseCloudPersistenceArgs = {
   targets: Target[]
   savedTargetSets: SavedTargetSet[]
   savedScenarios: SavedScenarioSet[]
+  savedBudgets: SavedBudget[]
+  actuals: Record<string, string>
 }
 
 const LAST_SYNC_KEY = 'flow_cloud_last_sync_at'
-// NOTE: We intentionally removed QUEUE_KEY (flow_cloud_sync_pending).
-// Pending count is now held only in React state for the current session.
-// This prevents a stale "25 pending" counter from appearing on every page load.
 
 const readLastSyncedAt = (): string | null => {
   try { return localStorage.getItem(LAST_SYNC_KEY) } catch { return null }
 }
-
-const writeLastSyncedAt = (value: string) => {
-  try { localStorage.setItem(LAST_SYNC_KEY, value) } catch { /* ignore */ }
+const writeLastSyncedAt = (v: string) => {
+  try { localStorage.setItem(LAST_SYNC_KEY, v) } catch { /* ignore */ }
 }
 
 export function useCloudPersistence(data: UseCloudPersistenceArgs) {
   const auth = useAuth()
 
   const [status, setStatus] = useState<CloudPersistenceStatus>('guest')
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(() => readLastSyncedAt())
-  // pendingCount is session-only — NOT persisted to localStorage.
-  // It resets to 0 on each page load so stale failures don't accumulate.
-  const [pendingCount, setPendingCount] = useState(0)
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(readLastSyncedAt)
+  const [pendingCount, setPendingCount] = useState(0)   // session-only — not persisted
   const [lastResult, setLastResult] = useState<CloudPersistSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // connectionTested: true once the test passes in this session.
-  // Resets on page reload — intentional; we want a fresh test each session.
   const [connectionTested, setConnectionTested] = useState(false)
   const [connectionTestError, setConnectionTestError] = useState<string | null>(null)
-
-  // autoSyncEnabled is OFF by default.
-  // Auto-sync will only run if the user explicitly enables it AND connectionTested is true.
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
+
+  // Conflict state — pauses sync until user resolves each conflict
+  const [pendingConflicts, setPendingConflicts] = useState<ConflictRecord[]>([])
+  // Resolutions accumulate across sync runs so re-syncing doesn't re-ask for resolved items
+  const [conflictResolutions, setConflictResolutions] = useState<ConflictResolutions>({})
 
   const syncInFlightRef = useRef(false)
   const testInFlightRef = useRef(false)
 
   const canSync = Boolean(auth.isConfigured && auth.user && supabase)
 
-  /**
-   * Stable fingerprint of the current data snapshot.
-   * Only used by consumers who want to track whether data changed since
-   * the last sync. Not used to auto-trigger sync anymore.
-   */
   const fingerprint = useMemo(() => JSON.stringify({
-    accounts: data.accounts.map(item => [item.id, item.updatedAt, item.balance, item.name]),
-    categories: data.categories.map(item => [item.id, item.name, item.amount, item.type]),
-    transactions: data.transactions.map(item => [item.id, item.updatedAt, item.date, item.amount, item.categoryId]),
-    rules: data.rules.map(item => [item.id, item.updatedAt, item.matchText, item.categoryId]),
-    targets: data.targets.map(item => [item.id, item.updatedAt, item.currentSaved, item.goalAmount, item.contributions?.length ?? 0]),
-    savedTargetSets: data.savedTargetSets.map(item => [item.name, item.savedAt]),
-    savedScenarios: data.savedScenarios.map(item => [item.name, item.savedAt]),
-  }), [data.accounts, data.categories, data.transactions, data.rules, data.targets, data.savedTargetSets, data.savedScenarios])
+    accounts:        data.accounts.map(i => [i.id, i.updatedAt, i.balance]),
+    categories:      data.categories.map(i => [i.id, i.updatedAt, i.amount]),
+    transactions:    data.transactions.map(i => [i.id, i.updatedAt, i.date, i.amount]),
+    rules:           data.rules.map(i => [i.id, i.updatedAt, i.matchText]),
+    targets:         data.targets.map(i => [i.id, i.updatedAt, i.currentSaved]),
+    savedTargetSets: data.savedTargetSets.map(i => [i.name, i.savedAt]),
+    savedScenarios:  data.savedScenarios.map(i => [i.name, i.savedAt]),
+    savedBudgets:    data.savedBudgets.map(i => [i.name, i.savedAt]),
+    actuals:         Object.keys(data.actuals).length,
+  }), [data])
 
-  /**
-   * Runs a tiny, read-only test against Supabase to verify connectivity
-   * and RLS permissions BEFORE any bulk sync is attempted.
-   *
-   * - Must succeed before runSyncNow is allowed.
-   * - Does NOT write data.
-   * - On failure, shows the exact error (e.g. 403 / RLS details).
-   */
+  // ─── Connection test ────────────────────────────────────────────────────────
+
   const runConnectionTest = useCallback(async (): Promise<CloudConnectionTestResult> => {
     if (!canSync || !auth.user || !supabase) {
       return { ok: false, error: 'Not logged in or Supabase not configured.' }
     }
-    if (testInFlightRef.current) {
-      return { ok: false, error: 'Test already in progress.' }
-    }
+    if (testInFlightRef.current) return { ok: false, error: 'Test already in progress.' }
 
     testInFlightRef.current = true
     setStatus('testing')
@@ -120,10 +102,8 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
 
     try {
       const result = await testCloudConnection(supabase, auth.user.id)
-
       if (result.ok) {
         setConnectionTested(true)
-        setConnectionTestError(null)
         setStatus('ready')
       } else {
         setConnectionTested(false)
@@ -131,36 +111,17 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
         setStatus('error')
         setError(result.error ?? 'Connection test failed.')
       }
-
       return result
     } finally {
       testInFlightRef.current = false
     }
   }, [auth.user, canSync])
 
-  /**
-   * Runs a full sync of all local data to Supabase.
-   *
-   * Guards:
-   * 1. canSync must be true (logged in + Supabase configured).
-   * 2. connectionTested must be true (test must have passed first).
-   * 3. Not already in-flight.
-   *
-   * On failure:
-   * - Sets pendingCount to the number of failed rows from this run.
-   * - Does NOT retry automatically.
-   * - Does NOT increment pendingCount on repeated manual retries
-   *   (it's replaced, not accumulated).
-   */
+  // ─── Full sync ─────────────────────────────────────────────────────────────
+
   const runSyncNow = useCallback(async () => {
-    if (!canSync || !auth.user || !supabase) {
-      setStatus('guest')
-      return
-    }
-    if (!connectionTested) {
-      setError('Run the connection test before syncing.')
-      return
-    }
+    if (!canSync || !auth.user || !supabase) { setStatus('guest'); return }
+    if (!connectionTested) { setError('Run the connection test before syncing.'); return }
     if (syncInFlightRef.current) return
 
     syncInFlightRef.current = true
@@ -172,16 +133,22 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
         supabase,
         userId: auth.user.id,
         ...data,
+        resolutions: conflictResolutions,
       })
 
       setLastResult(result)
 
+      // New conflicts found — pause sync and show modal
+      if (result.conflicts.length > 0) {
+        setPendingConflicts(result.conflicts)
+        setStatus('conflicts')
+        return
+      }
+
       if (result.failed > 0) {
-        // Replace pending count — do NOT add to existing count.
-        // This prevents "25 pending" becoming "50 pending" on retry.
         setPendingCount(result.failed)
         setStatus('pending')
-        setError(`${result.failed} cloud write${result.failed === 1 ? '' : 's'} failed. Local data is safe.`)
+        setError(`${result.failed} write${result.failed === 1 ? '' : 's'} failed. Local data is safe.`)
       } else {
         const syncedAt = result.lastSyncedAt ?? new Date().toISOString()
         setPendingCount(0)
@@ -191,55 +158,51 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
         setError(null)
       }
     } catch (err) {
-      // On a thrown error, set pending to 1 (something failed) but do NOT
-      // multiply it. If 25 rows were pending before, they're still 25 — we
-      // don't know the new count, so we leave it at the previous value or 1.
       setPendingCount(prev => Math.max(prev, 1))
       setStatus('error')
       setError(err instanceof Error ? err.message : 'Cloud sync failed. Local data is still safe.')
     } finally {
       syncInFlightRef.current = false
     }
-  }, [auth.user, canSync, connectionTested, data])
+  }, [auth.user, canSync, connectionTested, conflictResolutions, data])
+
+  // ─── Conflict resolution ───────────────────────────────────────────────────
 
   /**
-   * Toggles auto-sync. Setting it to true is only meaningful after
-   * connectionTested is true. If not yet tested, enabling auto-sync
-   * has no immediate effect — the user still needs to run the test.
-   *
-   * Auto-sync is intentionally not wired to a useEffect that fires on
-   * fingerprint changes. In V12.4C, "auto-sync" means the user
-   * has opted in, but sync is still only triggered by explicit user
-   * action (e.g. clicking "Sync now"). This prevents the 403 spam.
-   *
-   * If you want true auto-sync in a future version, add a useEffect
-   * here gated on `autoSyncEnabled && connectionTested`.
+   * Called by ConflictResolutionModal when the user has resolved all conflicts.
+   * Merges new resolutions, clears the pending list, and re-runs sync.
    */
+  const resolveConflicts = useCallback((resolutions: ConflictResolutions) => {
+    setConflictResolutions(prev => ({ ...prev, ...resolutions }))
+    setPendingConflicts([])
+    setStatus('ready')
+    // Re-run sync automatically after resolutions are applied
+    setTimeout(() => { void runSyncNow() }, 0)
+  }, [runSyncNow])
+
+  /**
+   * Cancel the conflict resolution — leaves sync in 'pending' state.
+   * The user can retry sync later; resolutions accumulated so far are kept.
+   */
+  const dismissConflicts = useCallback(() => {
+    setPendingConflicts([])
+    setStatus('pending')
+    setError('Sync paused — conflicts were not resolved. Retry sync to continue.')
+  }, [])
+
+  // ─── Auto-sync toggle ──────────────────────────────────────────────────────
+
   const handleSetAutoSyncEnabled = useCallback((enabled: boolean) => {
     setAutoSyncEnabled(enabled)
-    if (!enabled) {
-      // Transitioning off: reflect the pending count in status if needed
-      if (!connectionTested) {
-        setStatus(canSync ? 'idle' : 'guest')
-      }
-    }
+    if (!enabled && !connectionTested) setStatus(canSync ? 'idle' : 'guest')
   }, [canSync, connectionTested])
 
-  // Compute derived idle/guest status on auth changes without a side-effect loop
-  const derivedStatus: CloudPersistenceStatus = (() => {
-    if (!canSync) return 'guest'
-    // Only override to idle if no meaningful status is already set
-    if (status === 'guest') return 'idle'
-    return status
-  })()
+  // Derive guest/idle from canSync
+  if (!canSync && status !== 'guest') setStatus('guest')
+  else if (canSync && status === 'guest') setStatus('idle')
 
-  // Sync the status when canSync changes (e.g. user logs out)
-  // We use a ref to avoid adding setStatus to dependency arrays
-  if (!canSync && status !== 'guest') {
-    setStatus('guest')
-  } else if (canSync && status === 'guest') {
-    setStatus('idle')
-  }
+  const derivedStatus: CloudPersistenceStatus =
+    !canSync ? 'guest' : status === 'guest' ? 'idle' : status
 
   return {
     status: derivedStatus,
@@ -249,13 +212,15 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
     lastResult,
     lastSyncedAt,
     pendingCount,
+    pendingConflicts,
     canSync,
     autoSyncEnabled,
     fingerprint,
     setAutoSyncEnabled: handleSetAutoSyncEnabled,
     runConnectionTest,
-    /** @deprecated Use runConnectionTest first, then syncNow */
+    resolveConflicts,
+    dismissConflicts,
     retryNow: runSyncNow,
-    syncNow: runSyncNow,
+    syncNow:  runSyncNow,
   }
 }
