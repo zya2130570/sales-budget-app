@@ -1752,8 +1752,8 @@ txnMerchantRef.current?.focus()
       // ~15% chance to duplicate a previous entry in this batch (realistic scenario)
       const dupSrc = batch.length >= 2 && Math.random() < 0.15 ? batch[Math.floor(Math.random() * batch.length)] : null
       batch.push(dupSrc
-        ? { ...dupSrc, id: crypto.randomUUID(), createdAt: new Date().toISOString() }
-        : { id: crypto.randomUUID(), date, accountId, merchant, amount, type, categoryId, createdAt: new Date().toISOString() }
+        ? { ...dupSrc, id: crypto.randomUUID(), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+        : { id: crypto.randomUUID(), date, accountId, merchant, amount, type, categoryId, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
       )
     }
     const firstId = batch[0].id
@@ -1865,8 +1865,10 @@ txnMerchantRef.current?.focus()
       amount: r.amount,
       type: (PAYMENT_PATTERNS.test(r.merchant) ? 'credit card payment' : 'expense') as TransactionType,
       batchId,
+      importBatchId: batchId,
       importedCategoryHint: 'pdf',
       createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     }))
     setTxnWithHistory(prev => [...newTxns, ...prev])
     const acct = accounts.find(a => a.id === effectiveAccountId)
@@ -2254,6 +2256,7 @@ txnMerchantRef.current?.focus()
     savedScenarios,
     savedBudgets,
     actuals,
+    importBatches,
   })
 
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
