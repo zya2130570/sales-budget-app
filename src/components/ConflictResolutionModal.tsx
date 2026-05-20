@@ -8,7 +8,7 @@
  * After choosing, the parent calls onResolve() with the decisions,
  * which triggers a re-sync with the resolutions applied.
  */
-import { useState } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import type { ConflictRecord, ConflictResolution, ConflictResolutions } from '../utils/cloudPersistence'
 
 function formatTs(ts: string | null): string {
@@ -104,21 +104,48 @@ type Props = {
 }
 
 export function ConflictResolutionModal({ conflicts, onResolve, onDismiss }: Props) {
+  // Partition on mount: identical data → auto-resolve as 'local', real diffs → show to user
+  const { realConflicts, autoResolutions } = useMemo(() => {
+    const real: ConflictRecord[] = []
+    const auto: ConflictResolutions = {}
+    for (const c of conflicts) {
+      const identical = c.fields.every(f => f.localValue === f.cloudValue)
+      if (identical) {
+        auto[c.localId] = 'local'   // same data — keep local (safe upsert)
+      } else {
+        real.push(c)
+      }
+    }
+    return { realConflicts: real, autoResolutions: auto }
+  }, [conflicts])
+
   const [choices, setChoices] = useState<ConflictResolutions>({})
 
-  const allResolved = conflicts.every(c => choices[c.localId] !== undefined)
+  // If everything was auto-resolved (no real diffs), close immediately
+  useEffect(() => {
+    if (realConflicts.length === 0) {
+      onResolve(autoResolutions)
+    }
+  }, [realConflicts.length, autoResolutions, onResolve])
+
+  const allResolved = realConflicts.every(c => choices[c.localId] !== undefined)
   const resolvedCount = Object.keys(choices).length
 
   const pick = (localId: string, choice: ConflictResolution) =>
     setChoices(prev => ({ ...prev, [localId]: choice }))
 
   const pickAll = (choice: ConflictResolution) => {
-    const all = conflicts.reduce<ConflictResolutions>((map, c) => {
+    const all = realConflicts.reduce<ConflictResolutions>((map, c) => {
       map[c.localId] = choice
       return map
     }, {})
     setChoices(all)
   }
+
+  // Don't render anything if auto-resolving
+  if (realConflicts.length === 0) return null
+
+  const autoCount = Object.keys(autoResolutions).length
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
@@ -127,15 +154,17 @@ export function ConflictResolutionModal({ conflicts, onResolve, onDismiss }: Pro
         {/* Header */}
         <div className="p-5 border-b border-slate-700 flex-shrink-0">
           <h2 className="text-base font-semibold text-slate-100">
-            Sync conflict — {conflicts.length} record{conflicts.length === 1 ? '' : 's'} need review
+            Sync conflict — {realConflicts.length} record{realConflicts.length === 1 ? '' : 's'} need review
           </h2>
           <p className="text-xs text-slate-400 mt-1">
             The cloud has newer versions of these records. Choose which version to keep for each one.
-            {resolvedCount > 0 && resolvedCount < conflicts.length && (
-              <span className="text-blue-400"> {resolvedCount} of {conflicts.length} resolved.</span>
+            {autoCount > 0 && (
+              <span className="text-emerald-400"> {autoCount} identical record{autoCount === 1 ? '' : 's'} auto-resolved.</span>
+            )}
+            {resolvedCount > 0 && resolvedCount < realConflicts.length && (
+              <span className="text-blue-400"> {resolvedCount} of {realConflicts.length} resolved.</span>
             )}
           </p>
-          {/* Bulk actions */}
           <div className="flex gap-2 mt-3">
             <button onClick={() => pickAll('local')} className="text-[11px] px-2.5 py-1 rounded-lg bg-blue-900/40 hover:bg-blue-900/70 text-blue-300 transition-colors">
               Keep all local
@@ -148,7 +177,7 @@ export function ConflictResolutionModal({ conflicts, onResolve, onDismiss }: Pro
 
         {/* Conflict list */}
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {conflicts.map(c => (
+          {realConflicts.map(c => (
             <ConflictCard
               key={c.localId}
               conflict={c}
@@ -167,11 +196,11 @@ export function ConflictResolutionModal({ conflicts, onResolve, onDismiss }: Pro
             Cancel sync
           </button>
           <button
-            onClick={() => onResolve(choices)}
+            onClick={() => onResolve({ ...autoResolutions, ...choices })}
             disabled={!allResolved}
             className={`px-4 py-2 text-xs font-medium rounded-lg transition-colors ${allResolved ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}
           >
-            {allResolved ? 'Apply and finish sync' : `Resolve all ${conflicts.length - resolvedCount} remaining`}
+            {allResolved ? 'Apply and finish sync' : `Resolve all ${realConflicts.length - resolvedCount} remaining`}
           </button>
         </div>
       </div>
