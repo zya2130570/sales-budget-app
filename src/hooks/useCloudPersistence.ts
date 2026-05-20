@@ -8,7 +8,7 @@
  * - Soft delete awareness (schema supports deleted_at; local delete propagation in V12.6)
  */
 import { useCallback, useMemo, useRef, useState } from 'react'
-import type { Account, Category, SavedBudget, SavedScenarioSet, SavedTargetSet, Target, Transaction, TransactionRule } from '../types'
+import type { Account, Category, ImportBatch, SavedBudget, SavedScenarioSet, SavedTargetSet, Target, Transaction, TransactionRule } from '../types'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from './useAuth'
 import {
@@ -41,6 +41,7 @@ export type UseCloudPersistenceArgs = {
   savedScenarios: SavedScenarioSet[]
   savedBudgets: SavedBudget[]
   actuals: Record<string, string>
+  importBatches: ImportBatch[]
 }
 
 const LAST_SYNC_KEY = 'flow_cloud_last_sync_at'
@@ -84,6 +85,7 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
     savedTargetSets: data.savedTargetSets.map(i => [i.name, i.savedAt]),
     savedScenarios:  data.savedScenarios.map(i => [i.name, i.savedAt]),
     savedBudgets:    data.savedBudgets.map(i => [i.name, i.savedAt]),
+    importBatches:   data.importBatches.map(i => [i.id, i.importedAt, i.importedCount]),
     actuals:         Object.keys(data.actuals).length,
   }), [data])
 

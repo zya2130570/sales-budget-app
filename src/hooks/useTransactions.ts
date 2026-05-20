@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { ImportBatch, ImportPreset, Transaction, TransactionRule, TransactionType } from '../types'
 import { TXN_FILTER_OPTIONS } from '../utils/transactionHelpers'
-import { loadTransactions, loadTransactionRules, saveTransactions, saveTransactionRules, runMigrations } from '../utils/storage'
+import { loadTransactions, loadTransactionRules, loadImportBatches, saveTransactions, saveTransactionRules, saveImportBatches, runMigrations } from '../utils/storage'
 
 type TxnFilter = typeof TXN_FILTER_OPTIONS[number]['value']
 
@@ -81,10 +81,12 @@ export function useTransactions() {
     runMigrations()
     const tx = loadTransactions(); if (tx) setTransactions(tx)
     const rl = loadTransactionRules(); if (rl) setRules(rl)
+    const ib = loadImportBatches(); if (ib) setImportBatches(ib)
   }, [])
 
   useEffect(() => saveTransactions(transactions), [transactions])
   useEffect(() => saveTransactionRules(rules), [rules])
+  useEffect(() => saveImportBatches(importBatches), [importBatches])
 
   return {
     transactions,
