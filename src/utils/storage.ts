@@ -1,4 +1,4 @@
-import type { Tab, Period, Category, SavedBudget, SavedScenarioSet, Target, SavedTargetSet, Account, Transaction, TransactionRule, TakeHomeSettings } from '../types'
+import type { Tab, Period, Category, SavedBudget, SavedScenarioSet, Target, SavedTargetSet, Account, Transaction, TransactionRule, TakeHomeSettings, ImportBatch } from '../types'
 import { CURRENT_SCHEMA_VERSION } from '../types'
 import { STORAGE_KEYS } from './storageKeys'
 
@@ -234,6 +234,17 @@ export function runMigrations(): void {
         })))
       }
     }
+    // v4 — normalize batchId→importBatchId and backfill updatedAt on all transactions
+    if (currentVersion < 4) {
+      const transactions = loadFromStorage<Array<Record<string, unknown>> | null>(KEYS.transactions, null)
+      if (Array.isArray(transactions)) {
+        saveToStorage(KEYS.transactions, transactions.filter(isRecord).map(t => ({
+          ...t,
+          importBatchId: t['importBatchId'] ?? t['batchId'] ?? undefined,
+          updatedAt: t['updatedAt'] ?? t['createdAt'] ?? new Date().toISOString(),
+        })))
+      }
+    }
     saveRawToStorage(STORAGE_VERSION_KEY, String(STORAGE_VERSION))
   } catch {
     // Never block app startup because migration failed.
@@ -261,6 +272,7 @@ export function loadAccounts(): Account[] | null                 { return storag
 export function loadTransactions(): Transaction[] | null         { return storageGet<Transaction[]>(KEYS.transactions) }
 export function loadTransactionRules(): TransactionRule[] | null { return storageGet<TransactionRule[]>(KEYS.transactionRules) }
 export function loadTakeHomeSettings(): TakeHomeSettings | null  { return storageGet<TakeHomeSettings>(KEYS.takeHome) }
+export function loadImportBatches(): ImportBatch[] | null        { return storageGet<ImportBatch[]>(STORAGE_KEYS.importHistory) }
 
 export function saveTab(tab: Tab): void                         { saveRawToStorage(KEYS.tab, tab) }
 export function savePeriod(p: Period): void                     { saveRawToStorage(KEYS.period, p) }
@@ -273,3 +285,4 @@ export function saveAccounts(a: Account[]): void                { saveToStorage(
 export function saveTransactions(t: Transaction[]): void        { saveToStorage(KEYS.transactions, t) }
 export function saveTransactionRules(r: TransactionRule[]): void { saveToStorage(KEYS.transactionRules, r) }
 export function saveTakeHomeSettings(s: TakeHomeSettings): void { saveToStorage(KEYS.takeHome, s) }
+export function saveImportBatches(b: ImportBatch[]): void       { saveToStorage(STORAGE_KEYS.importHistory, b) }

@@ -16,6 +16,7 @@ import type {
   Account,
   Category,
   Contribution,
+  ImportBatch,
   SavedBudget,
   SavedScenarioSet,
   SavedTargetSet,
@@ -30,6 +31,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 export type CloudPersistEntity =
   | 'accounts'
   | 'categories'
+  | 'import_batches'
   | 'transactions'
   | 'transaction_rules'
   | 'savings_goals'
@@ -600,21 +602,116 @@ export async function persistBudgetActualsToCloud(
   return { entity, attempted: 1, synced, failed, skipped: 0 }
 }
 
-// ─── Transaction sync (V12.6) placeholder ─────────────────────────────────────
-// Transactions are intentionally excluded from V12.5.
-// Prerequisites: import_batches persistence (V12.6A), soft-delete tracking,
-// batchId→importBatchId migration, and verified FK resolution.
+// ─── Import batch sync ─────────────────────────────────────────────────────────
+
+export async function persistImportBatchesToCloud(
+  supabase: Client,
+  userId: string,
+  importBatches: ImportBatch[],
+): Promise<CloudPersistResult> {
+  const entity: CloudPersistEntity = 'import_batches'
+  if (!importBatches.length) return { entity, attempted: 0, synced: 0, failed: 0, skipped: 0 }
+
+  // Import batches are append-only — no conflict detection needed.
+  // Once a batch is created it never changes.
+  const rows: Row[] = importBatches.map(b => ({
+    user_id: userId,
+    local_id: b.id,
+    account_name: b.accountName,
+    import_month: b.importMonth,
+    imported_count: b.importedCount,
+    skipped_count: b.skippedCount,
+    skipped_duplicate_count: b.skippedDuplicateCount ?? 0,
+    failed_row_count: b.failedRowCount ?? 0,
+    import_source: b.importSource ?? b.source ?? 'csv',
+    preset: b.preset ?? 'auto',
+    imported_at: b.importedAt ?? b.createdAt ?? nowIso(),
+    created_at: b.createdAt ?? nowIso(),
+  }))
+
+  // Resolve account_id FK separately since accounts must be synced first
+  const accountIds = await resolveCloudIds(supabase, 'accounts', userId,
+    importBatches.map(b => b.accountId).filter(Boolean))
+  rows.forEach((row, i) => {
+    row.account_id = accountIds[importBatches[i].accountId] ?? null
+  })
+
+  const { synced, failed } = await batchUpsert(supabase, 'import_batches', rows)
+  return { entity, attempted: importBatches.length, synced, failed, skipped: 0 }
+}
+
+// ─── Transaction sync ──────────────────────────────────────────────────────────
 
 export async function persistTransactionsToCloud(
-  _supabase: Client,
-  _userId: string,
-  _transactions: Transaction[],
-  _resolutions: ConflictResolutions = {},
+  supabase: Client,
+  userId: string,
+  transactions: Transaction[],
+  resolutions: ConflictResolutions = {},
 ): Promise<{ result: CloudPersistResult; conflicts: ConflictRecord[] }> {
-  // V12.6 — not implemented yet
+  const entity: CloudPersistEntity = 'transactions'
+  if (!transactions.length) {
+    return { result: { entity, attempted: 0, synced: 0, failed: 0, skipped: 0 }, conflicts: [] }
+  }
+
+  const cloudTs = await fetchCloudTimestamps(supabase, 'transactions', userId)
+  const { safe, conflicted } = splitByConflict(transactions, cloudTs, resolutions)
+
+  // Resolve all FKs in three parallel batch selects
+  const [accountIds, categoryIds, batchIds] = await Promise.all([
+    resolveCloudIds(supabase, 'accounts', userId, [
+      ...safe.map(tx => tx.accountId),
+      ...safe.map(tx => tx.toAccountId ?? ''),
+    ]),
+    resolveCloudIds(supabase, 'categories', userId, safe.map(tx => tx.categoryId ?? '')),
+    resolveCloudIds(supabase, 'import_batches', userId, safe.map(tx => tx.importBatchId ?? tx.batchId ?? '')),
+  ])
+
+  const rows: Row[] = safe.map(tx => ({
+    user_id: userId,
+    local_id: tx.id,
+    account_id: accountIds[tx.accountId] ?? null,
+    to_account_id: tx.toAccountId ? (accountIds[tx.toAccountId] ?? null) : null,
+    category_id: tx.categoryId ? (categoryIds[tx.categoryId] ?? null) : null,
+    import_batch_id: (tx.importBatchId ?? tx.batchId)
+      ? (batchIds[tx.importBatchId ?? tx.batchId ?? ''] ?? null)
+      : null,
+    date: tx.date,
+    merchant: tx.merchant,
+    amount: safeNum(tx.amount),
+    type: tx.type,
+    notes: tx.notes ?? null,
+    source: tx.source ?? tx.importSource ?? 'manual',
+    review_status: tx.reviewStatus ?? null,
+    applied_by_rule: Boolean(tx.appliedByRule),
+    imported_category_hint: tx.importedCategoryHint ?? null,
+    created_at: tx.createdAt ?? nowIso(),
+    updated_at: tx.updatedAt ?? tx.createdAt ?? nowIso(),
+  }))
+
+  const { synced, failed } = await batchUpsert(supabase, 'transactions', rows)
+
+  const conflictRecords: ConflictRecord[] = await Promise.all(
+    conflicted.map(async tx => {
+      const cloud = await fetchCloudRow(supabase, 'transactions', userId, tx.id)
+      return {
+        entity,
+        localId: tx.id,
+        displayName: `${tx.merchant} — ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(tx.amount)}`,
+        localUpdatedAt: tx.updatedAt ?? null,
+        cloudUpdatedAt: cloudTs[tx.id] ?? null,
+        fields: [
+          { label: 'Date',     localValue: tx.date,                           cloudValue: String(cloud?.date ?? '—') },
+          { label: 'Merchant', localValue: tx.merchant,                       cloudValue: String(cloud?.merchant ?? '—') },
+          { label: 'Amount',   localValue: fmtCurrency(tx.amount),            cloudValue: fmtCurrency(cloud?.amount) },
+          { label: 'Type',     localValue: tx.type,                           cloudValue: String(cloud?.type ?? '—') },
+        ],
+      } satisfies ConflictRecord
+    }),
+  )
+
   return {
-    result: { entity: 'transactions', attempted: 0, synced: 0, failed: 0, skipped: 0, message: 'Transaction sync deferred to V12.6' },
-    conflicts: [],
+    result: { entity, attempted: transactions.length, synced, failed, skipped: conflicted.length },
+    conflicts: conflictRecords,
   }
 }
 
@@ -632,13 +729,14 @@ export async function persistCoreDataToCloud(params: {
   savedScenarios: SavedScenarioSet[]
   savedBudgets: SavedBudget[]
   actuals: Record<string, string>
+  importBatches: ImportBatch[]
   resolutions?: ConflictResolutions
 }): Promise<CloudPersistSummary> {
   const res = params.resolutions ?? {}
   const allConflicts: ConflictRecord[] = []
   const results: CloudPersistResult[] = []
 
-  // Parent entities first (FK targets)
+  // ── Stage 1: Parent entities (FK targets for transactions) ──
   const acct  = await persistAccountsToCloud(params.supabase, params.userId, params.accounts, res)
   results.push(acct.result); allConflicts.push(...acct.conflicts)
 
@@ -648,9 +746,15 @@ export async function persistCoreDataToCloud(params: {
   const goals = await persistSavingsGoalsToCloud(params.supabase, params.userId, params.targets, res)
   results.push(goals.result); allConflicts.push(...goals.conflicts)
 
-  // Child / linked entities
+  // Import batches must be synced before transactions (FK dependency)
+  results.push(await persistImportBatchesToCloud(params.supabase, params.userId, params.importBatches))
+
+  // ── Stage 2: Child/linked entities ──
   const rules = await persistTransactionRulesToCloud(params.supabase, params.userId, params.rules, res)
   results.push(rules.result); allConflicts.push(...rules.conflicts)
+
+  const txns  = await persistTransactionsToCloud(params.supabase, params.userId, params.transactions, res)
+  results.push(txns.result); allConflicts.push(...txns.conflicts)
 
   results.push(await persistSavingsGoalContributionsToCloud(params.supabase, params.userId, params.targets))
   results.push(await persistSavingsGoalSetsToCloud(params.supabase, params.userId, params.savedTargetSets))
