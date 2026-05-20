@@ -107,6 +107,7 @@ import { useNeedsReview } from './hooks/useNeedsReview'
 import { AuthPanel } from './components/AuthPanel'
 import { CloudSyncPanel } from './components/CloudSyncPanel'
 import { CloudPersistenceStatus } from './components/CloudPersistenceStatus'
+import { ConflictResolutionModal } from './components/ConflictResolutionModal'
 import { useCloudPersistence } from './hooks/useCloudPersistence'
 
 // Helper: true for transaction types that represent money movement between accounts
@@ -1705,7 +1706,7 @@ txnMerchantRef.current?.focus()
     const monthly = Math.max(5, tpl.monthly + jitter)
     const id = crypto.randomUUID()
     pushBudgetHistory()
-    setCategories(prev => [...prev, { id, name: tpl.name, amount: monthly, type: tpl.type }])
+    setCategories(prev => [...prev, { id, name: tpl.name, amount: monthly, type: tpl.type, updatedAt: new Date().toISOString() }])
     if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current)
     setHighlightedCategoryId(id)
     highlightTimerRef.current = setTimeout(() => setHighlightedCategoryId(null), 2500)
@@ -2011,13 +2012,13 @@ txnMerchantRef.current?.focus()
     setBudgetFormHint('')
     pushBudgetHistory()
     if (editId) {
-      setCategories(prev => prev.map(c => c.id === editId ? { ...c, name: n, amount: monthlyAmt, type: form.type } : c))
+      setCategories(prev => prev.map(c => c.id === editId ? { ...c, name: n, amount: monthlyAmt, type: form.type, updatedAt: new Date().toISOString() } : c))
       setEditId(null)
     } else {
       setCategories(prev => {
         const i = prev.findIndex(c => c.name.trim().toLowerCase() === n.toLowerCase() && c.type === form.type)
-        if (i >= 0) { const cp = [...prev]; cp[i] = { ...cp[i], amount: cp[i].amount + monthlyAmt }; return cp }
-        return [...prev, { id: crypto.randomUUID(), name: n, amount: monthlyAmt, type: form.type }]
+        if (i >= 0) { const cp = [...prev]; cp[i] = { ...cp[i], amount: cp[i].amount + monthlyAmt, updatedAt: new Date().toISOString() }; return cp }
+        return [...prev, { id: crypto.randomUUID(), name: n, amount: monthlyAmt, type: form.type, updatedAt: new Date().toISOString() }]
       })
     }
     setForm({ name: '', amount: '', type: 'fixed bill' })
@@ -2042,7 +2043,7 @@ txnMerchantRef.current?.focus()
     const actualStr = inlineCatEditForm.actual.replace(/[^0-9.-]/g, '')
     // Snapshot both budget and actuals together so undo restores both
     pushBudgetHistory({ ...actuals })
-    setCategories(prev => prev.map(c => c.id === inlineCatEditId ? { ...c, name: n, amount: monthlyAmt, type: inlineCatEditForm.type } : c))
+    setCategories(prev => prev.map(c => c.id === inlineCatEditId ? { ...c, name: n, amount: monthlyAmt, type: inlineCatEditForm.type, updatedAt: new Date().toISOString() } : c))
     setActuals(prev => ({ ...prev, [inlineCatEditId]: actualStr || '' }))
     setInlineCatEditId(null)
   }
@@ -2251,6 +2252,8 @@ txnMerchantRef.current?.focus()
     targets,
     savedTargetSets,
     savedScenarios,
+    savedBudgets,
+    actuals,
   })
 
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
@@ -2294,6 +2297,13 @@ txnMerchantRef.current?.focus()
   onSyncNow={cloudPersistence.syncNow}
   onToggleAutoSync={cloudPersistence.setAutoSyncEnabled}
 />
+      {cloudPersistence.pendingConflicts.length > 0 && (
+        <ConflictResolutionModal
+          conflicts={cloudPersistence.pendingConflicts}
+          onResolve={cloudPersistence.resolveConflicts}
+          onDismiss={cloudPersistence.dismissConflicts}
+        />
+      )}
 
         {/* ── DASHBOARD ── */}
         {tab === 'Dashboard' && (

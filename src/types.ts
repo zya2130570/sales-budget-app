@@ -3,29 +3,32 @@ export type Period = 'weekly' | 'bi-weekly' | 'monthly' | 'yearly'
 
 /**
  * Current local data schema version.
- * This is separate from UI versions and is used to keep localStorage migrations safe before cloud sync.
+ * v3 — adds updatedAt to Category.
  */
-export const CURRENT_SCHEMA_VERSION = 2
+export const CURRENT_SCHEMA_VERSION = 3
 
-/** Budget category persisted in v42-cats. Cloud-important: stable id, amount, and type. */
+/** Budget category persisted in v42-cats. Cloud-important: stable id, amount, type, and updatedAt. */
 export type CategoryType = 'fixed bill' | 'variable spending' | 'savings' | 'investing'
-export type Category = { id: string; name: string; amount: number; type: CategoryType }
+export type Category = {
+  id: string
+  name: string
+  amount: number
+  type: CategoryType
+  updatedAt?: string  // Added v3 — set on every create/edit
+}
 
-/** Saved budget snapshot persisted in v42-budgets. This stores copied categories, not live references. */
+/** Saved budget snapshot persisted in v42-budgets. */
 export type SavedBudget = { name: string; categories: Category[]; savedAt: string }
 export type BudgetSnapshot = { categories: Category[]; form: { name: string; amount: string; type: CategoryType }; editId: string | null }
 
-/** Scenario input model persisted in v42-scenarios. Values are gross profit assumptions by period. */
+/** Scenario input model persisted in v42-scenarios. */
 export type ScenarioName = 'Slow' | 'Medium' | 'Fast' | 'Custom'
 export type SavedScenarioSet = { name: string; scenarios: Record<ScenarioName, number>; period: Period; savedAt: string }
 
-/** Contribution attached to a savings goal. Cloud-important: stable id + date + amount. */
+/** Contribution attached to a savings goal. */
 export type Contribution = { id: string; date: string; amount: number; note: string }
 
-/**
- * Savings goal model persisted in v42-targets.
- * The app currently calls goals "targets" internally. Goal sets are snapshot copies of these objects.
- */
+/** Savings goal model persisted in v42-targets. */
 export type Target = {
   id: string
   name: string
@@ -41,10 +44,10 @@ export type Target = {
   paused?: boolean
 }
 
-/** Saved goal set persisted in v42-target-sets. Current behavior: snapshot copies of goals, not live references. */
+/** Saved goal set persisted in v42-target-sets. */
 export type SavedTargetSet = { name: string; targets: Target[]; savedAt: string }
 
-/** Account model persisted in v42-accounts. Cloud-important: balance and reconciliation metadata. */
+/** Account model persisted in v42-accounts. */
 export type AccountType = 'checking' | 'savings' | 'credit card' | 'investment' | 'cash' | 'roth ira' | 'retirement' | 'other'
 export type Account = {
   id: string
@@ -58,7 +61,7 @@ export type Account = {
   lastReconciledAt?: string
 }
 
-/** Transaction model persisted in v42-transactions. Cloud-important: account/category/import linkage. */
+/** Transaction model persisted in v42-transactions. */
 export type TransactionType = 'expense' | 'income' | 'transfer' | 'credit card payment'
 export type TransactionSource = 'manual' | 'csv' | 'pdf' | 'generated'
 export type TransactionReviewStatus = 'needs-review' | 'reviewed' | 'ignored'
@@ -73,9 +76,9 @@ export type Transaction = {
   notes?: string
   appliedByRule?: string
   toAccountId?: string
-  /** Legacy import batch field used by existing UI. Keep until a migration can fully replace it. */
+  /** Legacy import batch field. Keep until migration can fully replace it. */
   batchId?: string
-  /** Cloud-ready import batch field. Kept in sync with batchId during migrations/new imports where safe. */
+  /** Cloud-ready import batch field. Kept in sync with batchId. */
   importBatchId?: string
   source?: TransactionSource
   importSource?: TransactionSource
@@ -86,7 +89,7 @@ export type Transaction = {
   updatedAt?: string
 }
 
-/** Import batch record persisted in component state today and cloud-ready for future persistence. */
+/** Import batch record. */
 export type ImportPreset = 'auto' | 'apple-card' | 'generic-csv' | 'chase-pdf-experimental'
 export type ImportSource = 'csv' | 'pdf' | 'manual' | 'generated'
 export type ImportBatch = {
@@ -117,7 +120,7 @@ export type TransactionRule = {
   updatedAt?: string
 }
 
-/** Stable duplicate-resolution model for future persistence/cloud mapping. */
+/** Duplicate resolution model. */
 export type DuplicateResolutionStatus = 'unresolved' | 'kept-both' | 'deleted' | 'not-duplicate'
 export type DuplicateResolution = {
   id: string
@@ -127,7 +130,7 @@ export type DuplicateResolution = {
   resolvedAt?: string
 }
 
-/** Month-keyed monthly review model for future persistence/cloud mapping. */
+/** Monthly review model. */
 export type MonthlyReview = {
   month: string
   notes: string
