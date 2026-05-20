@@ -4,8 +4,9 @@ export type Period = 'weekly' | 'bi-weekly' | 'monthly' | 'yearly'
 /**
  * Current local data schema version.
  * v3 — adds updatedAt to Category.
+ * v4 — normalizes batchId→importBatchId and backfills updatedAt on all transactions.
  */
-export const CURRENT_SCHEMA_VERSION = 3
+export const CURRENT_SCHEMA_VERSION = 4
 
 /** Budget category persisted in v42-cats. Cloud-important: stable id, amount, type, and updatedAt. */
 export type CategoryType = 'fixed bill' | 'variable spending' | 'savings' | 'investing'
