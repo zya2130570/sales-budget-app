@@ -33,6 +33,7 @@ import {
   saveTransactions,
   saveTransactionRules,
   runMigrations,
+  downloadBackupFile,
 } from './utils/storage'
 import {
   loadBudgetActuals,
@@ -2296,9 +2297,11 @@ txnMerchantRef.current?.focus()
   pendingCount={cloudPersistence.pendingCount}
   lastSyncedAt={cloudPersistence.lastSyncedAt}
   error={cloudPersistence.error}
+  lastResult={cloudPersistence.lastResult}
   onTestConnection={cloudPersistence.runConnectionTest}
   onSyncNow={cloudPersistence.syncNow}
   onToggleAutoSync={cloudPersistence.setAutoSyncEnabled}
+  onDownloadBackup={downloadBackupFile}
 />
       {cloudPersistence.pendingConflicts.length > 0 && (
         <ConflictResolutionModal
