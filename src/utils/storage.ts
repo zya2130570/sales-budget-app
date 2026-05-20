@@ -223,6 +223,17 @@ export function runMigrations(): void {
         saveToStorage(STORAGE_KEYS.importHistory, importHistory.filter(isRecord).map(b => normalizeImportBatch({ ...b })))
       }
     }
+    // v3 — backfill updatedAt on all existing categories that lack it
+    if (currentVersion < 3) {
+      const categories = loadFromStorage<Array<Record<string, unknown>> | null>(KEYS.cats, null)
+      if (Array.isArray(categories)) {
+        const now = new Date().toISOString()
+        saveToStorage(KEYS.cats, categories.filter(isRecord).map(c => ({
+          ...c,
+          updatedAt: c['updatedAt'] ?? now,
+        })))
+      }
+    }
     saveRawToStorage(STORAGE_VERSION_KEY, String(STORAGE_VERSION))
   } catch {
     // Never block app startup because migration failed.
