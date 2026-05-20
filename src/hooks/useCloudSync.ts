@@ -7,6 +7,8 @@ import {
   getLocalDatasetSummary,
 } from '../utils/reconciliationEngine'
 import type { DatasetSummary, ReconciliationAnalysis } from '../utils/reconciliationEngine'
+import { fetchCloudDataForRestore, type CloudRestoreSummary } from '../utils/cloudRestore'
+import { downloadBackupFile, applyCloudRestoreToLocalStorage } from '../utils/storage'
 
 export type CloudSyncChoice = 'local' | 'cloud' | 'merge-safe' | null
 
@@ -37,6 +39,10 @@ export function useCloudSync() {
   const [status, setStatus] = useState<string>('Cloud reconciliation has not been checked yet.')
   const [error, setError] = useState<string | null>(null)
   const [selectedChoice, setSelectedChoice] = useState<CloudSyncChoice>(null)
+
+  // Restore state
+  const [restoring, setRestoring] = useState(false)
+  const [restoreSummary, setRestoreSummary] = useState<CloudRestoreSummary | null>(null)
 
   const canCheckCloud = Boolean(auth.isConfigured && auth.user && supabase)
 
@@ -79,17 +85,49 @@ export function useCloudSync() {
 
   const chooseLocal = useCallback(() => {
     setSelectedChoice('local')
-    setStatus('Local data selected as the preferred source. V12.3 does not upload or overwrite yet.')
+    setStatus('Local data is already active — no changes needed.')
   }, [])
 
-  const chooseCloud = useCallback(() => {
+  const chooseCloud = useCallback(async () => {
+    if (!auth.user || !supabase) return
+    setRestoring(true)
+    setError(null)
     setSelectedChoice('cloud')
-    setStatus('Cloud data selected as the preferred source. V12.3 does not replace localStorage yet.')
-  }, [])
+    setStatus('Downloading local backup…')
+
+    try {
+      // Always download a local backup before overwriting
+      downloadBackupFile()
+
+      setStatus('Fetching cloud data…')
+      const restored = await fetchCloudDataForRestore(supabase, auth.user.id)
+
+      if (restored.summary.errors.length > 0) {
+        setError(`Some entities failed to fetch: ${restored.summary.errors.join(', ')}`)
+      }
+
+      setStatus('Writing cloud data to local storage…')
+      applyCloudRestoreToLocalStorage(restored)
+      setRestoreSummary(restored.summary)
+      setStatus(
+        `Restore complete — ${restored.summary.accounts} accounts, ${restored.summary.categories} categories, ${restored.summary.transactions} transactions restored. Reloading…`
+      )
+
+      // Short delay so the user can read the status, then reload
+      setTimeout(() => window.location.reload(), 1800)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Restore failed.'
+      setError(msg)
+      setStatus('Restore failed. Local data was not changed.')
+      setSelectedChoice(null)
+    } finally {
+      setRestoring(false)
+    }
+  }, [auth.user])
 
   const chooseMergeSafe = useCallback(() => {
     setSelectedChoice('merge-safe')
-    setStatus('Safe merge selected for review. V12.3 only identifies safe/unsafe areas; it does not merge destructive financial data.')
+    setStatus('Safe merge is planned for V12.7C. Use "Sync now" in the Cloud persistence panel to push local data to cloud.')
   }, [])
 
   const summary = useMemo(() => ({
@@ -104,6 +142,8 @@ export function useCloudSync() {
     cloudSummary,
     analysis,
     loading,
+    restoring,
+    restoreSummary,
     status,
     error,
     selectedChoice,
