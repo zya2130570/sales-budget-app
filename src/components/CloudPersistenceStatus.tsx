@@ -1,17 +1,10 @@
 /**
- * CloudPersistenceStatus.tsx — V12.4C
+ * CloudPersistenceStatus.tsx — V12.7
  *
- * Displays cloud sync state with a mandatory connection test gate.
- *
- * Flow:
- *   1. User is logged in → shows "Test cloud connection" button.
- *   2. Test passes       → "Sync now" becomes enabled; shows optional auto-sync toggle.
- *   3. Test fails        → shows the exact error; "Sync now" stays disabled.
- *   4. Sync completes    → shows last-synced time or pending count.
- *
- * "Sync now" is always disabled until the connection test passes.
- * This prevents 403-spamming Supabase with bulk writes before access is verified.
+ * Cloud sync status UI with connection test gate, per-entity results panel,
+ * and local backup download.
  */
+import { useState } from 'react'
 
 export type CloudPersistenceStatusProps = {
   status: 'guest' | 'idle' | 'testing' | 'ready' | 'syncing' | 'synced' | 'pending' | 'error' | 'conflicts'
@@ -22,9 +15,11 @@ export type CloudPersistenceStatusProps = {
   pendingCount: number
   lastSyncedAt: string | null
   error: string | null
+  lastResult?: import('../utils/cloudPersistence').CloudPersistSummary | null
   onTestConnection: () => void
   onSyncNow: () => void
   onToggleAutoSync: (enabled: boolean) => void
+  onDownloadBackup: () => void
 }
 
 function StatusDot({ status }: { status: CloudPersistenceStatusProps['status'] }) {
@@ -49,10 +44,13 @@ export function CloudPersistenceStatus({
   pendingCount,
   lastSyncedAt,
   error,
+  lastResult,
   onTestConnection,
   onSyncNow,
   onToggleAutoSync,
+  onDownloadBackup,
 }: CloudPersistenceStatusProps) {
+  const [showResults, setShowResults] = useState(false)
   const isTesting = status === 'testing'
   const isSyncing = status === 'syncing'
   const busy = isTesting || isSyncing
@@ -154,6 +152,48 @@ export function CloudPersistenceStatus({
           </div>
         )}
       </div>
+
+      {/* Per-entity sync results — shown after at least one sync */}
+      {lastResult && lastResult.results.length > 0 && (
+        <div className="border-t border-slate-700 pt-3 space-y-2">
+          <button
+            onClick={() => setShowResults(v => !v)}
+            className="text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
+          >
+            {showResults ? '▲ Hide sync details' : `▼ Show sync details (${lastResult.synced} synced${lastResult.failed > 0 ? `, ${lastResult.failed} failed` : ''}${lastResult.skipped > 0 ? `, ${lastResult.skipped} skipped` : ''})`}
+          </button>
+          {showResults && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+              {lastResult.results.filter(r => r.attempted > 0).map(r => (
+                <div key={r.entity} className="rounded-lg bg-slate-900/60 px-2.5 py-1.5 text-[11px]">
+                  <p className="text-slate-500 truncate">{r.entity.replace(/_/g, ' ')}</p>
+                  <p className="font-medium text-slate-200">
+                    {r.synced} synced
+                    {r.failed > 0 && <span className="text-red-400"> · {r.failed} failed</span>}
+                    {r.skipped > 0 && <span className="text-amber-400"> · {r.skipped} skipped</span>}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Backup download — always available when logged in */}
+      {canSync && (
+        <div className="border-t border-slate-700 pt-3 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-medium text-slate-300">Local backup</p>
+            <p className="text-xs text-slate-500">Download all local data as a JSON file.</p>
+          </div>
+          <button
+            onClick={onDownloadBackup}
+            className="px-3 py-1.5 text-xs rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors flex-shrink-0"
+          >
+            Download backup
+          </button>
+        </div>
+      )}
 
       {/* Auto-sync toggle — only shown after test passes */}
       {canSync && connectionTested && (

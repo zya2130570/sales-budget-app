@@ -114,6 +114,8 @@ export function CloudSyncPanel() {
     cloudSummary,
     analysis,
     loading,
+    restoring,
+    restoreSummary,
     status,
     error,
     selectedChoice,
@@ -124,6 +126,9 @@ export function CloudSyncPanel() {
     chooseMergeSafe,
   } = useCloudSync()
   const [open, setOpen] = useState(false)
+  const [confirmRestore, setConfirmRestore] = useState(false)
+
+  const busy = loading || restoring
 
   return (
     <section className="rounded-2xl border border-slate-700 bg-slate-800/60 p-4 shadow-sm">
@@ -132,11 +137,11 @@ export function CloudSyncPanel() {
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-semibold text-slate-100">Cloud sync readiness</h2>
             <span className="rounded-full border border-slate-700 px-2.5 py-1 text-xs text-slate-400">
-              V12.3 preview only
+              V12.7
             </span>
           </div>
           <p className="mt-1 text-sm text-slate-400">
-            Compare this device with cloud data before choosing local, cloud, or safe merge. No data is overwritten in this step.
+            Compare this device with cloud data. Use Cloud Data will download a local backup first, then restore.
           </p>
           <p className="mt-1 text-xs text-slate-500">
             {summary.isSignedIn ? `Signed in as ${summary.userEmail}` : auth.isConfigured ? 'Sign in to compare cloud data.' : 'Supabase is not configured; local guest mode remains active.'}
@@ -152,7 +157,7 @@ export function CloudSyncPanel() {
           </button>
           <button
             onClick={refresh}
-            disabled={loading}
+            disabled={busy}
             className="rounded-xl bg-blue-600 px-3 py-2 text-xs font-medium text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? 'Checking…' : 'Compare'}
@@ -167,6 +172,16 @@ export function CloudSyncPanel() {
       {error && (
         <div className="mt-3 rounded-xl border border-red-700/60 bg-red-950/30 px-3 py-2 text-xs text-red-200">
           {error}
+        </div>
+      )}
+
+      {restoreSummary && !restoring && (
+        <div className="mt-3 rounded-xl border border-emerald-700/40 bg-emerald-950/20 px-3 py-2 text-xs text-emerald-300 space-y-0.5">
+          <p className="font-semibold">Restore complete</p>
+          <p>{restoreSummary.accounts} accounts · {restoreSummary.categories} categories · {restoreSummary.transactions} transactions · {restoreSummary.savingsGoals} goals</p>
+          {restoreSummary.errors.length > 0 && (
+            <p className="text-amber-300">Partial errors: {restoreSummary.errors.join(', ')}</p>
+          )}
         </div>
       )}
 
@@ -197,44 +212,72 @@ export function CloudSyncPanel() {
 
           <div className="rounded-2xl border border-slate-700 bg-slate-900/60 p-4">
             <h3 className="mb-2 text-sm font-semibold text-slate-100">Choose source direction</h3>
-            <p className="mb-3 text-xs text-slate-400">
-              These buttons only record the intended direction for now. V12.3 does not upload, delete, overwrite, or replace localStorage.
-            </p>
 
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={chooseLocal}
-                className={`rounded-xl border px-3 py-2 text-xs font-medium transition-colors ${
-                  selectedChoice === 'local'
-                    ? 'border-blue-500 bg-blue-600 text-white'
-                    : 'border-slate-600 text-slate-300 hover:bg-slate-700'
-                }`}
-              >
-                Use Local Data
-              </button>
-              <button
-                onClick={chooseCloud}
-                disabled={!summary.isSignedIn}
-                className={`rounded-xl border px-3 py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                  selectedChoice === 'cloud'
-                    ? 'border-blue-500 bg-blue-600 text-white'
-                    : 'border-slate-600 text-slate-300 hover:bg-slate-700'
-                }`}
-              >
-                Use Cloud Data
-              </button>
-              <button
-                onClick={chooseMergeSafe}
-                disabled={!summary.isSignedIn}
-                className={`rounded-xl border px-3 py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                  selectedChoice === 'merge-safe'
-                    ? 'border-blue-500 bg-blue-600 text-white'
-                    : 'border-slate-600 text-slate-300 hover:bg-slate-700'
-                }`}
-              >
-                Merge Safe Data
-              </button>
-            </div>
+            {!confirmRestore ? (
+              <>
+                <p className="mb-3 text-xs text-slate-400">
+                  "Use Cloud Data" downloads a local backup first, then replaces local data with cloud data and reloads the app.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={chooseLocal}
+                    disabled={busy}
+                    className={`rounded-xl border px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${
+                      selectedChoice === 'local'
+                        ? 'border-blue-500 bg-blue-600 text-white'
+                        : 'border-slate-600 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    Use Local Data
+                  </button>
+                  <button
+                    onClick={() => setConfirmRestore(true)}
+                    disabled={!summary.isSignedIn || busy}
+                    className={`rounded-xl border px-3 py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                      selectedChoice === 'cloud'
+                        ? 'border-blue-500 bg-blue-600 text-white'
+                        : 'border-slate-600 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    Use Cloud Data
+                  </button>
+                  <button
+                    onClick={chooseMergeSafe}
+                    disabled={!summary.isSignedIn || busy}
+                    className={`rounded-xl border px-3 py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                      selectedChoice === 'merge-safe'
+                        ? 'border-blue-500 bg-blue-600 text-white'
+                        : 'border-slate-600 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    Merge Safe Data
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="rounded-xl border border-amber-700/60 bg-amber-950/20 p-3 space-y-3">
+                <p className="text-xs font-semibold text-amber-200">Confirm restore from cloud</p>
+                <p className="text-xs text-amber-300/80">
+                  This will download your current local data as a backup, then replace everything with cloud data and reload the app. This cannot be undone without re-importing the backup.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setConfirmRestore(false); void chooseCloud() }}
+                    disabled={busy}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors disabled:opacity-50"
+                  >
+                    {restoring ? 'Restoring…' : 'Yes, restore from cloud'}
+                  </button>
+                  <button
+                    onClick={() => setConfirmRestore(false)}
+                    disabled={busy}
+                    className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
