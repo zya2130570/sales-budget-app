@@ -68,14 +68,15 @@ export type CloudConnectionTestResult = {
 /**
  * A conflict: local record exists AND cloud version has a newer updated_at.
  * The UI shows both sides and asks the user to pick one.
+ * dataIsIdentical is computed in the modal from the fields array — if all values
+ * match exactly, the conflict is auto-resolved without showing it to the user.
  */
 export type ConflictRecord = {
   entity: CloudPersistEntity
   localId: string
   displayName: string
-  localUpdatedAt: string | null   // null = no timestamp on this record
-  cloudUpdatedAt: string | null   // null = no timestamp on cloud side
-  /** Key fields for display. Values are already formatted as strings. */
+  localUpdatedAt: string | null
+  cloudUpdatedAt: string | null
   fields: Array<{ label: string; localValue: string; cloudValue: string }>
 }
 
