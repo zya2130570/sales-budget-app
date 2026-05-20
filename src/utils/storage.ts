@@ -286,3 +286,91 @@ export function saveTransactions(t: Transaction[]): void        { saveToStorage(
 export function saveTransactionRules(r: TransactionRule[]): void { saveToStorage(KEYS.transactionRules, r) }
 export function saveTakeHomeSettings(s: TakeHomeSettings): void { saveToStorage(KEYS.takeHome, s) }
 export function saveImportBatches(b: ImportBatch[]): void       { saveToStorage(STORAGE_KEYS.importHistory, b) }
+
+// ── Backup / restore ──────────────────────────────────────────────────────────
+
+/**
+ * Serialises all known localStorage keys to a JSON string.
+ * The result is self-contained and can be re-imported via importFromBackup().
+ */
+export function exportLocalBackup(): string {
+  const data: Record<string, unknown> = {}
+  for (const key of Object.values(STORAGE_KEYS)) {
+    const raw = localStorage.getItem(key)
+    if (raw !== null) {
+      try { data[key] = JSON.parse(raw) }
+      catch { data[key] = raw }
+    }
+  }
+  return JSON.stringify({
+    exportedAt: new Date().toISOString(),
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    data,
+  }, null, 2)
+}
+
+/**
+ * Triggers a browser download of the current local backup as a .json file.
+ */
+export function downloadBackupFile(): void {
+  const json = exportLocalBackup()
+  const blob = new Blob([json], { type: 'application/json' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href     = url
+  a.download = `flow-backup-${new Date().toISOString().slice(0, 10)}.json`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+/**
+ * Imports a backup JSON file (produced by exportLocalBackup) back into localStorage.
+ * Returns ok: false with an error message if the file is invalid.
+ */
+export function importFromBackup(json: string): { ok: boolean; error?: string } {
+  try {
+    const parsed = JSON.parse(json)
+    const data: Record<string, unknown> = parsed.data ?? parsed
+    for (const [key, value] of Object.entries(data)) {
+      if (typeof key === 'string' && value !== undefined && value !== null) {
+        try { localStorage.setItem(key, JSON.stringify(value)) }
+        catch { /* quota exceeded — skip */ }
+      }
+    }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Invalid backup file.' }
+  }
+}
+
+/**
+ * Applies a CloudRestoreData object to localStorage so the app can reload with cloud state.
+ * This is called after fetchCloudDataForRestore succeeds.
+ */
+export function applyCloudRestoreToLocalStorage(data: {
+  accounts: Account[]
+  categories: Category[]
+  transactions: Transaction[]
+  importBatches: ImportBatch[]
+  rules: TransactionRule[]
+  targets: Target[]
+  savedTargetSets: SavedTargetSet[]
+  savedScenarios: SavedScenarioSet[]
+  savedBudgets: SavedBudget[]
+  actuals: Record<string, string> | null
+}): void {
+  saveAccounts(data.accounts)
+  saveCategories(data.categories)
+  saveTransactions(data.transactions)
+  saveImportBatches(data.importBatches)
+  saveTransactionRules(data.rules)
+  saveTargets(data.targets)
+  saveSavedTargetSets(data.savedTargetSets)
+  saveSavedScenarios(data.savedScenarios)
+  saveSavedBudgets(data.savedBudgets)
+  if (data.actuals) {
+    saveToStorage(STORAGE_KEYS.budgetActuals, data.actuals)
+  }
+}
