@@ -202,7 +202,7 @@ export function CloudPersistenceStatus({
             <p className="text-xs font-medium text-slate-300">Auto-sync</p>
             <p className="text-xs text-slate-500">
               {autoSyncEnabled
-                ? 'Sync is manually triggered — auto-sync will run on next page interaction.'
+                ? 'Syncs automatically 5 seconds after any data change.'
                 : 'Off — click "Sync now" to push changes manually.'}
             </p>
           </div>

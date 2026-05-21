@@ -137,7 +137,7 @@ export function CloudSyncPanel() {
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-semibold text-slate-100">Cloud sync readiness</h2>
-            <VersionBadge version="V14" />
+            <VersionBadge version="V15" />
           </div>
           <p className="mt-1 text-sm text-slate-400">
             Compare this device with cloud data. Use Cloud Data will download a local backup first, then restore.
@@ -215,7 +215,7 @@ export function CloudSyncPanel() {
             {!confirmRestore ? (
               <>
                 <p className="mb-3 text-xs text-slate-400">
-                  "Use Cloud Data" downloads a local backup first, then replaces local data with cloud data and reloads the app.
+                  "Use Cloud Data" replaces everything with cloud data (local backup downloaded automatically). "Merge Safe Data" only adds cloud-only records to local — never overwrites existing data, never touches transactions.
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -241,7 +241,7 @@ export function CloudSyncPanel() {
                     Use Cloud Data
                   </button>
                   <button
-                    onClick={chooseMergeSafe}
+                    onClick={() => { void chooseMergeSafe() }}
                     disabled={!summary.isSignedIn || busy}
                     className={`rounded-xl border px-3 py-2 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                       selectedChoice === 'merge-safe'
@@ -249,7 +249,7 @@ export function CloudSyncPanel() {
                         : 'border-slate-600 text-slate-300 hover:bg-slate-700'
                     }`}
                   >
-                    Merge Safe Data
+                    {restoring && selectedChoice === 'merge-safe' ? 'Merging…' : 'Merge Safe Data'}
                   </button>
                 </div>
               </>

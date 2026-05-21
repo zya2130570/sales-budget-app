@@ -63,6 +63,7 @@ type GoalCardProps = {
   cancelEditContribution: () => void
   startEditContribution: (targetId: string, contribution: Contribution) => void
   setTargetsWithHistory: (updater: (prev: Target[]) => Target[]) => void
+  onDeleteTarget?: (id: string) => void
   setTargetLogForm: React.Dispatch<React.SetStateAction<Record<string, TargetLogForm>>>
   addTargetContribution: (targetId: string, amount: number, date: string, note: string) => void
   period: Period
@@ -155,7 +156,7 @@ export function GoalCard(props: GoalCardProps) {
           )}
           <button
             className="text-xs text-red-400 hover:text-red-300 px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 transition-colors"
-            onClick={() => setTargetsWithHistory(prev => prev.filter(x => x.id !== t.id))}
+            onClick={() => { if (props.onDeleteTarget) props.onDeleteTarget(t.id); setTargetsWithHistory(prev => prev.filter(x => x.id !== t.id)) }}
           >Delete</button>
         </div>
       }
