@@ -34,6 +34,8 @@ import {
   saveTransactionRules,
   runMigrations,
   downloadBackupFile,
+  addPendingDelete,
+  loadPendingDeletes,
 } from './utils/storage'
 import {
   loadBudgetActuals,
@@ -113,9 +115,11 @@ import { useCloudPersistence } from './hooks/useCloudPersistence'
 // V13 — Intelligence layer
 import { SpendingInsightsPanel } from './components/SpendingInsightsPanel'
 import { generateSpendingInsights, generateMonthlyReviewSummary } from './utils/spendingInsights'
-// V14 — AI assistant + version badge
+// V14 — AI assistant
 import { AIAssistantPanel } from './components/AIAssistantPanel'
 import { useAIAssistant } from './hooks/useAIAssistant'
+// V15 — Version badge
+import { VersionBadge } from './components/VersionBadge'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -667,6 +671,7 @@ export default function App() {
   const softDeleteTxn = (txId: string) => {
     const tx = transactions.find(t => t.id === txId)
     if (!tx) return
+    addPendingDelete('transactions', txId)
     setTxnWithHistory(prev => deleteTransaction(prev, txId))
     setDeletedTxns(prev => [{ ...tx }, ...prev.slice(0, 29)]) // keep last 30
   }
@@ -701,6 +706,8 @@ export default function App() {
   const [reviewMonth, setReviewMonth]     = useState(loadReviewMonth)
   const [monthlyNotes, setMonthlyNotes]   = useState<Record<string, string>>(loadMonthlyNotes)
   const [reviewedMonths, setReviewedMonths] = useState<Record<string, string>>(loadReviewedMonths)
+  // V15 — Pending cloud deletes: loaded fresh on each sync, not stored in component state
+  const getPendingDeletes = () => loadPendingDeletes()
   // V9.7.1 — Collapsible main transaction list
   const [txnListOpen, setTxnListOpen]             = useState(true)
 
@@ -1166,8 +1173,6 @@ export default function App() {
     overBudget:      budgetHealth.overBudget,
     totalPlanned:    budgetHealth.totalPlanned,
     totalActual:     budgetHealth.totalActual,
-    monthlyNetIncome: inc.totalMonthly,
-    monthlyBudget,
     forecast:        cashFlowForecast,
     reviewMonth,
     uncatExpenses:   monthlyReview.uncatExpenses,
@@ -1176,7 +1181,7 @@ export default function App() {
     monthlyIncome:   monthlyReview.income,
     monthlyExpenses: monthlyReview.expenses,
     monthlyNetCash:  monthlyReview.netCash,
-  }), [categories, transactions, targets, budgetHealth, inc.totalMonthly, monthlyBudget, cashFlowForecast, reviewMonth, monthlyReview])
+  }), [categories, transactions, targets, budgetHealth, cashFlowForecast, reviewMonth, monthlyReview])
 
   // V13 — Monthly review prose summary
   const monthlyReviewSummary = useMemo(() => generateMonthlyReviewSummary({
@@ -2281,6 +2286,7 @@ txnMerchantRef.current?.focus()
       setTargetLogForm, addTargetContribution, period, convertToMonthly, convertFromMonthly, categories,
       pushBudgetHistory, setCategories, setTab, highlightTimerRef, setHighlightedCategoryId, showToast,
       setTargetFormHistory, setTargetFormRedo, targetForm, setTargetForm, setTargetFormHint, targetNameRef,
+      onDeleteTarget: (id: string) => addPendingDelete('savings_goals', id),
     }
   }
 
@@ -2288,42 +2294,14 @@ txnMerchantRef.current?.focus()
   // V14 — AI assistant
   const aiAssistant = useAIAssistant()
   const aiContext = useMemo(() => ({
-    income: {
-      monthlyNet: inc.totalMonthly,
-      weeklyNet: convertFromMonthly(inc.totalMonthly, 'weekly'),
-    },
-    budget: {
-      monthlyTotal: monthlyBudget,
-      monthlyRemaining: monthlyLeft,
-      weeklyTotal: convertFromMonthly(monthlyBudget, 'weekly'),
-      isOverIncome: monthlyBudget > inc.totalMonthly,
-    },
-    cashFlow: {
-      status: cashFlowForecast.status,
-      projectedEnd: cashFlowForecast.projectedEnd,
-      safeToSpend: cashFlowForecast.safeToSpend,
-      windowDays: forecastPeriod,
-      startingCash: cashFlowForecast.startingCash,
-    },
-    categories: categories.slice(0, 12).map(c => ({
-      name: c.name,
-      type: c.type,
-      monthlyBudget: c.amount,
-    })),
-    savingsGoals: targets.filter(t => !t.completed).map(t => ({
-      name: t.name,
-      saved: t.currentSaved,
-      goal: t.goalAmount,
-      deadline: t.deadline,
-      pctComplete: t.goalAmount > 0 ? Math.round((t.currentSaved / t.goalAmount) * 100) : 0,
-    })),
-    recentSpending: {
-      last30DaysTotal: monthlyReview.expenses,
-      transactionCount: monthlyReview.txns.length,
-      reviewMonth,
-    },
+    income: { monthlyNet: inc.totalMonthly, weeklyNet: convertFromMonthly(inc.totalMonthly, 'weekly') },
+    budget: { monthlyTotal: monthlyBudget, monthlyRemaining: monthlyLeft, isOverIncome: monthlyBudget > inc.totalMonthly },
+    cashFlow: { status: cashFlowForecast.status, projectedEnd: cashFlowForecast.projectedEnd, safeToSpend: cashFlowForecast.safeToSpend },
+    categories: categories.slice(0, 12).map(c => ({ name: c.name, type: c.type, monthlyBudget: c.amount })),
+    savingsGoals: targets.filter(t => !t.completed).map(t => ({ name: t.name, saved: t.currentSaved, goal: t.goalAmount, deadline: t.deadline, pct: t.goalAmount > 0 ? Math.round((t.currentSaved / t.goalAmount) * 100) : 0 })),
+    recentSpending: { last30DaysTotal: monthlyReview.expenses, txnCount: monthlyReview.txns.length, reviewMonth },
     currentInsights: spendingInsights.map(i => `[${i.priority}] ${i.title}`),
-  }), [inc, monthlyBudget, monthlyLeft, cashFlowForecast, forecastPeriod, categories, targets, monthlyReview, reviewMonth, spendingInsights])
+  }), [inc, monthlyBudget, monthlyLeft, cashFlowForecast, categories, targets, monthlyReview, reviewMonth, spendingInsights])
 
   const cloudPersistence = useCloudPersistence({
     accounts,
@@ -2336,6 +2314,9 @@ txnMerchantRef.current?.focus()
     savedBudgets,
     actuals,
     importBatches,
+    monthlyNotes,
+    reviewedMonths,
+    pendingDeletes: getPendingDeletes(),
   })
 
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
@@ -2346,7 +2327,10 @@ txnMerchantRef.current?.focus()
 
         <header className="rounded-2xl border border-slate-700 bg-slate-800/80 shadow-xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Flow</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-3xl font-bold tracking-tight">Flow</h1>
+              <VersionBadge version="V15" className="mt-1" />
+            </div>
             <p className="text-slate-400">Personal Finance Dashboard</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -3430,7 +3414,7 @@ txnMerchantRef.current?.focus()
                             })
                             setTimeout(() => { inlineCatAmountRef.current?.focus(); inlineCatAmountRef.current?.select() }, 0)
                           }}>Edit</button>
-                          <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
+                          <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); addPendingDelete('categories', c.id); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
                           {/* V9.11 — Rollover toggle */}
                           <button
                             title={categoryRollovers[c.id] ? 'Rollover enabled — unused budget carries forward' : 'Enable rollover for this category'}
@@ -3745,6 +3729,7 @@ txnMerchantRef.current?.focus()
                                     Reconcile
                                   </button>
                                   <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => {
+                                    addPendingDelete('accounts', a.id)
                                     setAccountsWithHistory(prev => prev.filter(x => x.id !== a.id))
                                     showUndoableToast(`Deleted "${a.name}"`, undoAccount)
                                   }}>Delete</button>
@@ -4346,6 +4331,7 @@ txnMerchantRef.current?.focus()
                               }}>Edit</button>
                              <button className="text-red-400 hover:text-red-300 text-xs" onClick={() => {
                                 const deletedId = r.id
+                                addPendingDelete('transaction_rules', deletedId)
                                 setRulesWithHistory(prev => prev.filter(x => x.id !== deletedId))
                                 // V8.6 — When a rule is deleted, clear the category AND the badge on any
                                 // transaction that the rule assigned and the user hasn't manually changed
