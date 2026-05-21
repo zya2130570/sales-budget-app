@@ -33,6 +33,9 @@ export type InsightInput = {
   overBudget: Category[]
   totalPlanned: number
   totalActual: number
+  // income vs plan
+  monthlyNetIncome: number   // inc.totalMonthly — net take-home
+  monthlyBudget: number      // monthly budget total (sum of all categories)
   // from cashFlowForecast
   forecast: CashFlowForecast
   // from monthlyReview (for the selected review month)
@@ -64,6 +67,21 @@ function avgMonthlyContribution(target: Target): number {
 
 export function generateSpendingInsights(input: InsightInput): SpendingInsight[] {
   const insights: SpendingInsight[] = []
+
+  // ── HIGH: Planned budget exceeds net income ──────────────────────────────────
+  if (input.monthlyNetIncome > 0 && input.monthlyBudget > input.monthlyNetIncome) {
+    const diff = input.monthlyBudget - input.monthlyNetIncome
+    const pct  = Math.round((diff / input.monthlyNetIncome) * 100)
+    insights.push({
+      id: 'budget_over_income',
+      priority: 'high',
+      icon: '⚠',
+      title: `Planned budget exceeds income by ${currency(diff)}/month`,
+      body: `Your monthly spending plan (${currency(input.monthlyBudget)}) is ${pct}% more than your net income (${currency(input.monthlyNetIncome)}). This is unsustainable — reduce variable or discretionary categories until the plan fits within income.`,
+      actionLabel: 'Review budget',
+      actionTab: 'Budget',
+    })
+  }
 
   // ── HIGH: Forecast risk ──────────────────────────────────────────────────────
   if (input.forecast.status === 'risk' && input.forecast.projectedEnd < 0) {
