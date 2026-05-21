@@ -73,6 +73,8 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
   const [connectionTestError, setConnectionTestError] = useState<string | null>(null)
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
   const autoSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [consecutiveSyncFailures, setConsecutiveSyncFailures] = useState(0)
+  const [autoSyncPaused, setAutoSyncPaused] = useState(false)
 
   // Conflict state — pauses sync until user resolves each conflict
   const [pendingConflicts, setPendingConflicts] = useState<ConflictRecord[]>([])
@@ -114,6 +116,8 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
       const result = await testCloudConnection(supabase, auth.user.id)
       if (result.ok) {
         setConnectionTested(true)
+        setAutoSyncPaused(false)
+        setConsecutiveSyncFailures(0)
         setStatus('ready')
       } else {
         setConnectionTested(false)
@@ -161,10 +165,18 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
       }
 
       if (result.failed > 0) {
+        const nextFailures = consecutiveSyncFailures + 1
+        setConsecutiveSyncFailures(nextFailures)
+        if (nextFailures >= 3 && autoSyncEnabled) {
+          setAutoSyncPaused(true)
+          setAutoSyncEnabled(false)
+        }
         setPendingCount(result.failed)
         setStatus('pending')
         setError(`${result.failed} write${result.failed === 1 ? '' : 's'} failed. Local data is safe.`)
       } else {
+        setConsecutiveSyncFailures(0)
+        setAutoSyncPaused(false)
         const syncedAt = result.lastSyncedAt ?? new Date().toISOString()
         setPendingCount(0)
         setLastSyncedAt(syncedAt)
@@ -173,13 +185,19 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
         setError(null)
       }
     } catch (err) {
+      const nextFailures = consecutiveSyncFailures + 1
+      setConsecutiveSyncFailures(nextFailures)
+      if (nextFailures >= 3 && autoSyncEnabled) {
+        setAutoSyncPaused(true)
+        setAutoSyncEnabled(false)
+      }
       setPendingCount(prev => Math.max(prev, 1))
       setStatus('error')
       setError(err instanceof Error ? err.message : 'Cloud sync failed. Local data is still safe.')
     } finally {
       syncInFlightRef.current = false
     }
-  }, [auth.user, canSync, connectionTested, conflictResolutions, data])
+  }, [auth.user, canSync, connectionTested, conflictResolutions, consecutiveSyncFailures, autoSyncEnabled, data])
 
   // ─── Conflict resolution ───────────────────────────────────────────────────
 
@@ -214,7 +232,7 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
 
   // ── True auto-sync: fires 5s after any data change when enabled + tested ──
   useEffect(() => {
-    if (!autoSyncEnabled || !connectionTested || !canSync) return
+    if (!autoSyncEnabled || !connectionTested || !canSync || autoSyncPaused) return
     if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current)
     autoSyncTimerRef.current = setTimeout(() => {
       void runSyncNow()
@@ -244,6 +262,7 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
     pendingConflicts,
     canSync,
     autoSyncEnabled,
+    autoSyncPaused,
     fingerprint,
     setAutoSyncEnabled: handleSetAutoSyncEnabled,
     runConnectionTest,
