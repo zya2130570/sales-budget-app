@@ -110,6 +110,9 @@ import { CloudSyncPanel } from './components/CloudSyncPanel'
 import { CloudPersistenceStatus } from './components/CloudPersistenceStatus'
 import { ConflictResolutionModal } from './components/ConflictResolutionModal'
 import { useCloudPersistence } from './hooks/useCloudPersistence'
+// V13 — Intelligence layer
+import { SpendingInsightsPanel } from './components/SpendingInsightsPanel'
+import { generateSpendingInsights, generateMonthlyReviewSummary } from './utils/spendingInsights'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -1151,6 +1154,36 @@ export default function App() {
 
     return { txns, income, expenses, transfers, ccPayments, netCash, catBreakdown, bigTxns, uncatExpenses, unresolvedDups, recurringReviewed }
   }, [transactions, reviewMonth, categories, dismissedDupIds, recurringCandidates, confirmedRecurring, dismissedRecurring])
+
+  // V13 — Spending insights (needs cashFlowForecast + monthlyReview, both defined above)
+  const spendingInsights = useMemo(() => generateSpendingInsights({
+    categories,
+    transactions,
+    targets,
+    overBudget:      budgetHealth.overBudget,
+    totalPlanned:    budgetHealth.totalPlanned,
+    totalActual:     budgetHealth.totalActual,
+    forecast:        cashFlowForecast,
+    reviewMonth,
+    uncatExpenses:   monthlyReview.uncatExpenses,
+    catBreakdown:    monthlyReview.catBreakdown,
+    bigTxns:         monthlyReview.bigTxns,
+    monthlyIncome:   monthlyReview.income,
+    monthlyExpenses: monthlyReview.expenses,
+    monthlyNetCash:  monthlyReview.netCash,
+  }), [categories, transactions, targets, budgetHealth, cashFlowForecast, reviewMonth, monthlyReview])
+
+  // V13 — Monthly review prose summary
+  const monthlyReviewSummary = useMemo(() => generateMonthlyReviewSummary({
+    reviewMonth,
+    txnCount:      monthlyReview.txns.length,
+    income:        monthlyReview.income,
+    expenses:      monthlyReview.expenses,
+    netCash:       monthlyReview.netCash,
+    catBreakdown:  monthlyReview.catBreakdown,
+    uncatExpenses: monthlyReview.uncatExpenses,
+    bigTxns:       monthlyReview.bigTxns,
+  }), [reviewMonth, monthlyReview])
 
   const bulkAssign = () => {
     if (!bulkCategoryId || selectedTxnIds.size === 0) return
@@ -2350,6 +2383,12 @@ txnMerchantRef.current?.focus()
               />
             </div>
 
+            {/* ── V13 Spending Insights ── */}
+            <SpendingInsightsPanel
+              insights={spendingInsights}
+              onAction={(tab) => setTab(tab as import('./types').Tab)}
+            />
+
             <Card title="Dashboard Summary">
               <div className="flex gap-2 mb-4">{periods.map(p => <Pill key={p} active={period === p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div>
               <p className="mb-4">
@@ -2477,6 +2516,13 @@ txnMerchantRef.current?.focus()
                 )}
                 <span className="text-xs text-slate-500 ml-auto">{monthlyReview.txns.length} transaction{monthlyReview.txns.length !== 1 ? 's' : ''}</span>
               </div>
+
+              {/* V13 — Prose insight summary */}
+              {monthlyReviewSummary && (
+                <p className="text-xs text-slate-400 leading-relaxed mb-4 px-0.5">
+                  {monthlyReviewSummary}
+                </p>
+              )}
 
               {/* Summary */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
