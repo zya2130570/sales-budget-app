@@ -1,0 +1,157 @@
+/**
+ * AIAssistantPanel.tsx — V14
+ * Chat interface for the AI financial assistant.
+ */
+import { useState, useRef, useEffect } from 'react'
+import type { ChatMessage, AIAssistantStatus } from '../hooks/useAIAssistant'
+
+const SUGGESTED_QUESTIONS = [
+  'Can I afford a $500 expense right now?',
+  'Why is my budget over my income?',
+  'How much should I save per month for my goals?',
+  'What should I cut to get back on track?',
+  'When will I hit my biggest savings goal?',
+]
+
+type Props = {
+  messages: ChatMessage[]
+  status: AIAssistantStatus
+  error: string | null
+  onSend: (text: string) => void
+  onClear: () => void
+}
+
+function MessageBubble({ msg }: { msg: ChatMessage }) {
+  const isUser = msg.role === 'user'
+  return (
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+      <div
+        className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-xs leading-relaxed ${
+          isUser
+            ? 'bg-blue-600 text-white rounded-br-sm'
+            : 'bg-slate-700/80 text-slate-200 rounded-bl-sm border border-slate-600/50'
+        }`}
+      >
+        {msg.content.split('\n').map((line, i) => (
+          <span key={i}>{line}{i < msg.content.split('\n').length - 1 && <br />}</span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+export function AIAssistantPanel({ messages, status, error, onSend, onClear }: Props) {
+  const [input, setInput] = useState('')
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  const handleSend = () => {
+    if (!input.trim() || status === 'loading') return
+    onSend(input.trim())
+    setInput('')
+  }
+
+  const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
+  return (
+    <div className="rounded-2xl border border-slate-700 bg-slate-800/60 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
+        <div className="flex items-center gap-2">
+          <span className="text-base">✦</span>
+          <h2 className="text-sm font-semibold text-slate-100">Financial Assistant</h2>
+          <span className="text-[10px] text-slate-500 bg-slate-700 px-1.5 py-0.5 rounded">AI</span>
+        </div>
+        {messages.length > 0 && (
+          <button
+            onClick={onClear}
+            className="text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
+          >
+            Clear chat
+          </button>
+        )}
+      </div>
+
+      {/* Messages or empty state */}
+      <div className="px-4 py-3 space-y-3 min-h-[80px] max-h-72 overflow-y-auto">
+        {messages.length === 0 ? (
+          <div>
+            <p className="text-xs text-slate-500 mb-3">Ask anything about your finances — get specific, numbered answers.</p>
+            <div className="flex flex-wrap gap-2">
+              {SUGGESTED_QUESTIONS.map(q => (
+                <button
+                  key={q}
+                  onClick={() => { onSend(q) }}
+                  disabled={status === 'loading'}
+                  className="text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors text-left border border-slate-600/50"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <>
+            {messages.map((msg, i) => <MessageBubble key={i} msg={msg} />)}
+            {status === 'loading' && (
+              <div className="flex justify-start">
+                <div className="bg-slate-700/80 border border-slate-600/50 rounded-2xl rounded-bl-sm px-3.5 py-2.5">
+                  <span className="flex gap-1">
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </span>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        {error && (
+          <p className="text-xs text-red-300 bg-red-950/30 border border-red-700/40 rounded-lg px-3 py-2">
+            {error}
+          </p>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Input */}
+      <div className="px-4 pb-3 pt-1 border-t border-slate-700/60">
+        <div className="flex gap-2 items-end">
+          <textarea
+            ref={inputRef}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={handleKey}
+            disabled={status === 'loading'}
+            rows={1}
+            placeholder="Ask about your finances… (Enter to send)"
+            className="flex-1 resize-none rounded-xl bg-slate-700 border border-slate-600 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 disabled:opacity-50 min-h-[34px] max-h-24 overflow-y-auto"
+            style={{ height: 'auto' }}
+            onInput={e => {
+              const t = e.currentTarget
+              t.style.height = 'auto'
+              t.style.height = `${Math.min(t.scrollHeight, 96)}px`
+            }}
+          />
+          <button
+            onClick={handleSend}
+            disabled={!input.trim() || status === 'loading'}
+            className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+          >
+            Send
+          </button>
+        </div>
+        <p className="text-[10px] text-slate-600 mt-1">Your financial data is sent to the AI with each message.</p>
+      </div>
+    </div>
+  )
+}
