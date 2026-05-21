@@ -141,5 +141,9 @@ export type MonthlyReview = {
 }
 
 export type TakeHomeMode = 'simple' | 'manual'
-export type TakeHomeSettings = { mode: TakeHomeMode; simpleRate: number; manualMonthlyNet: number }
+export type TakeHomeSettings = { mode: TakeHomeMode; simpleRate: number; manualMonthlyNet: number; updatedAt?: string }
 export const DEFAULT_TAKE_HOME_SETTINGS: TakeHomeSettings = { mode: 'simple', simpleRate: 0.8243, manualMonthlyNet: 0 }
+
+
+export type BudgetActualsByPeriod = Record<string, Record<string, string>>
+export type BudgetActualsEnvelope = { version: 2; lastPeriodKey?: string; actualsByPeriod: BudgetActualsByPeriod }
