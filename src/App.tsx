@@ -108,8 +108,7 @@ import { useInlineEditTimer } from './hooks/useInlineEdit'
 import { useNeedsReview } from './hooks/useNeedsReview'
 // V12.2 — Supabase auth foundation
 import { AuthPanel } from './components/AuthPanel'
-import { CloudSyncPanel } from './components/CloudSyncPanel'
-import { CloudPersistenceStatus } from './components/CloudPersistenceStatus'
+import { CloudStatusButton } from './components/CloudStatusButton'
 import { ConflictResolutionModal } from './components/ConflictResolutionModal'
 import { useCloudPersistence } from './hooks/useCloudPersistence'
 // V13 — Intelligence layer
@@ -120,6 +119,11 @@ import { AIAssistantPanel } from './components/AIAssistantPanel'
 import { useAIAssistant } from './hooks/useAIAssistant'
 // V15 — Version badge
 import { VersionBadge } from './components/VersionBadge'
+// V16 — Settings, onboarding, demo mode
+import { SettingsPanel } from './components/SettingsPanel'
+import { OnboardingCard } from './components/OnboardingCard'
+import { DEMO_ACCOUNTS, DEMO_CATEGORIES, DEMO_TRANSACTIONS, DEMO_TARGETS, DEMO_RULES } from './utils/demoData'
+import { importFromBackup } from './utils/storage'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -708,6 +712,38 @@ export default function App() {
   const [reviewedMonths, setReviewedMonths] = useState<Record<string, string>>(loadReviewedMonths)
   // V15 — Pending cloud deletes: loaded fresh on each sync, not stored in component state
   const getPendingDeletes = () => loadPendingDeletes()
+
+  // V16 — Settings panel
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  // V17 — Collapsible dashboard sections
+  const [forecastOpen, setForecastOpen] = useState(false)
+  // reviewOpen already provided by useUiState()
+
+  const isAppEmpty = accounts.length === 0 && categories.length === 0 && transactions.length === 0
+
+  const handleLoadDemo = () => {
+    setAccountsWithHistory(() => DEMO_ACCOUNTS)
+    setCategories(DEMO_CATEGORIES)
+    setTxnWithHistory(() => DEMO_TRANSACTIONS)
+    setTargetsWithHistory(() => DEMO_TARGETS)
+    setRulesWithHistory(() => DEMO_RULES)
+  }
+
+  const handleClearAllData = () => {
+    setAccountsWithHistory(() => [])
+    setCategories([])
+    setTxnWithHistory(() => [])
+    setTargetsWithHistory(() => [])
+    setRulesWithHistory(() => [])
+    setSavedBudgets([])
+    setSavedScenarios([])
+    setSavedTargetSets([])
+  }
+
+  const handleImportFromFile = (json: string) => {
+    const result = importFromBackup(json)
+    if (!result.ok) throw new Error(result.error ?? 'Import failed')
+  }
   // V9.7.1 — Collapsible main transaction list
   const [txnListOpen, setTxnListOpen]             = useState(true)
 
@@ -2346,25 +2382,35 @@ txnMerchantRef.current?.focus()
             ))}
             {/* V12.2 — Auth panel (guest/local mode when Supabase not configured) */}
             <AuthPanel />
+            {/* V17 — Cloud status button */}
+            <CloudStatusButton
+              status={cloudPersistence.status}
+              canSync={cloudPersistence.canSync}
+              connectionTested={cloudPersistence.connectionTested}
+              connectionTestError={cloudPersistence.connectionTestError}
+              autoSyncEnabled={cloudPersistence.autoSyncEnabled}
+              autoSyncPaused={cloudPersistence.autoSyncPaused}
+              pendingCount={cloudPersistence.pendingCount}
+              lastSyncedAt={cloudPersistence.lastSyncedAt}
+              error={cloudPersistence.error}
+              lastResult={cloudPersistence.lastResult}
+              onTestConnection={cloudPersistence.runConnectionTest}
+              onSyncNow={cloudPersistence.syncNow}
+              onToggleAutoSync={cloudPersistence.setAutoSyncEnabled}
+              onDownloadBackup={downloadBackupFile}
+              onOpenSettings={() => setSettingsOpen(true)}
+            />
+            {/* V16 — Settings */}
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors"
+              title="Settings"
+            >
+              ⚙
+            </button>
           </div>
         </header>
 
-        <CloudSyncPanel />
-      <CloudPersistenceStatus
-  status={cloudPersistence.status}
-  canSync={cloudPersistence.canSync}
-  connectionTested={cloudPersistence.connectionTested}
-  connectionTestError={cloudPersistence.connectionTestError}
-  autoSyncEnabled={cloudPersistence.autoSyncEnabled}
-  pendingCount={cloudPersistence.pendingCount}
-  lastSyncedAt={cloudPersistence.lastSyncedAt}
-  error={cloudPersistence.error}
-  lastResult={cloudPersistence.lastResult}
-  onTestConnection={cloudPersistence.runConnectionTest}
-  onSyncNow={cloudPersistence.syncNow}
-  onToggleAutoSync={cloudPersistence.setAutoSyncEnabled}
-  onDownloadBackup={downloadBackupFile}
-/>
       {cloudPersistence.pendingConflicts.length > 0 && (
         <ConflictResolutionModal
           conflicts={cloudPersistence.pendingConflicts}
@@ -2373,9 +2419,30 @@ txnMerchantRef.current?.focus()
         />
       )}
 
+      {/* V16 — Settings panel */}
+      {settingsOpen && (
+        <SettingsPanel
+          onClose={() => setSettingsOpen(false)}
+          onLoadDemo={handleLoadDemo}
+          onClearAllData={handleClearAllData}
+          onDownloadBackup={downloadBackupFile}
+          onImportFromFile={handleImportFromFile}
+          lastSyncedAt={cloudPersistence.lastSyncedAt}
+          version="V16"
+        />
+      )}
+
         {/* ── DASHBOARD ── */}
         {tab === 'Dashboard' && (
           <section className="space-y-4 transition-all duration-300">
+
+            {/* ── V16 Onboarding — shown when app is empty ── */}
+            {isAppEmpty && (
+              <OnboardingCard
+                onLoadDemo={handleLoadDemo}
+                onOpenSettings={() => setSettingsOpen(true)}
+              />
+            )}
 
             {/* ── V7.3 Dashboard Status Banner ── */}
             <DashboardStatusBanner status={dashboardStatus} />
@@ -2447,20 +2514,35 @@ txnMerchantRef.current?.focus()
                 <Metric title="Total Budget" value={currency(convertFromMonthly(monthlyBudget, period))} tone={totalBudgetTone} />
                 <Metric title="Remaining After Budget" value={currency(selectedPeriodRemaining)} tone={remainingTone} glow={selectedPeriodRemaining < 0} />
               </div>
-            </Card>
-            <Card title="Financial Intelligence">
-              <div className="grid md:grid-cols-3 gap-3">
-                <Info title="Biggest Expense" value={top[0] ? `${top[0].name} (${currency(convertFromMonthly(top[0].amount, period))} ${labelPeriod(period)})` : 'None'} tone={biggestExpenseTone} />
-                <Info title="Fixed Bills Ratio" value={`${fixedRatio.toFixed(1)}%`} />
-                <Info title="Savings Rate" value={`${savingsRate.toFixed(1)}%`} tone={savingsTone} />
-                <Info title="Commission Dependency" value={`${dep.toFixed(1)}%`} className={depColor} />
-                <Info title="Remaining Cushion" value={`${remainingCushionPct.toFixed(1)}%`} tone={cushionTone} />
-                <Info title="Budget Status / Health Tier" value={statusLabel} tone={statusTone} glow={selectedPeriodRemaining < 0} />
+              {/* Financial Intelligence — folded in */}
+              <div className="mt-4 pt-4 border-t border-slate-700/60">
+                <div className="grid md:grid-cols-3 gap-3">
+                  <Info title="Biggest Expense" value={top[0] ? `${top[0].name} (${currency(convertFromMonthly(top[0].amount, period))} ${labelPeriod(period)})` : 'None'} tone={biggestExpenseTone} />
+                  <Info title="Fixed Bills Ratio" value={`${fixedRatio.toFixed(1)}%`} />
+                  <Info title="Savings Rate" value={`${savingsRate.toFixed(1)}%`} tone={savingsTone} />
+                  <Info title="Commission Dependency" value={`${dep.toFixed(1)}%`} className={depColor} />
+                  <Info title="Remaining Cushion" value={`${remainingCushionPct.toFixed(1)}%`} tone={cushionTone} />
+                  <Info title="Budget Status / Health Tier" value={statusLabel} tone={statusTone} glow={selectedPeriodRemaining < 0} />
+                </div>
               </div>
             </Card>
 
             {/* ── V9.8 Cash Flow Forecast ── */}
-            <Card title="Cash Flow Forecast" noHover>
+            <div className="rounded-2xl border border-slate-700 bg-slate-800/60">
+              <button
+                onClick={() => setForecastOpen(v => !v)}
+                className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-slate-700/20 transition-colors rounded-2xl"
+              >
+                <h2 className="text-lg font-semibold text-slate-100">Cash Flow Forecast</h2>
+                <div className="flex items-center gap-3">
+                  <span className={`text-sm font-medium ${cashFlowForecast.status === 'comfortable' ? 'text-emerald-400' : cashFlowForecast.status === 'tight' ? 'text-amber-400' : 'text-red-400'}`}>
+                    {currency(cashFlowForecast.projectedEnd)} · {cashFlowForecast.status}
+                  </span>
+                  <span className="text-slate-500 text-sm">{forecastOpen ? '▲' : '▼'}</span>
+                </div>
+              </button>
+              {forecastOpen && (
+              <div className="px-5 pb-5">
               {/* Period selector */}
               <div className="flex gap-1.5 mb-4">
                 {([7, 14, 30, 60] as const).map(d => (
@@ -2531,11 +2613,22 @@ txnMerchantRef.current?.focus()
                 <p className="text-xs text-slate-500 text-center py-2">
                   No upcoming recurring items found. Confirm or add recurring items in the Transactions tab to populate the forecast.
                 </p>
-              )}
-            </Card>
+              )}</div>)}
+            </div>
 
             {/* ── V9.9 Monthly Review ── */}
-            <Card title="Monthly Review" noHover>
+            <div className="rounded-2xl border border-slate-700 bg-slate-800/60">
+              <button
+                onClick={() => setReviewOpen(v => !v)}
+                className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-slate-700/20 transition-colors rounded-2xl"
+              >
+                <h2 className="text-lg font-semibold text-slate-100">Monthly Review</h2>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-slate-400">{reviewMonth}</span>
+                  <span className="text-slate-500 text-sm">{reviewOpen ? '▲' : '▼'}</span>
+                </div>
+              </button>
+              {reviewOpen && (<div className="px-5 pb-5">
               <div className="flex items-center gap-3 mb-4 flex-wrap">
                 <input
                   type="month" value={reviewMonth} onChange={e => setReviewMonth(e.target.value)}
@@ -2658,8 +2751,8 @@ txnMerchantRef.current?.focus()
               </div>
               {monthlyReview.txns.length === 0 && (
                 <p className="text-xs text-slate-500 text-center mt-2">No transactions for {reviewMonth}. Log or import transactions to see the monthly review.</p>
-              )}
-            </Card>
+              )}</div>)}
+            </div>
           </section>
         )}
 
