@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { DEFAULT_TAKE_HOME_SETTINGS } from './types'
 import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule, ImportBatch, ImportPreset } from './types'
 
 import { currency, labelPeriod } from './utils/formatting'
@@ -36,10 +37,13 @@ import {
   downloadBackupFile,
   addPendingDelete,
   loadPendingDeletes,
+  loadTakeHomeSettings,
 } from './utils/storage'
 import {
   loadBudgetActuals,
-  saveBudgetActuals,
+  saveBudgetActualsForPeriod,
+  loadBudgetActualsForPeriod,
+  actualsPeriodKey,
   loadReviewMonth,
   saveReviewMonth,
   loadMonthlyNotes,
@@ -412,6 +416,8 @@ export default function App() {
   const [budgetHistory, setBudgetHistory] = useState<BudgetSnapshot[]>([])
   const [budgetRedo, setBudgetRedo] = useState<BudgetSnapshot[]>([])
   const [form, setForm] = useState({ name: '', amount: '', type: 'fixed bill' as CategoryType })
+  const currentActualsRange = getPeriodDateRange(period)
+  const currentActualsPeriodKey = actualsPeriodKey(period, currentActualsRange.start, currentActualsRange.end)
 
   // ── V7.5 Plan vs Actual ──────────────────────────────────────────────────────
   // Keyed by category id → raw string so blank stays blank, never forced to "0".
@@ -419,10 +425,14 @@ export default function App() {
   // data with the empty default on the first render (effects fire after render).
   const [actuals, setActuals] = useState<Record<string, string>>(loadBudgetActuals)
 
-  // Persist actuals — save effect defined after lazy init; no ordering race
+  // Persist actuals by period so weekly/monthly actuals do not overwrite each other.
   useEffect(() => {
-    saveBudgetActuals(actuals)
-  }, [actuals])
+    setActuals(loadBudgetActualsForPeriod(currentActualsPeriodKey))
+  }, [currentActualsPeriodKey])
+
+  useEffect(() => {
+    saveBudgetActualsForPeriod(currentActualsPeriodKey, actuals)
+  }, [actuals, currentActualsPeriodKey])
 
   // Target edit state
   const [editTargetId, setEditTargetId] = useState<string | null>(null)
@@ -2339,6 +2349,8 @@ txnMerchantRef.current?.focus()
     currentInsights: spendingInsights.map(i => `[${i.priority}] ${i.title}`),
   }), [inc, monthlyBudget, monthlyLeft, cashFlowForecast, categories, targets, monthlyReview, reviewMonth, spendingInsights])
 
+  const takeHomeSettings = loadTakeHomeSettings() ?? DEFAULT_TAKE_HOME_SETTINGS
+
   const cloudPersistence = useCloudPersistence({
     accounts,
     categories,
@@ -2349,6 +2361,9 @@ txnMerchantRef.current?.focus()
     savedScenarios,
     savedBudgets,
     actuals,
+    takeHomeSettings,
+    actualsperiod: period,
+    actualsPeriodStart: currentActualsRange.start,
     importBatches,
     monthlyNotes,
     reviewedMonths,
