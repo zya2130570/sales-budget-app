@@ -1,7 +1,3 @@
-/**
- * changelog.ts — version history for the in-app changelog popup.
- * Newest entry first. Each entry includes what changed and what to click to test it.
- */
 export type VersionEntry = {
   version: string
   date: string
@@ -11,44 +7,59 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V15',
+    date: 'May 2026',
+    what: [
+      'Delete propagation — deleted records now marked soft-deleted in Supabase on next sync',
+      'Monthly reviews cloud sync — review notes and "mark reviewed" status backed up',
+      'Budget actuals tagged with current period — prevents cross-device period confusion',
+      'True auto-sync — toggle now actually fires 5s after any data change',
+      'Merge Safe Data wired — fills local gaps from cloud without touching transactions',
+    ],
+    test: [
+      'Delete a transaction → Sync now → check Supabase transactions table → that row should have deleted_at set',
+      'Write a monthly review note → Sync now → check Supabase monthly_reviews table',
+      'Toggle Auto-sync ON → edit a category name → wait 5 seconds → status should change to "Syncing…" automatically',
+      'Cloud sync readiness → Compare → Merge Safe Data → should report what was added or say "already in sync"',
+    ],
+  },
+  {
     version: 'V14',
     date: 'May 2026',
     what: [
-      'AI Financial Assistant — ask natural-language questions about your finances',
-      'Version changelog popup — click any version badge to see this',
-      'Insights: budget-over-income warning now surfaces even with no transactions',
+      'AI Financial Assistant — ask natural-language questions using your real data',
+      'Version changelog popup — click any version badge to open this',
+      'Insights: budget-over-income warning now shows even with no transactions',
     ],
     test: [
-      'Scroll to "Financial Assistant" on Dashboard — ask "Can I afford a $500 expense?"',
-      'Ask "Why is my budget over my income?" or "How much should I save per month?"',
-      'Click the V14 badge in Cloud sync readiness to open this changelog',
-      'Check Dashboard for an Insights panel — should now show a warning if planned budget > income',
+      'Dashboard → "Financial Assistant" panel → ask "Why is my budget over my income?"',
+      'Click the V15 badge in Cloud sync readiness to open this changelog',
+      'Dashboard Insights panel should show a red warning if planned budget > net income',
     ],
   },
   {
     version: 'V13',
     date: 'May 2026',
     what: [
-      'Spending Insights panel on Dashboard — prioritized, data-driven callouts',
-      'Monthly Review prose summary — generated paragraph above the metrics grid',
+      'Spending Insights panel on Dashboard — prioritized, numbered callouts',
+      'Monthly Review prose summary — auto-generated paragraph above the metrics',
     ],
     test: [
-      'Import transactions, then check Dashboard for the Insights panel below action cards',
-      'Open Monthly Review — a summary paragraph should appear above Total Income/Spending',
+      'Import transactions → Dashboard → Insights panel should appear below action cards',
+      'Dashboard → Monthly Review → summary paragraph above Total Income/Spending grid',
     ],
   },
   {
     version: 'V12.7',
     date: 'May 2026',
     what: [
-      'Local backup download — one-click JSON export of all local data',
-      'Restore from cloud — "Use Cloud Data" button now actually restores and reloads',
+      'Local backup download — one-click JSON export',
+      'Restore from cloud — "Use Cloud Data" downloads backup first then restores',
       'Per-entity sync results — expand "Show sync details" after syncing',
-      'Cloud sync readiness upgraded from V12.3 preview to V12.7 full',
     ],
     test: [
-      'Cloud persistence panel → Download backup → should download flow-backup-YYYY-MM-DD.json',
-      'Cloud sync readiness → Open panel → Compare → Use Cloud Data → confirm restore',
+      'Cloud persistence → Download backup → flow-backup-YYYY-MM-DD.json should download',
+      'Cloud sync readiness → Compare → Use Cloud Data → confirm, app should reload',
       'Sync now → click "Show sync details" to see per-entity breakdown',
     ],
   },
@@ -56,12 +67,11 @@ export const CHANGELOG: VersionEntry[] = [
     version: 'V12.6',
     date: 'May 2026',
     what: [
-      'Transaction cloud sync — all transactions now sync to Supabase',
-      'Import batch persistence — batches saved to localStorage and synced',
-      'PDF import now sets importBatchId correctly',
+      'Transaction cloud sync — all transactions pushed to Supabase',
+      'Import batch persistence to localStorage and cloud',
     ],
     test: [
-      'Sync now → check Supabase Table Editor → transactions table should have your rows',
+      'Sync now → Supabase Table Editor → transactions table should have your rows',
       'Import a CSV → sync → check import_batches table in Supabase',
     ],
   },
@@ -69,16 +79,13 @@ export const CHANGELOG: VersionEntry[] = [
     version: 'V12.5',
     date: 'May 2026',
     what: [
-      'Batch upsert replaces N+1 pattern — sync is now one request per entity type',
-      'Conflict detection — shows a side-by-side modal when cloud has newer data',
+      'Batch upsert — sync is one request per entity, not N+1',
+      'Conflict detection modal — shows side-by-side when cloud has newer data',
       'Safe entity sync: accounts, categories, goals, rules, saved budgets, actuals',
-      'Category updatedAt field added, schema migrated to v3',
     ],
     test: [
-      'Test cloud connection → Sync now → should show "Cloud synced" with no errors',
-      'Edit a category on one device, sync from another → conflict modal should appear',
+      'Test connection → Sync now → should say "Cloud synced" with no errors',
+      'Edit a record on two devices without syncing → sync one → conflict modal should appear',
     ],
   },
 ]
-
-export const CURRENT_VERSION = CHANGELOG[0].version

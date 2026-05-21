@@ -209,6 +209,8 @@ export type CloudRestoreData = {
   savedScenarios: SavedScenarioSet[]
   savedBudgets: SavedBudget[]
   actuals: Record<string, string> | null
+  monthlyNotes: Record<string, string>
+  reviewedMonths: Record<string, string>
   summary: CloudRestoreSummary
 }
 
@@ -238,7 +240,7 @@ export async function fetchCloudDataForRestore(
   const batchMap    = buildIdMap(batchesFetch.rows)
 
   // ── Stage 2: Fetch child entities in parallel ──
-  const [txnFetch, rulesFetch, contribFetch, setsFetch, scenariosFetch, budgetsFetch, actualsFetch] = await Promise.all([
+  const [txnFetch, rulesFetch, contribFetch, setsFetch, scenariosFetch, budgetsFetch, actualsFetch, reviewsFetch] = await Promise.all([
     fetchTable(supabase, 'transactions', userId),
     fetchTable(supabase, 'transaction_rules', userId),
     fetchTable(supabase, 'savings_goal_contributions', userId),
@@ -250,6 +252,12 @@ export async function fetchCloudDataForRestore(
         const { data } = await supabase.from('budget_actuals').select('actuals').eq('user_id', userId).maybeSingle()
         return data as { actuals: Record<string, string> } | null
       } catch { return null }
+    })(),
+    (async () => {
+      try {
+        const { data } = await supabase.from('monthly_reviews').select('month, notes, reviewed_at').eq('user_id', userId)
+        return Array.isArray(data) ? data as Array<{ month: string; notes: string; reviewed_at: string | null }> : []
+      } catch { return [] }
     })(),
   ])
 
@@ -299,6 +307,13 @@ export async function fetchCloudDataForRestore(
     ? (actualsFetch as { actuals: Record<string, string> }).actuals
     : null
 
+  const monthlyNotes: Record<string, string> = {}
+  const reviewedMonths: Record<string, string> = {}
+  for (const row of (reviewsFetch as Array<{ month: string; notes: string; reviewed_at: string | null }>) ?? []) {
+    if (row.notes) monthlyNotes[row.month] = row.notes
+    if (row.reviewed_at) reviewedMonths[row.month] = row.reviewed_at
+  }
+
   const totalContributions = Object.values(contribsByGoal).reduce((s, c) => s + c.length, 0)
 
   return {
@@ -312,6 +327,8 @@ export async function fetchCloudDataForRestore(
     savedScenarios,
     savedBudgets,
     actuals,
+    monthlyNotes,
+    reviewedMonths,
     summary: {
       accounts: accounts.length,
       categories: categories.length,

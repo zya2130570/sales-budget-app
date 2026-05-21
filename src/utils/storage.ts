@@ -287,6 +287,46 @@ export function saveTransactionRules(r: TransactionRule[]): void { saveToStorage
 export function saveTakeHomeSettings(s: TakeHomeSettings): void { saveToStorage(KEYS.takeHome, s) }
 export function saveImportBatches(b: ImportBatch[]): void       { saveToStorage(STORAGE_KEYS.importHistory, b) }
 
+// ── Pending cloud deletions ──────────────────────────────────────────────────
+// When the user deletes a record locally, we track its ID here so the next sync
+// can mark the corresponding cloud record as deleted_at (soft delete).
+// Cleared per-item after the sync confirms each deletion.
+
+import { PENDING_DELETES_KEY } from './storageKeys'
+
+export type PendingDeleteRecord = {
+  table: string   // cloud table name
+  localId: string
+  deletedAt: string
+}
+
+export function loadPendingDeletes(): PendingDeleteRecord[] {
+  try {
+    const raw = localStorage.getItem(PENDING_DELETES_KEY)
+    return raw ? (JSON.parse(raw) as PendingDeleteRecord[]) : []
+  } catch { return [] }
+}
+
+export function addPendingDelete(table: string, localId: string): void {
+  try {
+    const current = loadPendingDeletes()
+    // Avoid duplicates
+    if (current.some(d => d.table === table && d.localId === localId)) return
+    current.push({ table, localId, deletedAt: new Date().toISOString() })
+    localStorage.setItem(PENDING_DELETES_KEY, JSON.stringify(current))
+  } catch { /* quota — ignore */ }
+}
+
+export function clearSyncedDeletes(synced: PendingDeleteRecord[]): void {
+  try {
+    const current = loadPendingDeletes()
+    const remaining = current.filter(d =>
+      !synced.some(s => s.table === d.table && s.localId === d.localId),
+    )
+    localStorage.setItem(PENDING_DELETES_KEY, JSON.stringify(remaining))
+  } catch { /* ignore */ }
+}
+
 // ── Backup / restore ──────────────────────────────────────────────────────────
 
 /**
@@ -360,6 +400,8 @@ export function applyCloudRestoreToLocalStorage(data: {
   savedScenarios: SavedScenarioSet[]
   savedBudgets: SavedBudget[]
   actuals: Record<string, string> | null
+  monthlyNotes?: Record<string, string>
+  reviewedMonths?: Record<string, string>
 }): void {
   saveAccounts(data.accounts)
   saveCategories(data.categories)
@@ -372,5 +414,11 @@ export function applyCloudRestoreToLocalStorage(data: {
   saveSavedBudgets(data.savedBudgets)
   if (data.actuals) {
     saveToStorage(STORAGE_KEYS.budgetActuals, data.actuals)
+  }
+  if (data.monthlyNotes && Object.keys(data.monthlyNotes).length > 0) {
+    saveToStorage(STORAGE_KEYS.monthlyNotes, data.monthlyNotes)
+  }
+  if (data.reviewedMonths && Object.keys(data.reviewedMonths).length > 0) {
+    saveToStorage(STORAGE_KEYS.reviewedMonths, data.reviewedMonths)
   }
 }

@@ -40,6 +40,7 @@ export type CloudPersistEntity =
   | 'scenarios'
   | 'saved_budgets'
   | 'budget_actuals'
+  | 'monthly_reviews'
 
 export type CloudPersistResult = {
   entity: CloudPersistEntity
@@ -585,6 +586,8 @@ export async function persistBudgetActualsToCloud(
   supabase: Client,
   userId: string,
   actuals: Record<string, string>,
+  period?: string,
+  periodStart?: string,
 ): Promise<CloudPersistResult> {
   const entity: CloudPersistEntity = 'budget_actuals'
   if (!Object.keys(actuals).length) {
@@ -596,6 +599,8 @@ export async function persistBudgetActualsToCloud(
     user_id: userId,
     local_id: userId,
     actuals,
+    period: period ?? null,
+    period_start: periodStart ?? null,
     updated_at: nowIso(),
   }]
 
@@ -716,6 +721,100 @@ export async function persistTransactionsToCloud(
   }
 }
 
+// ─── Delete propagation ────────────────────────────────────────────────────────
+
+export type CloudPendingDelete = {
+  table: string
+  localId: string
+  deletedAt: string
+}
+
+/**
+ * Marks cloud records as soft-deleted for any locally deleted records.
+ * Sets deleted_at on the cloud row; the row is never physically removed.
+ */
+export async function syncPendingDeletes(
+  supabase: Client,
+  userId: string,
+  pendingDeletes: CloudPendingDelete[],
+): Promise<{ synced: CloudPendingDelete[]; failed: CloudPendingDelete[] }> {
+  if (!pendingDeletes.length) return { synced: [], failed: [] }
+
+  const synced: CloudPendingDelete[] = []
+  const failed: CloudPendingDelete[] = []
+
+  // Group by table so we can batch per table
+  const byTable = pendingDeletes.reduce<Record<string, CloudPendingDelete[]>>((map, d) => {
+    if (!map[d.table]) map[d.table] = []
+    map[d.table].push(d)
+    return map
+  }, {})
+
+  for (const [table, deletes] of Object.entries(byTable)) {
+    const localIds = deletes.map(d => d.localId)
+    try {
+      const { error } = await supabase
+        .from(table)
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('user_id', userId)
+        .in('local_id', localIds)
+        .is('deleted_at', null)
+
+      if (error) {
+        failed.push(...deletes)
+      } else {
+        synced.push(...deletes)
+      }
+    } catch {
+      failed.push(...deletes)
+    }
+  }
+
+  return { synced, failed }
+}
+
+// ─── Monthly reviews sync ──────────────────────────────────────────────────────
+
+/**
+ * Syncs monthly review notes and reviewed status to the monthly_reviews table.
+ * Uses (user_id, month) as the conflict key — one row per user per calendar month.
+ */
+export async function persistMonthlyReviewsToCloud(
+  supabase: Client,
+  userId: string,
+  monthlyNotes: Record<string, string>,
+  reviewedMonths: Record<string, string>,
+): Promise<CloudPersistResult> {
+  const entity: CloudPersistEntity = 'monthly_reviews'
+
+  const allMonths = Array.from(new Set([
+    ...Object.keys(monthlyNotes),
+    ...Object.keys(reviewedMonths),
+  ]))
+
+  if (!allMonths.length) return { entity, attempted: 0, synced: 0, failed: 0, skipped: 0 }
+
+  const rows = allMonths.map(month => ({
+    user_id: userId,
+    month,
+    notes: monthlyNotes[month] ?? '',
+    reviewed_at: reviewedMonths[month] ? new Date(reviewedMonths[month]).toISOString() : null,
+    status: reviewedMonths[month] ? 'reviewed' : 'draft',
+    updated_at: new Date().toISOString(),
+  }))
+
+  try {
+    const { error } = await supabase
+      .from('monthly_reviews')
+      .upsert(rows, { onConflict: 'user_id,month' })
+
+    if (error) return { entity, attempted: rows.length, synced: 0, failed: rows.length, skipped: 0 }
+    return { entity, attempted: rows.length, synced: rows.length, failed: 0, skipped: 0 }
+  } catch {
+    return { entity, attempted: rows.length, synced: 0, failed: rows.length, skipped: 0 }
+  }
+}
+
 // ─── Core sync orchestrator ────────────────────────────────────────────────────
 
 export async function persistCoreDataToCloud(params: {
@@ -730,12 +829,22 @@ export async function persistCoreDataToCloud(params: {
   savedScenarios: SavedScenarioSet[]
   savedBudgets: SavedBudget[]
   actuals: Record<string, string>
+  actualsperiod?: string
+  actualsPeriodStart?: string
   importBatches: ImportBatch[]
+  monthlyNotes: Record<string, string>
+  reviewedMonths: Record<string, string>
+  pendingDeletes: CloudPendingDelete[]
   resolutions?: ConflictResolutions
-}): Promise<CloudPersistSummary> {
+}): Promise<CloudPersistSummary & { syncedDeletes: CloudPendingDelete[] }> {
   const res = params.resolutions ?? {}
   const allConflicts: ConflictRecord[] = []
   const results: CloudPersistResult[] = []
+
+  // ── Stage 0: Delete propagation ──
+  const { synced: syncedDeletes } = await syncPendingDeletes(
+    params.supabase, params.userId, params.pendingDeletes,
+  )
 
   // ── Stage 1: Parent entities (FK targets for transactions) ──
   const acct  = await persistAccountsToCloud(params.supabase, params.userId, params.accounts, res)
@@ -761,7 +870,13 @@ export async function persistCoreDataToCloud(params: {
   results.push(await persistSavingsGoalSetsToCloud(params.supabase, params.userId, params.savedTargetSets))
   results.push(await persistScenariosToCloud(params.supabase, params.userId, params.savedScenarios))
   results.push(await persistSavedBudgetsToCloud(params.supabase, params.userId, params.savedBudgets))
-  results.push(await persistBudgetActualsToCloud(params.supabase, params.userId, params.actuals))
+  results.push(await persistBudgetActualsToCloud(
+    params.supabase, params.userId, params.actuals,
+    params.actualsperiod, params.actualsPeriodStart,
+  ))
+  results.push(await persistMonthlyReviewsToCloud(
+    params.supabase, params.userId, params.monthlyNotes, params.reviewedMonths,
+  ))
 
   return {
     attempted: results.reduce((s, r) => s + r.attempted, 0),
@@ -771,5 +886,6 @@ export async function persistCoreDataToCloud(params: {
     conflicts: allConflicts,
     results,
     lastSyncedAt: nowIso(),
+    syncedDeletes,
   }
 }
