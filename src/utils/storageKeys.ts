@@ -29,7 +29,10 @@ export const STORAGE_KEYS = {
   duplicateState: 'flow_duplicate_state',
   needsReviewState: 'flow_needs_review_state',
   undoRedoState: 'flow_undo_redo_state',
+  pendingDeletes: 'flow_pending_deletes',
 } as const
 
 export type StorageKeyName = keyof typeof STORAGE_KEYS
 export type StorageKey = (typeof STORAGE_KEYS)[StorageKeyName]
+
+export const PENDING_DELETES_KEY = STORAGE_KEYS.pendingDeletes
