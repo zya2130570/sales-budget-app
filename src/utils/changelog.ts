@@ -7,6 +7,40 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V17',
+    date: 'May 2026',
+    what: [
+      'Cloud Status button — replaces two always-visible cloud panels with a compact header button accessible from any tab',
+      'Compare & Merge tab — Merge Safe, Use Cloud, and Compare are all one click away, no longer buried',
+      'Auto-sync safety — pauses after 3 consecutive failures, re-enabling after a successful connection re-test',
+      'Dashboard condensed — Financial Intelligence merged into Dashboard Summary, Cash Flow Forecast and Monthly Review now collapsible',
+    ],
+    test: [
+      'Check the header — a colored dot + "Cloud" / "Synced" / "N pending" button should appear next to ⚙',
+      'Click the cloud button → Sync tab should show test/sync buttons. Compare & Merge tab should show Use Local / Merge Safe / Use Cloud all at once',
+      'Enable Auto-sync, let 3 syncs fail → toggle should turn off automatically and show "paused" warning',
+      'Dashboard → Dashboard Summary card should now show both income metrics AND the health metrics (fixed bills, savings rate, etc.) in one card',
+      'Dashboard → click "Cash Flow Forecast" header to expand/collapse. Same for "Monthly Review"',
+    ],
+  },
+  {
+    version: 'V16',
+    date: 'May 2026',
+    what: [
+      'Settings panel — gear icon in header opens a central settings modal',
+      'Demo mode — one click loads a full realistic dataset (accounts, budget, 30+ transactions, goals)',
+      'Import from backup file — restore a flow-backup-*.json file directly in settings',
+      'Onboarding card — shown on Dashboard when the app has no data yet',
+      'Clear all data — wipes local data from settings (cloud unaffected)',
+    ],
+    test: [
+      'Click the ⚙ gear icon in the header → settings modal should open',
+      'Settings → Load demo → confirm → app reloads with realistic data across all tabs',
+      'Settings → Download backup → then Clear all data → then Restore from backup file → data comes back',
+      'After clearing data, Dashboard should show the onboarding welcome card',
+    ],
+  },
+  {
     version: 'V15',
     date: 'May 2026',
     what: [
