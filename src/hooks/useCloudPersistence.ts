@@ -7,7 +7,7 @@
  * - New entities: savedBudgets, actuals
  * - Soft delete awareness (schema supports deleted_at; local delete propagation in V12.6)
  */
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Account, Category, ImportBatch, SavedBudget, SavedScenarioSet, SavedTargetSet, Target, Transaction, TransactionRule } from '../types'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from './useAuth'
@@ -15,10 +15,12 @@ import {
   persistCoreDataToCloud,
   testCloudConnection,
   type CloudConnectionTestResult,
+  type CloudPendingDelete,
   type CloudPersistSummary,
   type ConflictRecord,
   type ConflictResolutions,
 } from '../utils/cloudPersistence'
+import { clearSyncedDeletes } from '../utils/storage'
 
 export type CloudPersistenceStatus =
   | 'guest'       // not logged in / Supabase not configured
@@ -42,6 +44,11 @@ export type UseCloudPersistenceArgs = {
   savedBudgets: SavedBudget[]
   actuals: Record<string, string>
   importBatches: ImportBatch[]
+  monthlyNotes: Record<string, string>
+  reviewedMonths: Record<string, string>
+  pendingDeletes: CloudPendingDelete[]
+  actualsperiod?: string
+  actualsPeriodStart?: string
 }
 
 const LAST_SYNC_KEY = 'flow_cloud_last_sync_at'
@@ -65,6 +72,7 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
   const [connectionTested, setConnectionTested] = useState(false)
   const [connectionTestError, setConnectionTestError] = useState<string | null>(null)
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
+  const autoSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Conflict state — pauses sync until user resolves each conflict
   const [pendingConflicts, setPendingConflicts] = useState<ConflictRecord[]>([])
@@ -138,6 +146,11 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
         resolutions: conflictResolutions,
       })
 
+      // Clear pending deletes that were successfully synced
+      if (result.syncedDeletes?.length) {
+        clearSyncedDeletes(result.syncedDeletes)
+      }
+
       setLastResult(result)
 
       // New conflicts found — pause sync and show modal
@@ -198,6 +211,20 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
     setAutoSyncEnabled(enabled)
     if (!enabled && !connectionTested) setStatus(canSync ? 'idle' : 'guest')
   }, [canSync, connectionTested])
+
+  // ── True auto-sync: fires 5s after any data change when enabled + tested ──
+  useEffect(() => {
+    if (!autoSyncEnabled || !connectionTested || !canSync) return
+    if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current)
+    autoSyncTimerRef.current = setTimeout(() => {
+      void runSyncNow()
+    }, 5000)
+    return () => {
+      if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current)
+    }
+  // fingerprint changes are the data-mutation signal
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fingerprint, autoSyncEnabled, connectionTested, canSync])
 
   // Derive guest/idle from canSync
   if (!canSync && status !== 'guest') setStatus('guest')

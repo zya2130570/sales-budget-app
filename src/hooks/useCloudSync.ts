@@ -8,7 +8,14 @@ import {
 } from '../utils/reconciliationEngine'
 import type { DatasetSummary, ReconciliationAnalysis } from '../utils/reconciliationEngine'
 import { fetchCloudDataForRestore, type CloudRestoreSummary } from '../utils/cloudRestore'
-import { downloadBackupFile, applyCloudRestoreToLocalStorage } from '../utils/storage'
+import {
+  downloadBackupFile,
+  applyCloudRestoreToLocalStorage,
+  loadAccounts, loadCategories, loadTargets, loadTransactionRules,
+  loadSavedBudgets, loadSavedScenarios, loadSavedTargetSets,
+  saveAccounts, saveCategories, saveTargets, saveTransactionRules,
+  saveSavedBudgets, saveSavedScenarios, saveSavedTargetSets,
+} from '../utils/storage'
 
 export type CloudSyncChoice = 'local' | 'cloud' | 'merge-safe' | null
 
@@ -125,10 +132,68 @@ export function useCloudSync() {
     }
   }, [auth.user])
 
-  const chooseMergeSafe = useCallback(() => {
+  const chooseMergeSafe = useCallback(async () => {
+    if (!auth.user || !supabase) return
+    setRestoring(true)
+    setError(null)
     setSelectedChoice('merge-safe')
-    setStatus('Safe merge is planned for V12.7C. Use "Sync now" in the Cloud persistence panel to push local data to cloud.')
-  }, [])
+    setStatus('Fetching cloud data to find gaps…')
+
+    try {
+      const cloud = await fetchCloudDataForRestore(supabase, auth.user.id)
+
+      // Build local ID sets for safe entity types (never merge transactions)
+      const localAccountIds  = new Set((loadAccounts() ?? []).map(r => r.id))
+      const localCategoryIds = new Set((loadCategories() ?? []).map(r => r.id))
+      const localGoalIds     = new Set((loadTargets() ?? []).map(r => r.id))
+      const localRuleIds     = new Set((loadTransactionRules() ?? []).map(r => r.id))
+      const localBudgetNames = new Set((loadSavedBudgets() ?? []).map(r => r.name + r.savedAt))
+      const localScenarioNames = new Set((loadSavedScenarios() ?? []).map(r => r.name + r.savedAt))
+      const localSetNames    = new Set((loadSavedTargetSets() ?? []).map(r => r.name + r.savedAt))
+
+      // Only cloud-only records (exist in cloud but NOT locally)
+      const newAccounts   = cloud.accounts.filter(r => !localAccountIds.has(r.id))
+      const newCategories = cloud.categories.filter(r => !localCategoryIds.has(r.id))
+      const newGoals      = cloud.targets.filter(r => !localGoalIds.has(r.id))
+      const newRules      = cloud.rules.filter(r => !localRuleIds.has(r.id))
+      const newBudgets    = cloud.savedBudgets.filter(r => !localBudgetNames.has(r.name + r.savedAt))
+      const newScenarios  = cloud.savedScenarios.filter(r => !localScenarioNames.has(r.name + r.savedAt))
+      const newGoalSets   = cloud.savedTargetSets.filter(r => !localSetNames.has(r.name + r.savedAt))
+
+      const totalAdded = newAccounts.length + newCategories.length + newGoals.length +
+        newRules.length + newBudgets.length + newScenarios.length + newGoalSets.length
+
+      if (totalAdded === 0) {
+        setStatus('Safe merge complete — local already has everything from cloud. No changes made.')
+        setRestoring(false)
+        return
+      }
+
+      // Merge: append cloud-only records to local state
+      if (newAccounts.length)   saveAccounts([...(loadAccounts() ?? []), ...newAccounts])
+      if (newCategories.length) saveCategories([...(loadCategories() ?? []), ...newCategories])
+      if (newGoals.length)      saveTargets([...(loadTargets() ?? []), ...newGoals])
+      if (newRules.length)      saveTransactionRules([...(loadTransactionRules() ?? []), ...newRules])
+      if (newBudgets.length)    saveSavedBudgets([...(loadSavedBudgets() ?? []), ...newBudgets])
+      if (newScenarios.length)  saveSavedScenarios([...(loadSavedScenarios() ?? []), ...newScenarios])
+      if (newGoalSets.length)   saveSavedTargetSets([...(loadSavedTargetSets() ?? []), ...newGoalSets])
+
+      setRestoreSummary(cloud.summary)
+      setStatus(
+        `Safe merge complete — added ${totalAdded} cloud-only record${totalAdded === 1 ? '' : 's'} locally. ` +
+        `(${newAccounts.length} accounts, ${newCategories.length} categories, ${newGoals.length} goals, ${newRules.length} rules.) ` +
+        `Transactions were not touched. Reloading…`
+      )
+      setTimeout(() => window.location.reload(), 1800)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Safe merge failed.'
+      setError(msg)
+      setStatus('Safe merge failed. Local data was not changed.')
+      setSelectedChoice(null)
+    } finally {
+      setRestoring(false)
+    }
+  }, [auth.user])
 
   const summary = useMemo(() => ({
     canCheckCloud,
