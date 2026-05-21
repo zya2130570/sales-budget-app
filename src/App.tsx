@@ -113,6 +113,9 @@ import { useCloudPersistence } from './hooks/useCloudPersistence'
 // V13 — Intelligence layer
 import { SpendingInsightsPanel } from './components/SpendingInsightsPanel'
 import { generateSpendingInsights, generateMonthlyReviewSummary } from './utils/spendingInsights'
+// V14 — AI assistant + version badge
+import { AIAssistantPanel } from './components/AIAssistantPanel'
+import { useAIAssistant } from './hooks/useAIAssistant'
 
 // Helper: true for transaction types that represent money movement between accounts
 const isMoneyMovement = (type: TransactionType): boolean =>
@@ -1163,6 +1166,8 @@ export default function App() {
     overBudget:      budgetHealth.overBudget,
     totalPlanned:    budgetHealth.totalPlanned,
     totalActual:     budgetHealth.totalActual,
+    monthlyNetIncome: inc.totalMonthly,
+    monthlyBudget,
     forecast:        cashFlowForecast,
     reviewMonth,
     uncatExpenses:   monthlyReview.uncatExpenses,
@@ -1171,7 +1176,7 @@ export default function App() {
     monthlyIncome:   monthlyReview.income,
     monthlyExpenses: monthlyReview.expenses,
     monthlyNetCash:  monthlyReview.netCash,
-  }), [categories, transactions, targets, budgetHealth, cashFlowForecast, reviewMonth, monthlyReview])
+  }), [categories, transactions, targets, budgetHealth, inc.totalMonthly, monthlyBudget, cashFlowForecast, reviewMonth, monthlyReview])
 
   // V13 — Monthly review prose summary
   const monthlyReviewSummary = useMemo(() => generateMonthlyReviewSummary({
@@ -2280,6 +2285,46 @@ txnMerchantRef.current?.focus()
   }
 
   // V12.4 — Local-first cloud persistence. localStorage remains runtime source of truth.
+  // V14 — AI assistant
+  const aiAssistant = useAIAssistant()
+  const aiContext = useMemo(() => ({
+    income: {
+      monthlyNet: inc.totalMonthly,
+      weeklyNet: convertFromMonthly(inc.totalMonthly, 'weekly'),
+    },
+    budget: {
+      monthlyTotal: monthlyBudget,
+      monthlyRemaining: monthlyLeft,
+      weeklyTotal: convertFromMonthly(monthlyBudget, 'weekly'),
+      isOverIncome: monthlyBudget > inc.totalMonthly,
+    },
+    cashFlow: {
+      status: cashFlowForecast.status,
+      projectedEnd: cashFlowForecast.projectedEnd,
+      safeToSpend: cashFlowForecast.safeToSpend,
+      windowDays: forecastPeriod,
+      startingCash: cashFlowForecast.startingCash,
+    },
+    categories: categories.slice(0, 12).map(c => ({
+      name: c.name,
+      type: c.type,
+      monthlyBudget: c.amount,
+    })),
+    savingsGoals: targets.filter(t => !t.completed).map(t => ({
+      name: t.name,
+      saved: t.currentSaved,
+      goal: t.goalAmount,
+      deadline: t.deadline,
+      pctComplete: t.goalAmount > 0 ? Math.round((t.currentSaved / t.goalAmount) * 100) : 0,
+    })),
+    recentSpending: {
+      last30DaysTotal: monthlyReview.expenses,
+      transactionCount: monthlyReview.txns.length,
+      reviewMonth,
+    },
+    currentInsights: spendingInsights.map(i => `[${i.priority}] ${i.title}`),
+  }), [inc, monthlyBudget, monthlyLeft, cashFlowForecast, forecastPeriod, categories, targets, monthlyReview, reviewMonth, spendingInsights])
+
   const cloudPersistence = useCloudPersistence({
     accounts,
     categories,
@@ -2387,6 +2432,15 @@ txnMerchantRef.current?.focus()
             <SpendingInsightsPanel
               insights={spendingInsights}
               onAction={(tab) => setTab(tab as import('./types').Tab)}
+            />
+
+            {/* ── V14 AI Financial Assistant ── */}
+            <AIAssistantPanel
+              messages={aiAssistant.messages}
+              status={aiAssistant.status}
+              error={aiAssistant.error}
+              onSend={(text) => aiAssistant.sendMessage(text, aiContext)}
+              onClear={aiAssistant.clearHistory}
             />
 
             <Card title="Dashboard Summary">
