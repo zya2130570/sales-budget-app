@@ -23,6 +23,7 @@ import type {
   Target,
   Transaction,
   TransactionRule,
+  TakeHomeSettings,
 } from '../types'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
@@ -41,6 +42,7 @@ export type CloudPersistEntity =
   | 'saved_budgets'
   | 'budget_actuals'
   | 'monthly_reviews'
+  | 'take_home_settings'
 
 export type CloudPersistResult = {
   entity: CloudPersistEntity
@@ -594,17 +596,43 @@ export async function persistBudgetActualsToCloud(
     return { entity, attempted: 0, synced: 0, failed: 0, skipped: 0 }
   }
 
-  // One row per user — use user_id as local_id for the upsert key
+  const periodKey = [period ?? 'unknown-period', periodStart ?? 'unknown-start'].join(':')
+
+  // One row per user + period. This prevents May actuals from overwriting June actuals.
   const rows: Row[] = [{
     user_id: userId,
-    local_id: userId,
-    actuals,
+    local_id: periodKey,
+    period_key: periodKey,
     period: period ?? null,
     period_start: periodStart ?? null,
+    actuals,
     updated_at: nowIso(),
+    deleted_at: null,
   }]
 
   const { synced, failed } = await batchUpsert(supabase, 'budget_actuals', rows)
+  return { entity, attempted: 1, synced, failed, skipped: 0 }
+}
+
+export async function persistTakeHomeSettingsToCloud(
+  supabase: Client,
+  userId: string,
+  settings: TakeHomeSettings | null | undefined,
+): Promise<CloudPersistResult> {
+  const entity: CloudPersistEntity = 'take_home_settings'
+  if (!settings) return { entity, attempted: 0, synced: 0, failed: 0, skipped: 0 }
+
+  const rows: Row[] = [{
+    user_id: userId,
+    local_id: userId,
+    mode: settings.mode,
+    simple_rate: safeNum(settings.simpleRate, 0.8243),
+    manual_monthly_net: safeNum(settings.manualMonthlyNet, 0),
+    updated_at: settings.updatedAt ?? nowIso(),
+    deleted_at: null,
+  }]
+
+  const { synced, failed } = await batchUpsert(supabase, 'take_home_settings', rows)
   return { entity, attempted: 1, synced, failed, skipped: 0 }
 }
 
@@ -829,6 +857,7 @@ export async function persistCoreDataToCloud(params: {
   savedScenarios: SavedScenarioSet[]
   savedBudgets: SavedBudget[]
   actuals: Record<string, string>
+  takeHomeSettings?: TakeHomeSettings | null
   actualsperiod?: string
   actualsPeriodStart?: string
   importBatches: ImportBatch[]
@@ -873,6 +902,9 @@ export async function persistCoreDataToCloud(params: {
   results.push(await persistBudgetActualsToCloud(
     params.supabase, params.userId, params.actuals,
     params.actualsperiod, params.actualsPeriodStart,
+  ))
+  results.push(await persistTakeHomeSettingsToCloud(
+    params.supabase, params.userId, params.takeHomeSettings,
   ))
   results.push(await persistMonthlyReviewsToCloud(
     params.supabase, params.userId, params.monthlyNotes, params.reviewedMonths,

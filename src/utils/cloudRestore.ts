@@ -26,6 +26,7 @@ import type {
   TransactionRule,
   TransactionSource,
   TransactionType,
+  TakeHomeSettings,
 } from '../types'
 
 export type CloudRestoreSummary = {
@@ -40,6 +41,7 @@ export type CloudRestoreSummary = {
   savedTargetSets: number
   savedBudgets: number
   actualsRestored: boolean
+  takeHomeSettingsRestored: boolean
   errors: string[]
 }
 
@@ -79,6 +81,8 @@ async function fetchTable(
     const tablesWithSoftDelete = [
       'accounts', 'categories', 'transactions', 'transaction_rules',
       'import_batches', 'savings_goals', 'savings_goal_contributions',
+      'savings_goal_sets', 'scenarios', 'saved_budgets', 'budget_actuals',
+      'monthly_reviews', 'take_home_settings',
     ]
     if (tablesWithSoftDelete.includes(table)) {
       q = q.is('deleted_at', null)
@@ -209,6 +213,8 @@ export type CloudRestoreData = {
   savedScenarios: SavedScenarioSet[]
   savedBudgets: SavedBudget[]
   actuals: Record<string, string> | null
+  actualsByPeriod: Record<string, Record<string, string>>
+  takeHomeSettings: TakeHomeSettings | null
   monthlyNotes: Record<string, string>
   reviewedMonths: Record<string, string>
   summary: CloudRestoreSummary
@@ -240,7 +246,7 @@ export async function fetchCloudDataForRestore(
   const batchMap    = buildIdMap(batchesFetch.rows)
 
   // ── Stage 2: Fetch child entities in parallel ──
-  const [txnFetch, rulesFetch, contribFetch, setsFetch, scenariosFetch, budgetsFetch, actualsFetch, reviewsFetch] = await Promise.all([
+  const [txnFetch, rulesFetch, contribFetch, setsFetch, scenariosFetch, budgetsFetch, actualsFetch, reviewsFetch, takeHomeFetch] = await Promise.all([
     fetchTable(supabase, 'transactions', userId),
     fetchTable(supabase, 'transaction_rules', userId),
     fetchTable(supabase, 'savings_goal_contributions', userId),
@@ -249,15 +255,21 @@ export async function fetchCloudDataForRestore(
     fetchTable(supabase, 'saved_budgets', userId),
     (async () => {
       try {
-        const { data } = await supabase.from('budget_actuals').select('actuals').eq('user_id', userId).maybeSingle()
-        return data as { actuals: Record<string, string> } | null
-      } catch { return null }
+        const { data } = await supabase.from('budget_actuals').select('period_key, actuals, updated_at').eq('user_id', userId).is('deleted_at', null)
+        return Array.isArray(data) ? data as Array<{ period_key: string | null; actuals: Record<string, string>; updated_at?: string }> : []
+      } catch { return [] }
     })(),
     (async () => {
       try {
-        const { data } = await supabase.from('monthly_reviews').select('month, notes, reviewed_at').eq('user_id', userId)
+        const { data } = await supabase.from('monthly_reviews').select('month, notes, reviewed_at').eq('user_id', userId).is('deleted_at', null)
         return Array.isArray(data) ? data as Array<{ month: string; notes: string; reviewed_at: string | null }> : []
       } catch { return [] }
+    })(),
+    (async () => {
+      try {
+        const { data } = await supabase.from('take_home_settings').select('*').eq('user_id', userId).is('deleted_at', null).maybeSingle()
+        return data as Record<string, unknown> | null
+      } catch { return null }
     })(),
   ])
 
@@ -303,9 +315,21 @@ export async function fetchCloudDataForRestore(
     categories: Array.isArray(r.categories_snapshot) ? (r.categories_snapshot as Category[]) : [],
   }))
 
-  const actuals = (actualsFetch && typeof actualsFetch === 'object' && 'actuals' in actualsFetch)
-    ? (actualsFetch as { actuals: Record<string, string> }).actuals
-    : null
+  const actualsRows = Array.isArray(actualsFetch) ? actualsFetch as Array<{ period_key: string | null; actuals: Record<string, string>; updated_at?: string }> : []
+  const actualsByPeriod = actualsRows.reduce<Record<string, Record<string, string>>>((map, row) => {
+    const key = row.period_key || 'legacy'
+    map[key] = row.actuals ?? {}
+    return map
+  }, {})
+  const latestActualsRow = [...actualsRows].sort((a, b) => String(b.updated_at ?? '').localeCompare(String(a.updated_at ?? '')))[0]
+  const actuals = latestActualsRow?.actuals ?? null
+
+  const takeHomeSettings: TakeHomeSettings | null = takeHomeFetch ? {
+    mode: str((takeHomeFetch as Row).mode, 'simple') as TakeHomeSettings['mode'],
+    simpleRate: num((takeHomeFetch as Row).simple_rate, 0.8243),
+    manualMonthlyNet: num((takeHomeFetch as Row).manual_monthly_net, 0),
+    updatedAt: (takeHomeFetch as Row).updated_at ? str((takeHomeFetch as Row).updated_at) : undefined,
+  } : null
 
   const monthlyNotes: Record<string, string> = {}
   const reviewedMonths: Record<string, string> = {}
@@ -327,6 +351,8 @@ export async function fetchCloudDataForRestore(
     savedScenarios,
     savedBudgets,
     actuals,
+    actualsByPeriod,
+    takeHomeSettings,
     monthlyNotes,
     reviewedMonths,
     summary: {
@@ -341,6 +367,7 @@ export async function fetchCloudDataForRestore(
       savedTargetSets: savedTargetSets.length,
       savedBudgets: savedBudgets.length,
       actualsRestored: actuals !== null,
+      takeHomeSettingsRestored: takeHomeSettings !== null,
       errors,
     },
   }

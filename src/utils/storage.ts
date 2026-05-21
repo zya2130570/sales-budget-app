@@ -400,6 +400,8 @@ export function applyCloudRestoreToLocalStorage(data: {
   savedScenarios: SavedScenarioSet[]
   savedBudgets: SavedBudget[]
   actuals: Record<string, string> | null
+  actualsByPeriod?: Record<string, Record<string, string>>
+  takeHomeSettings?: TakeHomeSettings | null
   monthlyNotes?: Record<string, string>
   reviewedMonths?: Record<string, string>
 }): void {
@@ -412,8 +414,13 @@ export function applyCloudRestoreToLocalStorage(data: {
   saveSavedTargetSets(data.savedTargetSets)
   saveSavedScenarios(data.savedScenarios)
   saveSavedBudgets(data.savedBudgets)
-  if (data.actuals) {
-    saveToStorage(STORAGE_KEYS.budgetActuals, data.actuals)
+  if (data.actualsByPeriod && Object.keys(data.actualsByPeriod).length > 0) {
+    saveToStorage(STORAGE_KEYS.budgetActuals, { version: 2, actualsByPeriod: data.actualsByPeriod })
+  } else if (data.actuals) {
+    saveToStorage(STORAGE_KEYS.budgetActuals, { version: 2, lastPeriodKey: 'restored', actualsByPeriod: { restored: data.actuals } })
+  }
+  if (data.takeHomeSettings) {
+    saveTakeHomeSettings(data.takeHomeSettings)
   }
   if (data.monthlyNotes && Object.keys(data.monthlyNotes).length > 0) {
     saveToStorage(STORAGE_KEYS.monthlyNotes, data.monthlyNotes)
