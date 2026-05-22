@@ -275,12 +275,22 @@ export function CloudStatusButton(props: SyncProps) {
                       </button>
                     ) : (
                       <div className="col-span-3 rounded-xl border border-amber-700/50 bg-amber-950/20 p-3 space-y-2">
-                        <p className="text-xs font-semibold text-amber-200">Replace local with cloud?</p>
-                        <p className="text-xs text-amber-300/70">Backup downloads first, then restores. App reloads.</p>
-                        <div className="flex gap-2">
-                          <button onClick={() => { void cs.chooseCloud(); setConfirmRestore(false) }} disabled={busy}
-                            className="px-3 py-1.5 text-xs rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors">
-                            {cs.restoring ? 'Restoring…' : 'Yes, restore'}
+                        <p className="text-xs font-semibold text-amber-200">Replace local data with cloud?</p>
+                        <p className="text-xs text-amber-300/70">
+                          Your local data will be overwritten and the app will reload.
+                          We recommend downloading a backup first, but it&apos;s optional.
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={() => { void cs.chooseCloud(); setConfirmRestore(false) }}
+                            disabled={busy}
+                            className="px-3 py-1.5 text-xs rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors disabled:opacity-50">
+                            {cs.restoring ? 'Restoring…' : 'Restore now'}
+                          </button>
+                          <button
+                            onClick={() => { props.onDownloadBackup(); }}
+                            className="px-3 py-1.5 text-xs rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors">
+                            Download backup first
                           </button>
                           <button onClick={() => setConfirmRestore(false)} className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200">Cancel</button>
                         </div>
@@ -290,7 +300,7 @@ export function CloudStatusButton(props: SyncProps) {
 
                   <p className="text-[11px] text-slate-500">
                     <strong className="text-slate-400">Merge Safe</strong> adds cloud-only records locally without overwriting. Never touches transactions.
-                    <strong className="text-slate-400"> Use Cloud</strong> replaces everything (downloads backup first).
+                    <strong className="text-slate-400"> Use Cloud</strong> replaces everything with your cloud data. A backup download is available but optional.
                   </p>
 
                   {/* Compare button + results */}
