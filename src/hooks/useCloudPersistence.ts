@@ -8,7 +8,7 @@
  * - Soft delete awareness (schema supports deleted_at; local delete propagation in V12.6)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Account, Category, ImportBatch, SavedBudget, SavedScenarioSet, SavedTargetSet, Target, Transaction, TransactionRule, TakeHomeSettings } from '../types'
+import type { Account, Category, ImportBatch, SavedBudget, SavedScenarioSet, SavedTargetSet, Target, Transaction, TransactionRule } from '../types'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from './useAuth'
 import {
@@ -43,7 +43,6 @@ export type UseCloudPersistenceArgs = {
   savedScenarios: SavedScenarioSet[]
   savedBudgets: SavedBudget[]
   actuals: Record<string, string>
-  takeHomeSettings?: TakeHomeSettings | null
   importBatches: ImportBatch[]
   monthlyNotes: Record<string, string>
   reviewedMonths: Record<string, string>
@@ -98,7 +97,6 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
     savedBudgets:    data.savedBudgets.map(i => [i.name, i.savedAt]),
     importBatches:   data.importBatches.map(i => [i.id, i.importedAt, i.importedCount]),
     actuals:         Object.keys(data.actuals).length,
-    takeHomeSettings: data.takeHomeSettings ? data.takeHomeSettings.updatedAt ?? data.takeHomeSettings.simpleRate ?? data.takeHomeSettings.manualMonthlyNet : null,
   }), [data])
 
   // ─── Connection test ────────────────────────────────────────────────────────
