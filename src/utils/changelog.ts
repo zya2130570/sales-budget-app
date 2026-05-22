@@ -7,8 +7,22 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V17.1',
+    date: '5/21/2026 at 6:15 PM',
+    what: [
+      'Version badge now always shows the current version number dynamically',
+      'Changelog dates now show specific dates and times, not just month',
+      'Settings panel now closes when clicking outside (matches Cloud Status behavior)',
+    ],
+    test: [
+      'Check the version badge in the header and in Cloud sync readiness — should say V17.1, not V15',
+      'Open Settings → click the dark overlay outside the panel → should close',
+      'Open Cloud Status → click outside → closes. Settings should now behave the same way',
+    ],
+  },
+  {
     version: 'V17',
-    date: 'May 2026',
+    date: '5/21/2026 at 5:45 PM',
     what: [
       'Cloud Status button — replaces two always-visible cloud panels with a compact header button accessible from any tab',
       'Compare & Merge tab — Merge Safe, Use Cloud, and Compare are all one click away, no longer buried',
@@ -17,15 +31,15 @@ export const CHANGELOG: VersionEntry[] = [
     ],
     test: [
       'Check the header — a colored dot + "Cloud" / "Synced" / "N pending" button should appear next to ⚙',
-      'Click the cloud button → Sync tab should show test/sync buttons. Compare & Merge tab should show Use Local / Merge Safe / Use Cloud all at once',
-      'Enable Auto-sync, let 3 syncs fail → toggle should turn off automatically and show "paused" warning',
-      'Dashboard → Dashboard Summary card should now show both income metrics AND the health metrics (fixed bills, savings rate, etc.) in one card',
-      'Dashboard → click "Cash Flow Forecast" header to expand/collapse. Same for "Monthly Review"',
+      'Click the cloud button → Sync tab shows test/sync buttons. Compare & Merge tab shows all three actions at once',
+      'Enable Auto-sync, let 3 syncs fail → toggle should turn off automatically',
+      'Dashboard → Dashboard Summary card should now include the health metrics (fixed bills, savings rate, etc.)',
+      'Dashboard → click "Cash Flow Forecast" or "Monthly Review" header to expand/collapse',
     ],
   },
   {
     version: 'V16',
-    date: 'May 2026',
+    date: '5/21/2026 at 3:00 PM',
     what: [
       'Settings panel — gear icon in header opens a central settings modal',
       'Demo mode — one click loads a full realistic dataset (accounts, budget, 30+ transactions, goals)',
@@ -42,7 +56,7 @@ export const CHANGELOG: VersionEntry[] = [
   },
   {
     version: 'V15',
-    date: 'May 2026',
+    date: '5/21/2026 at 12:35 PM',
     what: [
       'Delete propagation — deleted records now marked soft-deleted in Supabase on next sync',
       'Monthly reviews cloud sync — review notes and "mark reviewed" status backed up',
@@ -59,7 +73,7 @@ export const CHANGELOG: VersionEntry[] = [
   },
   {
     version: 'V14',
-    date: 'May 2026',
+    date: '5/21/2026 at 10:00 AM',
     what: [
       'AI Financial Assistant — ask natural-language questions using your real data',
       'Version changelog popup — click any version badge to open this',
@@ -67,13 +81,13 @@ export const CHANGELOG: VersionEntry[] = [
     ],
     test: [
       'Dashboard → "Financial Assistant" panel → ask "Why is my budget over my income?"',
-      'Click the V15 badge in Cloud sync readiness to open this changelog',
+      'Click the version badge in the header to open this changelog',
       'Dashboard Insights panel should show a red warning if planned budget > net income',
     ],
   },
   {
     version: 'V13',
-    date: 'May 2026',
+    date: '5/20/2026 at 8:30 PM',
     what: [
       'Spending Insights panel on Dashboard — prioritized, numbered callouts',
       'Monthly Review prose summary — auto-generated paragraph above the metrics',
@@ -85,7 +99,7 @@ export const CHANGELOG: VersionEntry[] = [
   },
   {
     version: 'V12.7',
-    date: 'May 2026',
+    date: '5/20/2026 at 5:00 PM',
     what: [
       'Local backup download — one-click JSON export',
       'Restore from cloud — "Use Cloud Data" downloads backup first then restores',
@@ -99,7 +113,7 @@ export const CHANGELOG: VersionEntry[] = [
   },
   {
     version: 'V12.6',
-    date: 'May 2026',
+    date: '5/19/2026 at 6:00 PM',
     what: [
       'Transaction cloud sync — all transactions pushed to Supabase',
       'Import batch persistence to localStorage and cloud',
@@ -111,7 +125,7 @@ export const CHANGELOG: VersionEntry[] = [
   },
   {
     version: 'V12.5',
-    date: 'May 2026',
+    date: '5/19/2026 at 3:53 PM',
     what: [
       'Batch upsert — sync is one request per entity, not N+1',
       'Conflict detection modal — shows side-by-side when cloud has newer data',
@@ -123,3 +137,6 @@ export const CHANGELOG: VersionEntry[] = [
     ],
   },
 ]
+
+/** Always reflects the latest deployed version. Used by VersionBadge. */
+export const CURRENT_VERSION = CHANGELOG[0].version
