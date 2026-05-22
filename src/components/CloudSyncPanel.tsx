@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useCloudSync } from '../hooks/useCloudSync'
 import { VersionBadge } from './VersionBadge'
+import { CURRENT_VERSION } from '../utils/changelog'
 import type { DatasetSummary, ReconciliationAnalysis } from '../utils/reconciliationEngine'
 
 function formatDate(value: string | null): string {
@@ -137,7 +138,7 @@ export function CloudSyncPanel() {
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-base font-semibold text-slate-100">Cloud sync readiness</h2>
-            <VersionBadge version="V15" />
+            <VersionBadge version={CURRENT_VERSION} />
           </div>
           <p className="mt-1 text-sm text-slate-400">
             Compare this device with cloud data. Use Cloud Data will download a local backup first, then restore.
