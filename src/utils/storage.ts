@@ -82,7 +82,7 @@ export function saveToStorage(key: string, value: unknown): void {
 
 export function saveRawToStorage(key: string, value: string): void {
   try {
-    localStorage.setItem(key, value)
+    localStorage.setItem(wsKey(key), value)
   } catch {
     // Ignore quota/private browsing failures.
   }

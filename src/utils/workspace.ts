@@ -1,5 +1,5 @@
 /**
- * workspace.ts — V17.2
+ * workspace.ts — V17.3
  *
  * Namespaces localStorage keys per authenticated user so different accounts
  * on the same device/browser never share or see each other's data.
@@ -15,17 +15,21 @@
  *     It persists the prefix to sessionStorage and reloads the page so all
  *     React state is reloaded from the correct namespace.
  *  3. workspace.clear() is called by useAuth on sign-out.
- *     It removes the sessionStorage entry and reloads.
+ *     It removes the sessionStorage entry, clears the flat guest keys so
+ *     the guest namespace is empty after a logged-in session, then reloads.
  *
  * Migration:
  *  When a user first logs in on a device that has flat (guest) data,
  *  workspace.migrate(userId) copies all app keys to the namespaced prefix.
- *  The original flat keys are preserved so the app can still fall back to
- *  them in guest mode.
+ *  After migration the flat keys are cleared so they don't leak back into
+ *  guest mode on sign-out.
  */
 
 const SESSION_UID_KEY = 'flow_ws_uid'
 const WS_PREFIX = 'ws:u:'
+
+/** All app-owned key prefixes that should be namespaced. */
+const APP_KEY_PREFIXES = ['v42-', 'flow_']
 
 let _prefix = ''        // '' = guest, 'ws:u:{id}:' = authenticated
 let _currentUid: string | null = null
@@ -38,6 +42,32 @@ export function wsKey(rawKey: string): string {
 /** Returns the current active user ID, or null for guest. */
 export function currentWorkspaceUid(): string | null {
   return _currentUid
+}
+
+/**
+ * Returns true if a localStorage key belongs to the app (not a workspace key).
+ */
+function isAppFlatKey(key: string): boolean {
+  if (key.startsWith(WS_PREFIX)) return false  // already namespaced
+  return APP_KEY_PREFIXES.some(p => key.startsWith(p))
+}
+
+/**
+ * Clears all flat (guest-namespace) app keys from localStorage.
+ * Called after migration (so flat keys don't leak back to guest on sign-out)
+ * and on sign-out (so the guest view is empty after an auth session ends).
+ */
+function clearFlatAppKeys(): void {
+  try {
+    const toRemove: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && isAppFlatKey(key)) toRemove.push(key)
+    }
+    for (const key of toRemove) {
+      localStorage.removeItem(key)
+    }
+  } catch { /* private browsing */ }
 }
 
 /**
@@ -58,6 +88,7 @@ export function initWorkspace(): void {
 /**
  * Switch to the authenticated workspace for userId.
  * Runs migration (copies flat keys to namespaced ones on first login),
+ * clears the flat keys so they don't bleed back to guest mode,
  * then reloads the page so React state is initialized from the correct namespace.
  */
 export function activateUserWorkspace(userId: string): void {
@@ -68,6 +99,9 @@ export function activateUserWorkspace(userId: string): void {
     // Run migration before switching prefix so source flat keys still exist
     migrateToWorkspace(userId)
 
+    // After migration, clear flat keys so they don't pollute guest mode on sign-out
+    clearFlatAppKeys()
+
     sessionStorage.setItem(SESSION_UID_KEY, userId)
     window.location.reload()
   } catch { /* ignore */ }
@@ -75,11 +109,17 @@ export function activateUserWorkspace(userId: string): void {
 
 /**
  * Switch back to guest workspace.
- * Reloads so React state is initialized from flat (guest) keys.
+ * Clears flat app keys first (removing any remnants from before the user
+ * signed in or from a previous session), then reloads so React reads the
+ * now-empty guest namespace — giving a clean signed-out state.
  */
 export function clearUserWorkspace(): void {
   try {
     if (!sessionStorage.getItem(SESSION_UID_KEY)) return  // already guest
+
+    // Wipe flat keys so guest view is blank after sign-out
+    clearFlatAppKeys()
+
     sessionStorage.removeItem(SESSION_UID_KEY)
     window.location.reload()
   } catch { /* ignore */ }
@@ -98,8 +138,8 @@ export function migrateToWorkspace(userId: string): void {
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i)
       if (!key) continue
-      // Only migrate app-owned keys (v42-* and flow_*), skip any already-namespaced keys
-      if ((key.startsWith('v42-') || key.startsWith('flow_')) && !key.startsWith(WS_PREFIX)) {
+      // Only migrate flat app-owned keys, skip any already-namespaced keys
+      if (isAppFlatKey(key)) {
         const value = localStorage.getItem(key)
         if (value !== null) {
           const destKey = `${WS_PREFIX}${userId}:${key}`
