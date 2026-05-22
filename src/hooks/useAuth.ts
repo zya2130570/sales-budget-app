@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { User, Session } from '@supabase/supabase-js'
 import { supabase, isSupabaseConfigured } from '../lib/supabaseClient'
+import { activateUserWorkspace, clearUserWorkspace } from '../utils/workspace'
 
 export interface AuthState {
   user: User | null
@@ -76,8 +77,10 @@ export function useAuth(): AuthState {
     if (!isSupabaseConfigured || !supabase) return
     setError(null)
     try {
-      const { error: err } = await supabase.auth.signInWithPassword({ email, password })
-      if (err) setError(err.message)
+      const { data, error: err } = await supabase.auth.signInWithPassword({ email, password })
+      if (err) { setError(err.message); return }
+      // Switch to user workspace — migrates data from guest keys if needed, then reloads
+      if (data.user) activateUserWorkspace(data.user.id)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Sign in failed')
     }
@@ -99,7 +102,9 @@ export function useAuth(): AuthState {
     setError(null)
     try {
       const { error: err } = await supabase.auth.signOut()
-      if (err) setError(err.message)
+      if (err) { setError(err.message); return }
+      // Switch back to guest workspace — reloads so app reads guest (flat) keys
+      clearUserWorkspace()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Sign out failed')
     }
