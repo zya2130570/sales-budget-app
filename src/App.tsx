@@ -36,6 +36,7 @@ import {
   downloadBackupFile,
   addPendingDelete,
   loadPendingDeletes,
+  loadTakeHomeSettings,
 } from './utils/storage'
 import {
   loadBudgetActuals,
@@ -2354,6 +2355,10 @@ txnMerchantRef.current?.focus()
     monthlyNotes,
     reviewedMonths,
     pendingDeletes: getPendingDeletes(),
+    // V18 — previously unsynced entities
+    takeHomeSettings: loadTakeHomeSettings(),
+    scenarioNotes,
+    categoryMemory,
   })
 
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
