@@ -119,6 +119,7 @@ import { AIAssistantPanel } from './components/AIAssistantPanel'
 import { useAIAssistant } from './hooks/useAIAssistant'
 // V15 — Version badge
 import { VersionBadge } from './components/VersionBadge'
+import { CURRENT_VERSION } from './utils/changelog'
 // V16 — Settings, onboarding, demo mode
 import { SettingsPanel } from './components/SettingsPanel'
 import { OnboardingCard } from './components/OnboardingCard'
@@ -2365,7 +2366,7 @@ txnMerchantRef.current?.focus()
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-3xl font-bold tracking-tight">Flow</h1>
-              <VersionBadge version="V15" className="mt-1" />
+              <VersionBadge version={CURRENT_VERSION} className="mt-1" />
             </div>
             <p className="text-slate-400">Personal Finance Dashboard</p>
           </div>
