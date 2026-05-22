@@ -1,6 +1,7 @@
 import type { Tab, Period, Category, SavedBudget, SavedScenarioSet, Target, SavedTargetSet, Account, Transaction, TransactionRule, TakeHomeSettings, ImportBatch } from '../types'
 import { CURRENT_SCHEMA_VERSION } from '../types'
 import { STORAGE_KEYS } from './storageKeys'
+import { wsKey } from './workspace'
 
 export const KEYS = {
   tab: STORAGE_KEYS.tab,
@@ -55,7 +56,7 @@ export function safeJsonStringify(value: unknown): string | null {
 
 export function loadFromStorage<T>(key: string, fallback: T): T {
   try {
-    return safeJsonParse<T>(localStorage.getItem(key), fallback)
+    return safeJsonParse<T>(localStorage.getItem(wsKey(key)), fallback)
   } catch {
     return fallback
   }
@@ -63,7 +64,7 @@ export function loadFromStorage<T>(key: string, fallback: T): T {
 
 export function loadRawFromStorage(key: string, fallback = ''): string {
   try {
-    const raw = localStorage.getItem(key)
+    const raw = localStorage.getItem(wsKey(key))
     return raw === null ? fallback : raw
   } catch {
     return fallback
@@ -73,7 +74,7 @@ export function loadRawFromStorage(key: string, fallback = ''): string {
 export function saveToStorage(key: string, value: unknown): void {
   try {
     const raw = safeJsonStringify(value)
-    if (raw !== null) localStorage.setItem(key, raw)
+    if (raw !== null) localStorage.setItem(wsKey(key), raw)
   } catch {
     // Ignore quota/private browsing failures.
   }
@@ -89,7 +90,7 @@ export function saveRawToStorage(key: string, value: string): void {
 
 export function removeFromStorage(key: string): void {
   try {
-    localStorage.removeItem(key)
+    localStorage.removeItem(wsKey(key))
   } catch {
     // Ignore storage failures.
   }
@@ -302,7 +303,7 @@ export type PendingDeleteRecord = {
 
 export function loadPendingDeletes(): PendingDeleteRecord[] {
   try {
-    const raw = localStorage.getItem(PENDING_DELETES_KEY)
+    const raw = localStorage.getItem(wsKey(PENDING_DELETES_KEY))
     return raw ? (JSON.parse(raw) as PendingDeleteRecord[]) : []
   } catch { return [] }
 }
@@ -313,7 +314,7 @@ export function addPendingDelete(table: string, localId: string): void {
     // Avoid duplicates
     if (current.some(d => d.table === table && d.localId === localId)) return
     current.push({ table, localId, deletedAt: new Date().toISOString() })
-    localStorage.setItem(PENDING_DELETES_KEY, JSON.stringify(current))
+    localStorage.setItem(wsKey(PENDING_DELETES_KEY), JSON.stringify(current))
   } catch { /* quota — ignore */ }
 }
 
@@ -323,7 +324,7 @@ export function clearSyncedDeletes(synced: PendingDeleteRecord[]): void {
     const remaining = current.filter(d =>
       !synced.some(s => s.table === d.table && s.localId === d.localId),
     )
-    localStorage.setItem(PENDING_DELETES_KEY, JSON.stringify(remaining))
+    localStorage.setItem(wsKey(PENDING_DELETES_KEY), JSON.stringify(remaining))
   } catch { /* ignore */ }
 }
 
@@ -336,7 +337,8 @@ export function clearSyncedDeletes(synced: PendingDeleteRecord[]): void {
 export function exportLocalBackup(): string {
   const data: Record<string, unknown> = {}
   for (const key of Object.values(STORAGE_KEYS)) {
-    const raw = localStorage.getItem(key)
+    // Read from workspace-prefixed key (wsKey handles guest vs authenticated)
+    const raw = localStorage.getItem(wsKey(key))
     if (raw !== null) {
       try { data[key] = JSON.parse(raw) }
       catch { data[key] = raw }
@@ -375,7 +377,7 @@ export function importFromBackup(json: string): { ok: boolean; error?: string } 
     const data: Record<string, unknown> = parsed.data ?? parsed
     for (const [key, value] of Object.entries(data)) {
       if (typeof key === 'string' && value !== undefined && value !== null) {
-        try { localStorage.setItem(key, JSON.stringify(value)) }
+        try { localStorage.setItem(wsKey(key), JSON.stringify(value)) }
         catch { /* quota exceeded — skip */ }
       }
     }

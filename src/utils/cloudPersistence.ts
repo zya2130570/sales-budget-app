@@ -51,6 +51,7 @@ export type CloudPersistResult = {
   failed: number
   skipped: number   // rows skipped because user chose 'cloud' for that conflict
   message?: string
+  errorDetail?: string  // exact Supabase error message for debugging
 }
 
 export type CloudPersistSummary = {
@@ -165,18 +166,21 @@ async function batchUpsert(
   supabase: Client,
   table: string,
   rows: Row[],
-): Promise<{ synced: number; failed: number }> {
+): Promise<{ synced: number; failed: number; errorDetail?: string }> {
   if (!rows.length) return { synced: 0, failed: 0 }
   try {
     const { error } = await supabase
       .from(table)
       .upsert(rows, { onConflict: 'user_id,local_id' })
 
-    return error
-      ? { synced: 0, failed: rows.length }
-      : { synced: rows.length, failed: 0 }
-  } catch {
-    return { synced: 0, failed: rows.length }
+    if (error) {
+      const detail = `[${table}] ${error.message}${error.details ? ` — ${error.details}` : ''}${error.hint ? ` (hint: ${error.hint})` : ''}`
+      return { synced: 0, failed: rows.length, errorDetail: detail }
+    }
+    return { synced: rows.length, failed: 0 }
+  } catch (err) {
+    const detail = `[${table}] ${err instanceof Error ? err.message : 'Unknown error'}`
+    return { synced: 0, failed: rows.length, errorDetail: detail }
   }
 }
 
@@ -312,7 +316,7 @@ export async function persistAccountsToCloud(
     updated_at: a.updatedAt ?? nowIso(),
   }))
 
-  const { synced, failed } = await batchUpsert(supabase, 'accounts', rows)
+  const { synced, failed, errorDetail } = await batchUpsert(supabase, 'accounts', rows)
 
   // Build conflict records (fetch cloud row for display)
   const conflictRecords: ConflictRecord[] = await Promise.all(
@@ -334,7 +338,7 @@ export async function persistAccountsToCloud(
   )
 
   return {
-    result: { entity, attempted: accounts.length, synced, failed, skipped: conflicted.length },
+    result: { entity, attempted: accounts.length, synced, failed, skipped: conflicted.length, errorDetail },
     conflicts: conflictRecords,
   }
 }
@@ -359,7 +363,7 @@ export async function persistCategoriesToCloud(
     updated_at: c.updatedAt ?? nowIso(),
   }))
 
-  const { synced, failed } = await batchUpsert(supabase, 'categories', rows)
+  const { synced, failed, errorDetail } = await batchUpsert(supabase, 'categories', rows)
 
   const conflictRecords: ConflictRecord[] = await Promise.all(
     conflicted.map(async c => {
@@ -380,7 +384,7 @@ export async function persistCategoriesToCloud(
   )
 
   return {
-    result: { entity, attempted: categories.length, synced, failed, skipped: conflicted.length },
+    result: { entity, attempted: categories.length, synced, failed, skipped: conflicted.length, errorDetail },
     conflicts: conflictRecords,
   }
 }
@@ -409,7 +413,7 @@ export async function persistTransactionRulesToCloud(
     updated_at: r.updatedAt ?? nowIso(),
   }))
 
-  const { synced, failed } = await batchUpsert(supabase, 'transaction_rules', rows)
+  const { synced, failed, errorDetail } = await batchUpsert(supabase, 'transaction_rules', rows)
 
   const conflictRecords: ConflictRecord[] = await Promise.all(
     conflicted.map(async r => {
@@ -430,7 +434,7 @@ export async function persistTransactionRulesToCloud(
   )
 
   return {
-    result: { entity, attempted: rules.length, synced, failed, skipped: conflicted.length },
+    result: { entity, attempted: rules.length, synced, failed, skipped: conflicted.length, errorDetail },
     conflicts: conflictRecords,
   }
 }
@@ -460,7 +464,7 @@ export async function persistSavingsGoalsToCloud(
     updated_at: t.updatedAt ?? nowIso(),
   }))
 
-  const { synced, failed } = await batchUpsert(supabase, 'savings_goals', rows)
+  const { synced, failed, errorDetail } = await batchUpsert(supabase, 'savings_goals', rows)
 
   const conflictRecords: ConflictRecord[] = await Promise.all(
     conflicted.map(async t => {
@@ -481,7 +485,7 @@ export async function persistSavingsGoalsToCloud(
   )
 
   return {
-    result: { entity, attempted: targets.length, synced, failed, skipped: conflicted.length },
+    result: { entity, attempted: targets.length, synced, failed, skipped: conflicted.length, errorDetail },
     conflicts: conflictRecords,
   }
 }
@@ -515,10 +519,10 @@ export async function persistSavingsGoalContributionsToCloud(
       updated_at: nowIso(),
     }))
 
-  const { synced, failed } = await batchUpsert(supabase, 'savings_goal_contributions', rows)
+  const { synced, failed, errorDetail } = await batchUpsert(supabase, 'savings_goal_contributions', rows)
   const skipped = allContributions.length - rows.length
 
-  return { entity, attempted: allContributions.length, synced, failed, skipped }
+  return { entity, attempted: allContributions.length, synced, failed, skipped, errorDetail }
 }
 
 export async function persistSavingsGoalSetsToCloud(
@@ -536,8 +540,8 @@ export async function persistSavingsGoalSetsToCloud(
     updated_at: s.savedAt ?? nowIso(),
   }))
 
-  const { synced, failed } = await batchUpsert(supabase, 'savings_goal_sets', rows)
-  return { entity, attempted: savedTargetSets.length, synced, failed, skipped: 0 }
+  const { synced, failed, errorDetail } = await batchUpsert(supabase, 'savings_goal_sets', rows)
+  return { entity, attempted: savedTargetSets.length, synced, failed, skipped: 0, errorDetail }
 }
 
 export async function persistScenariosToCloud(
@@ -556,8 +560,8 @@ export async function persistScenariosToCloud(
     updated_at: s.savedAt ?? nowIso(),
   }))
 
-  const { synced, failed } = await batchUpsert(supabase, 'scenarios', rows)
-  return { entity, attempted: savedScenarios.length, synced, failed, skipped: 0 }
+  const { synced, failed, errorDetail } = await batchUpsert(supabase, 'scenarios', rows)
+  return { entity, attempted: savedScenarios.length, synced, failed, skipped: 0, errorDetail }
 }
 
 export async function persistSavedBudgetsToCloud(
@@ -575,8 +579,8 @@ export async function persistSavedBudgetsToCloud(
     updated_at: b.savedAt ?? nowIso(),
   }))
 
-  const { synced, failed } = await batchUpsert(supabase, 'saved_budgets', rows)
-  return { entity, attempted: savedBudgets.length, synced, failed, skipped: 0 }
+  const { synced, failed, errorDetail } = await batchUpsert(supabase, 'saved_budgets', rows)
+  return { entity, attempted: savedBudgets.length, synced, failed, skipped: 0, errorDetail }
 }
 
 /**
@@ -610,8 +614,8 @@ export async function persistBudgetActualsToCloud(
     deleted_at: null,
   }]
 
-  const { synced, failed } = await batchUpsert(supabase, 'budget_actuals', rows)
-  return { entity, attempted: 1, synced, failed, skipped: 0 }
+  const { synced, failed, errorDetail } = await batchUpsert(supabase, 'budget_actuals', rows)
+  return { entity, attempted: 1, synced, failed, skipped: 0, errorDetail }
 }
 
 export async function persistTakeHomeSettingsToCloud(
@@ -670,8 +674,8 @@ export async function persistImportBatchesToCloud(
     row.account_id = accountIds[importBatches[i].accountId] ?? null
   })
 
-  const { synced, failed } = await batchUpsert(supabase, 'import_batches', rows)
-  return { entity, attempted: importBatches.length, synced, failed, skipped: 0 }
+  const { synced, failed, errorDetail } = await batchUpsert(supabase, 'import_batches', rows)
+  return { entity, attempted: importBatches.length, synced, failed, skipped: 0, errorDetail }
 }
 
 // ─── Transaction sync ──────────────────────────────────────────────────────────
@@ -722,7 +726,7 @@ export async function persistTransactionsToCloud(
     updated_at: tx.updatedAt ?? tx.createdAt ?? nowIso(),
   }))
 
-  const { synced, failed } = await batchUpsert(supabase, 'transactions', rows)
+  const { synced, failed, errorDetail } = await batchUpsert(supabase, 'transactions', rows)
 
   const conflictRecords: ConflictRecord[] = await Promise.all(
     conflicted.map(async tx => {
@@ -744,7 +748,7 @@ export async function persistTransactionsToCloud(
   )
 
   return {
-    result: { entity, attempted: transactions.length, synced, failed, skipped: conflicted.length },
+    result: { entity, attempted: transactions.length, synced, failed, skipped: conflicted.length, errorDetail },
     conflicts: conflictRecords,
   }
 }

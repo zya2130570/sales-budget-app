@@ -7,6 +7,23 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V17.2',
+    date: '5/21/2026 at 8:00 PM',
+    what: [
+      'Workspace isolation — each user now has a separate localStorage namespace. Logging in as User A never shows User B\'s data',
+      'Migration on first login — existing local data is automatically copied to your user namespace on sign-in',
+      'Sign-out clears workspace — signing out reloads into guest mode with clean state',
+      'Sync error details — Cloud Status now shows the exact Supabase error per entity (e.g. "missing constraint", "invalid value")',
+      'Reverted GPT\'s calculations.ts change — formatMoney restored to Intl.NumberFormat (GPT\'s Math.abs() broke negative numbers)',
+    ],
+    test: [
+      'Sign out → sign back in → your data should still be there (migration ran successfully)',
+      'After sign-in, open Cloud Status → Sync Details → any failed entity should now show the exact error reason below it',
+      'Sign out → the app should show empty/guest state, not your account\'s data',
+      'Sign in as a different email → should see that account\'s data, not the previous user\'s',
+    ],
+  },
+  {
     version: 'V17.1',
     date: '5/21/2026 at 6:15 PM',
     what: [

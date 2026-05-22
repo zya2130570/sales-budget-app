@@ -517,7 +517,7 @@ export function estimateTaxBreakdown(grossAnnual: number): TaxBreakdown {
 // --- Internal helpers (not exported) -----------------------------------------
 
 function formatMoney(n: number): string {
-  return '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
 }
 
 function pLabel(p: Period): string {
