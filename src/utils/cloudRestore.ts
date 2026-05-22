@@ -217,6 +217,8 @@ export type CloudRestoreData = {
   takeHomeSettings: TakeHomeSettings | null
   monthlyNotes: Record<string, string>
   reviewedMonths: Record<string, string>
+  scenarioNotes: Record<string, string>
+  categoryMemory: Record<string, string>
   summary: CloudRestoreSummary
 }
 
@@ -246,7 +248,7 @@ export async function fetchCloudDataForRestore(
   const batchMap    = buildIdMap(batchesFetch.rows)
 
   // ── Stage 2: Fetch child entities in parallel ──
-  const [txnFetch, rulesFetch, contribFetch, setsFetch, scenariosFetch, budgetsFetch, actualsFetch, reviewsFetch, takeHomeFetch] = await Promise.all([
+  const [txnFetch, rulesFetch, contribFetch, setsFetch, scenariosFetch, budgetsFetch, actualsFetch, reviewsFetch, takeHomeFetch, scenarioNotesFetch, categoryMemoryFetch] = await Promise.all([
     fetchTable(supabase, 'transactions', userId),
     fetchTable(supabase, 'transaction_rules', userId),
     fetchTable(supabase, 'savings_goal_contributions', userId),
@@ -269,6 +271,18 @@ export async function fetchCloudDataForRestore(
       try {
         const { data } = await supabase.from('take_home_settings').select('*').eq('user_id', userId).is('deleted_at', null).maybeSingle()
         return data as Record<string, unknown> | null
+      } catch { return null }
+    })(),
+    (async () => {
+      try {
+        const { data } = await supabase.from('scenario_notes').select('notes_blob').eq('user_id', userId).maybeSingle()
+        return (data as { notes_blob: Record<string, string> } | null)?.notes_blob ?? null
+      } catch { return null }
+    })(),
+    (async () => {
+      try {
+        const { data } = await supabase.from('category_memory').select('memory_blob').eq('user_id', userId).maybeSingle()
+        return (data as { memory_blob: Record<string, string> } | null)?.memory_blob ?? null
       } catch { return null }
     })(),
   ])
@@ -340,6 +354,9 @@ export async function fetchCloudDataForRestore(
 
   const totalContributions = Object.values(contribsByGoal).reduce((s, c) => s + c.length, 0)
 
+  const scenarioNotes: Record<string, string> = scenarioNotesFetch ?? {}
+  const categoryMemory: Record<string, string> = categoryMemoryFetch ?? {}
+
   return {
     accounts,
     categories,
@@ -355,6 +372,8 @@ export async function fetchCloudDataForRestore(
     takeHomeSettings,
     monthlyNotes,
     reviewedMonths,
+    scenarioNotes,
+    categoryMemory,
     summary: {
       accounts: accounts.length,
       categories: categories.length,

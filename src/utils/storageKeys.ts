@@ -36,3 +36,7 @@ export type StorageKeyName = keyof typeof STORAGE_KEYS
 export type StorageKey = (typeof STORAGE_KEYS)[StorageKeyName]
 
 export const PENDING_DELETES_KEY = STORAGE_KEYS.pendingDeletes
+
+// V18 — last sync timestamp (moved from hardcoded string in useCloudPersistence)
+// Note: appended separately so existing key values are not changed
+export const LAST_SYNC_AT_KEY = 'flow_cloud_last_sync_at'

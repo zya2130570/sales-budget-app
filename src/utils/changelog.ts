@@ -7,6 +7,23 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V18',
+    date: '5/22/2026 at 9:00 AM',
+    what: [
+      'take_home_settings now syncs to cloud (was wired in Supabase but never passed from the app)',
+      'scenario_notes now syncs to cloud — your scenario annotations persist across devices',
+      'category_memory now syncs to cloud — merchant auto-categorization learned on one device applies on all devices',
+      'flow_cloud_last_sync_at moved into the workspace-aware storage system (per-user timestamp isolation)',
+      'All three new entities also restored on "Use Cloud Data" / "Merge Safe Data"',
+    ],
+    test: [
+      'Go to Income tab → adjust take-home rate → Sync now → sign in on another device → Use Cloud Data → rate should match',
+      'Add a note to a scenario → Sync now → check Supabase scenario_notes table for a row',
+      'Import CSV transactions (this builds category_memory) → Sync now → check Supabase category_memory table',
+      'Cloud Status → Sync Details → should now show scenario_notes and category_memory rows in the results',
+    ],
+  },
+  {
     version: 'V17.2',
     date: '5/21/2026 at 8:00 PM',
     what: [

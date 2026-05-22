@@ -43,6 +43,8 @@ export type CloudPersistEntity =
   | 'budget_actuals'
   | 'monthly_reviews'
   | 'take_home_settings'
+  | 'scenario_notes'
+  | 'category_memory'
 
 export type CloudPersistResult = {
   entity: CloudPersistEntity
@@ -864,6 +866,48 @@ export async function persistMonthlyReviewsToCloud(
   }
 }
 
+// ─── Scenario notes sync ───────────────────────────────────────────────────────
+
+export async function persistScenarioNotesToCloud(
+  supabase: Client,
+  userId: string,
+  notes: Record<string, string>,
+): Promise<CloudPersistResult> {
+  const entity: CloudPersistEntity = 'scenario_notes'
+  if (!Object.keys(notes).length) return { entity, attempted: 0, synced: 0, failed: 0, skipped: 0 }
+
+  const rows: Row[] = [{
+    user_id: userId,
+    local_id: userId,           // one row per user
+    notes_blob: notes,
+    updated_at: nowIso(),
+  }]
+
+  const { synced, failed, errorDetail } = await batchUpsert(supabase, 'scenario_notes', rows)
+  return { entity, attempted: 1, synced, failed, skipped: 0, errorDetail }
+}
+
+// ─── Category memory sync ──────────────────────────────────────────────────────
+
+export async function persistCategoryMemoryToCloud(
+  supabase: Client,
+  userId: string,
+  memory: Record<string, string>,
+): Promise<CloudPersistResult> {
+  const entity: CloudPersistEntity = 'category_memory'
+  if (!Object.keys(memory).length) return { entity, attempted: 0, synced: 0, failed: 0, skipped: 0 }
+
+  const rows: Row[] = [{
+    user_id: userId,
+    local_id: userId,           // one row per user
+    memory_blob: memory,
+    updated_at: nowIso(),
+  }]
+
+  const { synced, failed, errorDetail } = await batchUpsert(supabase, 'category_memory', rows)
+  return { entity, attempted: 1, synced, failed, skipped: 0, errorDetail }
+}
+
 // ─── Core sync orchestrator ────────────────────────────────────────────────────
 
 export async function persistCoreDataToCloud(params: {
@@ -885,6 +929,8 @@ export async function persistCoreDataToCloud(params: {
   monthlyNotes: Record<string, string>
   reviewedMonths: Record<string, string>
   pendingDeletes: CloudPendingDelete[]
+  scenarioNotes?: Record<string, string>
+  categoryMemory?: Record<string, string>
   resolutions?: ConflictResolutions
 }): Promise<CloudPersistSummary & { syncedDeletes: CloudPendingDelete[] }> {
   const res = params.resolutions ?? {}
@@ -930,6 +976,12 @@ export async function persistCoreDataToCloud(params: {
   results.push(await persistMonthlyReviewsToCloud(
     params.supabase, params.userId, params.monthlyNotes, params.reviewedMonths,
   ))
+  if (params.scenarioNotes && Object.keys(params.scenarioNotes).length > 0) {
+    results.push(await persistScenarioNotesToCloud(params.supabase, params.userId, params.scenarioNotes))
+  }
+  if (params.categoryMemory && Object.keys(params.categoryMemory).length > 0) {
+    results.push(await persistCategoryMemoryToCloud(params.supabase, params.userId, params.categoryMemory))
+  }
 
   return {
     attempted: results.reduce((s, r) => s + r.attempted, 0),

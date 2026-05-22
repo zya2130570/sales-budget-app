@@ -406,6 +406,8 @@ export function applyCloudRestoreToLocalStorage(data: {
   takeHomeSettings?: TakeHomeSettings | null
   monthlyNotes?: Record<string, string>
   reviewedMonths?: Record<string, string>
+  scenarioNotes?: Record<string, string>
+  categoryMemory?: Record<string, string>
 }): void {
   saveAccounts(data.accounts)
   saveCategories(data.categories)
@@ -429,5 +431,11 @@ export function applyCloudRestoreToLocalStorage(data: {
   }
   if (data.reviewedMonths && Object.keys(data.reviewedMonths).length > 0) {
     saveToStorage(STORAGE_KEYS.reviewedMonths, data.reviewedMonths)
+  }
+  if (data.scenarioNotes && Object.keys(data.scenarioNotes).length > 0) {
+    saveToStorage(STORAGE_KEYS.scenarioNotes, data.scenarioNotes)
+  }
+  if (data.categoryMemory && Object.keys(data.categoryMemory).length > 0) {
+    saveToStorage(STORAGE_KEYS.categoryMemory, data.categoryMemory)
   }
 }
