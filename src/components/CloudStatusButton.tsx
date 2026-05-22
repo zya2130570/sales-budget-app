@@ -202,15 +202,20 @@ export function CloudStatusButton(props: SyncProps) {
                         {showResults ? '▲ Hide' : `▼ Details (${props.lastResult.synced} synced${props.lastResult.failed > 0 ? `, ${props.lastResult.failed} failed` : ''})`}
                       </button>
                       {showResults && (
-                        <div className="grid grid-cols-2 gap-1.5 mt-2">
+                        <div className="space-y-1.5 mt-2">
                           {props.lastResult.results.filter(r => r.attempted > 0).map(r => (
-                            <div key={r.entity} className="rounded-lg bg-slate-900/60 px-2.5 py-1.5 text-[11px]">
-                              <p className="text-slate-500 truncate">{r.entity.replace(/_/g, ' ')}</p>
-                              <p className="font-medium text-slate-200">
-                                {r.synced} synced
-                                {r.failed > 0 && <span className="text-red-400"> · {r.failed} failed</span>}
-                                {r.skipped > 0 && <span className="text-amber-400"> · {r.skipped} skipped</span>}
-                              </p>
+                            <div key={r.entity} className="rounded-lg bg-slate-900/60 px-2.5 py-1.5">
+                              <div className="flex items-center justify-between text-[11px]">
+                                <p className="text-slate-500 truncate">{r.entity.replace(/_/g, ' ')}</p>
+                                <p className="font-medium flex-shrink-0 ml-2">
+                                  {r.synced > 0 && <span className="text-emerald-400">{r.synced} ✓ </span>}
+                                  {r.failed > 0 && <span className="text-red-400">{r.failed} ✗</span>}
+                                  {r.skipped > 0 && <span className="text-amber-400 ml-1">{r.skipped} –</span>}
+                                </p>
+                              </div>
+                              {(r as any).errorDetail && (
+                                <p className="text-[10px] text-red-300/80 font-mono mt-0.5 break-all">{(r as any).errorDetail}</p>
+                              )}
                             </div>
                           ))}
                         </div>
