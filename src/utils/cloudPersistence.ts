@@ -162,6 +162,20 @@ async function fetchCloudRow(
  * Batch upsert rows using ON CONFLICT (user_id, local_id) DO UPDATE.
  * Single network request for all rows — replaces N+1 pattern entirely.
  */
+/**
+ * Deduplicates rows by local_id, keeping the last occurrence of each.
+ * Prevents "ON CONFLICT DO UPDATE command cannot affect a row a second time"
+ * which happens when two records share the same local_id in a single batch.
+ */
+function deduplicateByLocalId(rows: Row[]): Row[] {
+  const seen = new Map<string, Row>()
+  for (const row of rows) {
+    const key = String(row['local_id'] ?? '')
+    seen.set(key, row)   // later occurrence wins (most-recently saved version)
+  }
+  return Array.from(seen.values())
+}
+
 async function batchUpsert(
   supabase: Client,
   table: string,
@@ -531,14 +545,15 @@ export async function persistSavingsGoalSetsToCloud(
   savedTargetSets: SavedTargetSet[],
 ): Promise<CloudPersistResult> {
   const entity: CloudPersistEntity = 'savings_goal_sets'
-  const rows: Row[] = savedTargetSets.map(s => ({
+  const rawRows: Row[] = savedTargetSets.map(s => ({
     user_id: userId,
-    local_id: `${s.name}-${s.savedAt}`,
+    local_id: `${userId}-goalset-${encodeURIComponent(s.name)}`,
     name: s.name,
     targets_snapshot: s.targets ?? [],
     saved_at: s.savedAt ?? nowIso(),
     updated_at: s.savedAt ?? nowIso(),
   }))
+  const rows = deduplicateByLocalId(rawRows)
 
   const { synced, failed, errorDetail } = await batchUpsert(supabase, 'savings_goal_sets', rows)
   return { entity, attempted: savedTargetSets.length, synced, failed, skipped: 0, errorDetail }
@@ -550,15 +565,16 @@ export async function persistScenariosToCloud(
   savedScenarios: SavedScenarioSet[],
 ): Promise<CloudPersistResult> {
   const entity: CloudPersistEntity = 'scenarios'
-  const rows: Row[] = savedScenarios.map(s => ({
+  const rawRows: Row[] = savedScenarios.map(s => ({
     user_id: userId,
-    local_id: `${s.name}-${s.savedAt}`,
+    local_id: `${userId}-scenario-${encodeURIComponent(s.name)}`,
     name: s.name,
     period: s.period,
     scenario_values: s.scenarios ?? {},
     saved_at: s.savedAt ?? nowIso(),
     updated_at: s.savedAt ?? nowIso(),
   }))
+  const rows = deduplicateByLocalId(rawRows)
 
   const { synced, failed, errorDetail } = await batchUpsert(supabase, 'scenarios', rows)
   return { entity, attempted: savedScenarios.length, synced, failed, skipped: 0, errorDetail }
@@ -570,14 +586,15 @@ export async function persistSavedBudgetsToCloud(
   savedBudgets: SavedBudget[],
 ): Promise<CloudPersistResult> {
   const entity: CloudPersistEntity = 'saved_budgets'
-  const rows: Row[] = savedBudgets.map(b => ({
+  const rawRows: Row[] = savedBudgets.map(b => ({
     user_id: userId,
-    local_id: `${b.name}-${b.savedAt}`,
+    local_id: `${userId}-budget-${encodeURIComponent(b.name)}`,
     name: b.name,
     categories_snapshot: b.categories ?? [],
     saved_at: b.savedAt ?? nowIso(),
     updated_at: b.savedAt ?? nowIso(),
   }))
+  const rows = deduplicateByLocalId(rawRows)
 
   const { synced, failed, errorDetail } = await batchUpsert(supabase, 'saved_budgets', rows)
   return { entity, attempted: savedBudgets.length, synced, failed, skipped: 0, errorDetail }
