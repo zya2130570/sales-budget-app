@@ -744,6 +744,15 @@ export default function App() {
 
   // V16 — Settings panel
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // V22 — dark/light theme
+  const [theme, setTheme] = useState<'dark' | 'light'>(() =>
+    (localStorage.getItem('flow_theme') as 'dark' | 'light') ?? 'dark'
+  )
+  const toggleTheme = () => {
+    const next = theme === 'dark' ? 'light' : 'dark'
+    setTheme(next)
+    localStorage.setItem('flow_theme', next)
+  }
   // V17 — Collapsible dashboard sections
   const [forecastOpen, setForecastOpen] = useState(false)
   // reviewOpen already provided by useUiState()
@@ -2461,7 +2470,7 @@ txnMerchantRef.current?.focus()
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 overflow-x-hidden">
+    <div className="min-h-screen bg-slate-900 text-slate-100 overflow-x-hidden" data-theme={theme}>
       <div className="max-w-7xl mx-auto w-full px-4 md:px-8 py-4 md:py-8 space-y-6">
 
         <header className="rounded-2xl border border-slate-700 bg-slate-800/80 shadow-xl p-4 md:p-5 space-y-3">
@@ -2540,7 +2549,9 @@ txnMerchantRef.current?.focus()
           onDownloadBackup={downloadBackupFile}
           onImportFromFile={handleImportFromFile}
           lastSyncedAt={cloudPersistence.lastSyncedAt}
-          version="V16"
+          version={CURRENT_VERSION}
+          theme={theme}
+          onToggleTheme={toggleTheme}
         />
       )}
 
