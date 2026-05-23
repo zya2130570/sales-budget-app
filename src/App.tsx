@@ -44,7 +44,13 @@ import {
 } from './utils/storage'
 import {
   loadBudgetActuals,
-  saveBudgetActuals,
+  loadBudgetActualsForPeriod,
+  saveBudgetActualsForPeriod,
+  loadAllBudgetActualsByPeriod,
+  currentReviewMonth,
+  prevMonthKey,
+  loadCategoryRollovers,
+  saveCategoryRollovers,
   loadReviewMonth,
   saveReviewMonth,
   loadMonthlyNotes,
@@ -433,12 +439,17 @@ export default function App() {
   // Keyed by category id → raw string so blank stays blank, never forced to "0".
   // Lazy-initialized from localStorage so the save effect can't overwrite stored
   // data with the empty default on the first render (effects fire after render).
-  const [actuals, setActuals] = useState<Record<string, string>>(loadBudgetActuals)
+  // V19 — period-keyed actuals (YYYY-MM). Falls back to legacy data on first load.
+  const currentActualsPeriodKey = currentReviewMonth()
+  const [actuals, setActuals] = useState<Record<string, string>>(() => {
+    const periodActuals = loadBudgetActualsForPeriod(currentActualsPeriodKey)
+    return Object.keys(periodActuals).length > 0 ? periodActuals : loadBudgetActuals()
+  })
 
-  // Persist actuals — save effect defined after lazy init; no ordering race
+  // Persist actuals under current period key
   useEffect(() => {
-    saveBudgetActuals(actuals)
-  }, [actuals])
+    saveBudgetActualsForPeriod(currentActualsPeriodKey, actuals)
+  }, [actuals, currentActualsPeriodKey])
 
   // Target edit state
   const [editTargetId, setEditTargetId] = useState<string | null>(null)
@@ -673,7 +684,9 @@ export default function App() {
   } = useImportPipeline()
 
   // V9.11 — Budget evolution state
-  const [categoryRollovers, setCategoryRollovers]     = useState<Record<string, boolean>>({})
+  const [categoryRollovers, setCategoryRollovers] = useState<Record<string, boolean>>(loadCategoryRollovers)
+
+  useEffect(() => { saveCategoryRollovers(categoryRollovers) }, [categoryRollovers])
   const [budgetFilter, setBudgetFilter]               = useState<'all' | 'over-budget' | 'no-activity'>('all')
   // V9.11 — Uncategorized expenses collapsible (default open)
   const [uncatOpen, setUncatOpen]                     = useState(true)
@@ -1022,7 +1035,7 @@ export default function App() {
   // V10 ARCHITECTURE — BUDGET ENGINE
   // categories[] → effectiveCatActual() → plan vs actual variance
   // Budget health: catStatus(), budgetHealth useMemo
-  // Rollover: categoryRollovers state (flag stored, calc TBD)
+  // Rollover: categoryRollovers state — calc in rolloverByCatId memo below (V19)
   // ══════════════════════════════════════════════════════════════════════════════
   // varianceTone imported from utils/budgetMath
 
@@ -1073,6 +1086,32 @@ export default function App() {
   // catStatus imported from utils/budgetMath — signature: catStatus(actual: number | null, planned: number)
 
   // V9.11 — Budget health summary
+  // V19 — Budget history state
+  const [historyMonth, setHistoryMonth] = useState<string | null>(null)
+  const allActualsByPeriod = useMemo(() => loadAllBudgetActualsByPeriod(), [actuals])
+  const historyPeriodKeys = useMemo(() => {
+    return Object.keys(allActualsByPeriod)
+      .filter(k => k !== currentActualsPeriodKey && Object.keys(allActualsByPeriod[k]).length > 0)
+      .sort((a, b) => b.localeCompare(a)) // newest first
+  }, [allActualsByPeriod, currentActualsPeriodKey])
+
+  // V19 — Rollover: for rollover-enabled categories, add previous month's underspend to this month's plan
+  const rolloverByCatId = useMemo(() => {
+    const result: Record<string, number> = {}
+    const hasRollovers = Object.values(categoryRollovers).some(Boolean)
+    if (!hasRollovers) return result
+    const prevKey = prevMonthKey(currentActualsPeriodKey)
+    const prevActuals = loadBudgetActualsForPeriod(prevKey)
+    for (const cat of categories) {
+      if (!categoryRollovers[cat.id]) continue
+      const monthlyPlan = cat.amount
+      const prevActual = parseFloat(prevActuals[cat.id] ?? '0')
+      const underspend = Math.max(0, monthlyPlan - prevActual)
+      if (underspend > 0) result[cat.id] = underspend
+    }
+    return result
+  }, [categoryRollovers, categories, currentActualsPeriodKey])
+
   const budgetHealth = useMemo(() => {
     const overBudget   = categories.filter(c => { const e = effectiveCatActual(c.id); return e !== null && e.total > convertFromMonthly(c.amount, period) })
     const noActivity   = categories.filter(c => effectiveCatActual(c.id) === null)
@@ -2382,6 +2421,7 @@ txnMerchantRef.current?.focus()
       pushBudgetHistory, setCategories, setTab, highlightTimerRef, setHighlightedCategoryId, showToast,
       setTargetFormHistory, setTargetFormRedo, targetForm, setTargetForm, setTargetFormHint, targetNameRef,
       onDeleteTarget: (id: string) => addPendingDelete('savings_goals', id),
+      onDeleteContribution: (id: string) => addPendingDelete('savings_goal_contributions', id),
     }
   }
 
@@ -3582,6 +3622,12 @@ txnMerchantRef.current?.focus()
                             className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${categoryRollovers[c.id] ? 'text-teal-300 bg-teal-900/30 border-teal-700/30' : 'text-slate-600 border-slate-700/30 hover:text-slate-400'}`}
                             onClick={() => setCategoryRollovers(prev => ({ ...prev, [c.id]: !prev[c.id] }))}
                           >{categoryRollovers[c.id] ? 'Rollover ✓' : 'Rollover'}</button>
+                          {/* V19 — Show rollover amount when applicable */}
+                          {categoryRollovers[c.id] && rolloverByCatId[c.id] > 0 && (
+                            <span className="text-[10px] text-teal-400 ml-1" title={`+${currency(rolloverByCatId[c.id])}/mo underspend rolled over from last month`}>
+                              +{currency(convertFromMonthly(rolloverByCatId[c.id], period))} rolled
+                            </span>
+                          )}
                         </td>
                       </tr>
                     )
@@ -3589,6 +3635,66 @@ txnMerchantRef.current?.focus()
                 </tbody>
               </table>
             </Card></div>
+
+            {/* V19 — Budget History */}
+            {historyPeriodKeys.length > 0 && (
+              <div className="rounded-2xl border border-slate-700 bg-slate-800/60">
+                <button
+                  onClick={() => setHistoryMonth(prev => prev ? null : historyPeriodKeys[0])}
+                  className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-slate-700/20 transition-colors rounded-2xl"
+                >
+                  <h2 className="text-lg font-semibold text-slate-100">Budget History</h2>
+                  <span className="text-slate-500 text-sm">{historyMonth ? '▲' : `▼ ${historyPeriodKeys.length} month${historyPeriodKeys.length === 1 ? '' : 's'} available`}</span>
+                </button>
+                {historyMonth !== null && (
+                  <div className="px-5 pb-5">
+                    <div className="flex items-center gap-3 mb-4 flex-wrap">
+                      <label className="text-xs text-slate-400">Viewing:</label>
+                      <select
+                        value={historyMonth}
+                        onChange={e => setHistoryMonth(e.target.value)}
+                        className="px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                      >
+                        {historyPeriodKeys.map(key => (
+                          <option key={key} value={key}>
+                            {key === 'legacy' ? 'Previous data' : (() => {
+                              const [y, m] = key.split('-')
+                              return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+                            })()}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-slate-400 border-b border-slate-700">
+                          <th className="text-left py-1.5 pr-3">Category</th>
+                          <th className="text-right py-1.5 pr-3">Plan / mo</th>
+                          <th className="text-right py-1.5 pr-3">Actual</th>
+                          <th className="text-right py-1.5">Variance</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {categories.map(cat => {
+                          const hist = parseFloat(allActualsByPeriod[historyMonth!]?.[cat.id] ?? '0')
+                          const diff = hist - cat.amount
+                          return (
+                            <tr key={cat.id} className="border-b border-slate-700/40">
+                              <td className="py-1.5 pr-3 text-slate-300">{cat.name}</td>
+                              <td className="py-1.5 pr-3 text-right text-slate-400">{currency(cat.amount)}</td>
+                              <td className="py-1.5 pr-3 text-right text-slate-200">{hist > 0 ? currency(hist) : '—'}</td>
+                              <td className={`py-1.5 text-right font-medium ${diff > 0 ? 'text-red-400' : diff < 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                {hist > 0 ? (diff > 0 ? `+${currency(diff)}` : `-${currency(Math.abs(diff))}`) : '—'}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </section>
         )}
 
