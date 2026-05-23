@@ -37,6 +37,10 @@ import {
   addPendingDelete,
   loadPendingDeletes,
   loadTakeHomeSettings,
+  saveTakeHomeSettings,
+  saveImportBatches,
+  saveToStorage,
+  applyCloudRestoreToLocalStorage,
 } from './utils/storage'
 import {
   loadBudgetActuals,
@@ -47,6 +51,8 @@ import {
   saveMonthlyNotes,
   loadReviewedMonths,
   saveReviewedMonths,
+  loadManualRecurringItems,
+  saveManualRecurringItems,
 } from './utils/persistence'
 // V9.0 — CSV import pipeline
 import { runImportPipeline, buildImportedTransactions } from './utils/importHelpers'
@@ -112,6 +118,7 @@ import { AuthPanel } from './components/AuthPanel'
 import { CloudStatusButton } from './components/CloudStatusButton'
 import { ConflictResolutionModal } from './components/ConflictResolutionModal'
 import { useCloudPersistence } from './hooks/useCloudPersistence'
+import { supabase } from './lib/supabaseClient'
 // V13 — Intelligence layer
 import { SpendingInsightsPanel } from './components/SpendingInsightsPanel'
 import { generateSpendingInsights, generateMonthlyReviewSummary } from './utils/spendingInsights'
@@ -124,7 +131,12 @@ import { CURRENT_VERSION } from './utils/changelog'
 // V16 — Settings, onboarding, demo mode
 import { SettingsPanel } from './components/SettingsPanel'
 import { OnboardingCard } from './components/OnboardingCard'
+import { PersonalPreloadCard } from './components/PersonalPreloadCard'
 import { DEMO_ACCOUNTS, DEMO_CATEGORIES, DEMO_TRANSACTIONS, DEMO_TARGETS, DEMO_RULES } from './utils/demoData'
+import { ZYAN_PERSONAL_PRELOAD } from './utils/personalPreloadData'
+import { STORAGE_KEYS } from './utils/storageKeys'
+import { useAuth } from './hooks/useAuth'
+import { fetchCloudDataForRestore } from './utils/cloudRestore'
 import { importFromBackup } from './utils/storage'
 
 // Helper: true for transaction types that represent money movement between accounts
@@ -321,6 +333,8 @@ const SAMPLE_BUDGET_CATS: Array<{ name: string; type: CategoryType; monthly: num
 const periods: Period[] = ['weekly', 'bi-weekly', 'monthly', 'yearly']
 
 export default function App() {
+  const appAuth = useAuth()
+  const autoCloudRestoreAttemptedRef = useRef(false)
   const incomeRef = useRef<HTMLInputElement>(null)
   const budgetCategoryTableRef = useRef<HTMLDivElement>(null)
   const budgetNameRef = useRef<HTMLInputElement>(null)
@@ -703,7 +717,7 @@ export default function App() {
   const [confirmedRecurring, setConfirmedRecurring] = useState<Set<string>>(new Set()) // merchantKeys
   const [dismissedRecurring, setDismissedRecurring] = useState<Set<string>>(new Set()) // merchantKeys
   // V9.8 — Manual recurring items (user-entered)
-  const [manualRecurringItems, setManualRecurringItems] = useState<ManualRecurringItem[]>([])
+  const [manualRecurringItems, setManualRecurringItems] = useState<ManualRecurringItem[]>(loadManualRecurringItems)
   const [showAddRecurring, setShowAddRecurring]         = useState(false)
   const [recurringForm, setRecurringForm]               = useState<{
     name: string; amount: string; cadence: RecurringCadence; nextDueDate: string; type: 'expense' | 'income'
@@ -745,6 +759,29 @@ export default function App() {
   const handleImportFromFile = (json: string) => {
     const result = importFromBackup(json)
     if (!result.ok) throw new Error(result.error ?? 'Import failed')
+  }
+
+  const handleLoadPersonalPreload = () => {
+    const data = ZYAN_PERSONAL_PRELOAD
+    setAccountsWithHistory(() => data.accounts)
+    setCategories(data.categories)
+    setTxnWithHistory(() => data.transactions)
+    setTargetsWithHistory(() => data.targets)
+    setRulesWithHistory(() => data.rules)
+    setSavedTargetSets(data.savedTargetSets)
+    setSavedBudgets(data.savedBudgets)
+    setSavedScenarios(data.savedScenarios)
+    setImportBatches(data.importBatches)
+    setManualRecurringItems(data.manualRecurringItems)
+    setCategoryMemory(data.categoryMemory)
+    setMonthlyNotes(data.monthlyNotes)
+    setReviewedMonths(data.reviewedMonths)
+    saveTakeHomeSettings(data.takeHomeSettings)
+    saveToStorage(STORAGE_KEYS.scenarioNotes, data.scenarioNotes)
+    saveToStorage(STORAGE_KEYS.categoryMemory, data.categoryMemory)
+    saveToStorage(STORAGE_KEYS.budgetActuals, data.budgetActualsEnvelope)
+    saveImportBatches(data.importBatches)
+    showToast('Loaded Zyan starter data. Sync to cloud when ready.')
   }
   // V9.7.1 — Collapsible main transaction list
   const [txnListOpen, setTxnListOpen]             = useState(true)
@@ -879,6 +916,7 @@ export default function App() {
   useEffect(() => saveReviewMonth(reviewMonth), [reviewMonth])
   useEffect(() => saveMonthlyNotes(monthlyNotes), [monthlyNotes])
   useEffect(() => saveReviewedMonths(reviewedMonths), [reviewedMonths])
+  useEffect(() => saveManualRecurringItems(manualRecurringItems), [manualRecurringItems])
 
   // V8.7 — auto-select the only account in the transaction form
   useEffect(() => {
@@ -886,6 +924,25 @@ export default function App() {
       setTxnForm(prev => ({ ...prev, accountId: accounts[0].id }))
     }
   }, [accounts.length, accounts[0]?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+
+  // Auto-load cloud data after login when the local workspace is empty.
+  // This makes login feel like loading the account, without overwriting local data.
+  useEffect(() => {
+    if (autoCloudRestoreAttemptedRef.current) return
+    if (!appAuth.user || !supabase) return
+    if (!isAppEmpty) return
+    autoCloudRestoreAttemptedRef.current = true
+
+    fetchCloudDataForRestore(supabase, appAuth.user.id).then(restored => {
+      const hasCloudData = restored.summary.accounts + restored.summary.categories + restored.summary.transactions + restored.summary.savingsGoals > 0
+      if (!hasCloudData) return
+      applyCloudRestoreToLocalStorage(restored)
+      window.location.reload()
+    }).catch(() => {
+      // Ignore auto-restore errors; manual Cloud Status restore still exists.
+    })
+  }, [appAuth.user, isAppEmpty])
 
   // Deadline-passed detection: show a one-time prompt per target when today is past the deadline
   // and the target is still active (not completed, not fully funded).
@@ -2449,6 +2506,11 @@ txnMerchantRef.current?.focus()
                 onOpenSettings={() => setSettingsOpen(true)}
               />
             )}
+
+            <PersonalPreloadCard
+              onLoadPersonalData={handleLoadPersonalPreload}
+              onDownloadBackup={downloadBackupFile}
+            />
 
             {/* ── V7.3 Dashboard Status Banner ── */}
             <DashboardStatusBanner status={dashboardStatus} />
