@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { runSchemaRepair } from '../utils/schemaRepair'
 
 type SettingsPanelProps = {
   onClose: () => void
@@ -21,6 +22,8 @@ export function SettingsPanel({
 }: SettingsPanelProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
+  const [repairStatus, setRepairStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [repairMessage, setRepairMessage] = useState<string | null>(null)
 
   const handleImportFile = async (file: File | null) => {
     if (!file) return
@@ -117,6 +120,33 @@ export function SettingsPanel({
             <p className="mt-1 text-sm text-slate-400">
               Last synced: {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : 'Not synced yet'}
             </p>
+          </section>
+
+          {/* V19 — Schema repair */}
+          <section className="rounded-xl border border-slate-700 bg-slate-800/70 p-4">
+            <h3 className="font-semibold text-slate-100">Database schema</h3>
+            <p className="mt-1 text-sm text-slate-400">
+              Creates any missing Supabase tables automatically. Run this if you see sync errors about missing tables or columns.
+            </p>
+            <button
+              onClick={async () => {
+                setRepairStatus('loading')
+                setRepairMessage(null)
+                const result = await runSchemaRepair()
+                setRepairStatus(result.ok ? 'success' : 'error')
+                setRepairMessage(result.applied ?? result.error ?? null)
+              }}
+              disabled={repairStatus === 'loading'}
+              className="mt-3 rounded-lg bg-slate-600 hover:bg-slate-500 disabled:opacity-50 px-3 py-2 text-sm font-medium text-white transition-colors"
+              type="button"
+            >
+              {repairStatus === 'loading' ? 'Running…' : 'Repair database schema'}
+            </button>
+            {repairMessage && (
+              <p className={`mt-2 text-xs rounded-lg px-3 py-2 ${repairStatus === 'success' ? 'bg-emerald-950/40 text-emerald-300' : 'bg-red-950/40 text-red-300'}`}>
+                {repairMessage}
+              </p>
+            )}
           </section>
 
           <section className="rounded-xl border border-red-900/60 bg-red-950/30 p-4">

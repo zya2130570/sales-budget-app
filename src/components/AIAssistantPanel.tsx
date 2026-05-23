@@ -33,7 +33,18 @@ export function AIAssistantPanel({ messages, status, error, onSend, onClear }: {
             <div className="flex flex-wrap gap-2">{SUGGESTED.map(q => <button key={q} onClick={() => onSend(q)} disabled={status==='loading'} className="text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors text-left border border-slate-600/50">{q}</button>)}</div>
           </div>
         ) : (<>{messages.map((m, i) => <Bubble key={i} msg={m} />)}{status==='loading' && <div className="flex justify-start"><div className="bg-slate-700/80 border border-slate-600/50 rounded-2xl rounded-bl-sm px-3.5 py-2.5"><span className="flex gap-1">{[0,150,300].map(d => <span key={d} className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{animationDelay:`${d}ms`}} />)}</span></div></div>}</>)}
-        {error && <p className="text-xs text-red-300 bg-red-950/30 border border-red-700/40 rounded-lg px-3 py-2">{error}</p>}
+        {error && (
+          error.toLowerCase().includes('anthropic_api_key') || error.toLowerCase().includes('not set') || error.toLowerCase().includes('not configured')
+            ? (
+              <div className="rounded-xl border border-amber-700/50 bg-amber-950/20 p-3">
+                <p className="text-xs font-semibold text-amber-200 mb-1">AI assistant needs setup</p>
+                <p className="text-xs text-amber-300/80 leading-relaxed">
+                  Add <code className="bg-slate-700 px-1 rounded">ANTHROPIC_API_KEY</code> to your Vercel project environment variables, then redeploy. Get a key at <span className="underline">console.anthropic.com</span>.
+                </p>
+              </div>
+            )
+            : <p className="text-xs text-red-300 bg-red-950/30 border border-red-700/40 rounded-lg px-3 py-2">{error}</p>
+        )}
         <div ref={bottomRef} />
       </div>
       <div className="px-4 pb-3 pt-1 border-t border-slate-700/60">
