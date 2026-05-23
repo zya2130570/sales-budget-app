@@ -9,6 +9,8 @@ type SettingsPanelProps = {
   onImportFromFile: (json: string) => void
   lastSyncedAt?: string | null
   version?: string
+  theme?: 'dark' | 'light'
+  onToggleTheme?: () => void
 }
 
 export function SettingsPanel({
@@ -18,7 +20,9 @@ export function SettingsPanel({
   onDownloadBackup,
   onImportFromFile,
   lastSyncedAt,
-  version = 'V16',
+  version = 'V22',
+  theme = 'dark',
+  onToggleTheme,
 }: SettingsPanelProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
@@ -121,6 +125,27 @@ export function SettingsPanel({
               Last synced: {lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : 'Not synced yet'}
             </p>
           </section>
+
+          {/* V22 — Theme toggle */}
+          {onToggleTheme && (
+            <section className="rounded-xl border border-slate-700 bg-slate-800/70 p-4">
+              <h3 className="font-semibold text-slate-100">Appearance</h3>
+              <div className="mt-3 flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-slate-300">{theme === 'dark' ? '🌙 Dark mode' : '☀️ Light mode'}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Switch between dark and light theme</p>
+                </div>
+                <button
+                  onClick={onToggleTheme}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors ${theme === 'light' ? 'bg-blue-600' : 'bg-slate-600'}`}
+                  role="switch"
+                  aria-checked={theme === 'light'}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${theme === 'light' ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+            </section>
+          )}
 
           {/* V19 — Schema repair */}
           <section className="rounded-xl border border-slate-700 bg-slate-800/70 p-4">
