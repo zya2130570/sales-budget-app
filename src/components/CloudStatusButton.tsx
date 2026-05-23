@@ -8,6 +8,7 @@
  * Merge Safe Data is a top-level button, not buried inside Compare.
  */
 import { useState } from 'react'
+import { runSchemaRepair } from '../utils/schemaRepair'
 import { useCloudSync } from '../hooks/useCloudSync'
 import type { CloudPersistenceStatus } from '../hooks/useCloudPersistence'
 import type { CloudPersistSummary } from '../utils/cloudPersistence'
@@ -111,9 +112,23 @@ export function CloudStatusButton(props: SyncProps) {
   const [tab, setTab] = useState<'sync' | 'compare'>('sync')
   const [showResults, setShowResults] = useState(false)
   const [confirmRestore, setConfirmRestore] = useState(false)
+  const [repairingSchema, setRepairingSchema] = useState(false)
+  const [schemaRepairMessage, setSchemaRepairMessage] = useState<string | null>(null)
 
   const cs = useCloudSync()
   const busy = props.status === 'syncing' || props.status === 'testing' || cs.loading || cs.restoring
+
+  const handleSchemaRepair = async () => {
+    setRepairingSchema(true)
+    setSchemaRepairMessage(null)
+    const result = await runSchemaRepair()
+    if (result.ok) {
+      setSchemaRepairMessage(`Schema repaired${result.applied ? `: ${result.applied}` : ''}. Re-test connection, then sync again.`)
+    } else {
+      setSchemaRepairMessage(result.error ?? 'Schema repair failed.')
+    }
+    setRepairingSchema(false)
+  }
 
   return (
     <>
@@ -191,7 +206,18 @@ export function CloudStatusButton(props: SyncProps) {
                         className={`px-3 py-2 rounded-lg text-xs transition-colors ${busy || !props.connectionTested ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-500 text-white'}`}>
                         {props.status === 'syncing' ? 'Syncing…' : 'Sync now'}
                       </button>
+                      {(props.status === 'pending' || props.status === 'error' || (props.lastResult?.failed ?? 0) > 0) && (
+                        <button onClick={handleSchemaRepair} disabled={busy || repairingSchema}
+                          className={`px-3 py-2 rounded-lg text-xs transition-colors ${busy || repairingSchema ? 'bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-amber-600 hover:bg-amber-500 text-white'}`}>
+                          {repairingSchema ? 'Repairing…' : 'Repair schema'}
+                        </button>
+                      )}
                     </div>
+                  )}
+                  {schemaRepairMessage && (
+                    <p className={`text-xs mt-1 ${schemaRepairMessage.toLowerCase().includes('failed') || schemaRepairMessage.toLowerCase().includes('not configured') ? 'text-red-300' : 'text-emerald-300'}`}>
+                      {schemaRepairMessage}
+                    </p>
                   )}
 
                   {/* Per-entity results */}
