@@ -2472,17 +2472,21 @@ txnMerchantRef.current?.focus()
             </div>
             <p className="text-slate-400">Personal Finance Dashboard</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          {/* Tabs + utility row — tabs scroll on mobile, utility buttons stay right */}
+          <div className="flex items-start gap-2 flex-wrap md:flex-nowrap">
+            <div className="flex overflow-x-auto gap-2 flex-1 min-w-0 pb-1 md:pb-0 scrollbar-none">
             {(['Dashboard', 'Income', 'Budget', 'Accounts', 'Transactions', 'Scenarios', 'Targets'] as Tab[]).map(t => (
               <button
                 title={tabTips[t]}
                 key={t}
                 onClick={() => setTab(t)}
-                className={`px-4 py-2 rounded-lg transition-all duration-200 hover:-translate-y-0.5 ${tab === t ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600'}`}
+                className={`px-4 py-2 rounded-lg transition-all duration-200 hover:-translate-y-0.5 whitespace-nowrap flex-shrink-0 ${tab === t ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600'}`}
               >
                 {t === 'Targets' ? 'Savings Goals' : t}
               </button>
             ))}
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
             {/* V12.2 — Auth panel (guest/local mode when Supabase not configured) */}
             <AuthPanel />
             {/* V17 — Cloud status button */}
@@ -2511,7 +2515,8 @@ txnMerchantRef.current?.focus()
             >
               ⚙
             </button>
-          </div>
+            </div>{/* end utility buttons */}
+          </div>{/* end tabs+utility row */}
         </header>
 
       {cloudPersistence.pendingConflicts.length > 0 && (
@@ -2538,6 +2543,19 @@ txnMerchantRef.current?.focus()
         {/* ── DASHBOARD ── */}
         {tab === 'Dashboard' && (
           <section className="space-y-4 transition-all duration-300">
+
+            {/* V20 — Print/PDF export button */}
+            {!isAppEmpty && (
+              <div className="flex justify-end print:hidden">
+                <button
+                  onClick={() => window.print()}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors"
+                  title="Export dashboard as PDF via browser print"
+                >
+                  ↓ Export PDF
+                </button>
+              </div>
+            )}
 
             {/* ── V16 Onboarding — shown when app is empty ── */}
             {isAppEmpty && (
@@ -3293,7 +3311,16 @@ txnMerchantRef.current?.focus()
                           <div className="text-xs text-slate-400">{new Date(b.savedAt).toLocaleString()}</div>
                         </div>
                         <div className="flex gap-2 shrink-0">
-                          <button className="text-blue-300 hover:text-blue-200 text-xs" onClick={() => setCategories(b.categories)}>Load</button>
+                          <button
+                            className="text-blue-300 hover:text-blue-200 text-xs"
+                            onClick={() => {
+                              if (window.confirm(`Apply "${b.name}" as your budget? This replaces your current categories.`)) {
+                                pushBudgetHistory()
+                                setCategories(b.categories)
+                                showToast(`Applied template "${b.name}".`)
+                              }
+                            }}
+                          >Apply</button>
                           <button className="text-amber-300 hover:text-amber-200 text-xs" onClick={() => {
                             setEditingBudgetIdx(idx)
                             setRenameBudgetValue(b.name)
