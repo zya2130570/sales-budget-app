@@ -2,6 +2,7 @@ import { STORAGE_KEYS } from './storageKeys'
 import { loadFromStorage, loadRawFromStorage, saveRawToStorage, saveToStorage } from './storage'
 import type { CategoryMemory } from './categoryMemory'
 import type { BudgetActualsEnvelope, MonthlyReview } from '../types'
+import type { ManualRecurringItem } from './forecastMath'
 
 export function currentReviewMonth(): string {
   const n = new Date()
@@ -125,4 +126,12 @@ export function saveMonthlyReview(review: MonthlyReview): void {
   const reviewed = loadReviewedMonths()
   saveMonthlyNotes({ ...notes, [review.month]: review.notes })
   if (review.reviewedAt) saveReviewedMonths({ ...reviewed, [review.month]: review.reviewedAt })
+}
+
+export function loadManualRecurringItems(): ManualRecurringItem[] {
+  return loadFromStorage<ManualRecurringItem[]>(STORAGE_KEYS.recurringState, [])
+}
+
+export function saveManualRecurringItems(items: ManualRecurringItem[]): void {
+  saveToStorage(STORAGE_KEYS.recurringState, items)
 }
