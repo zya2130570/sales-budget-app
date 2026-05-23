@@ -1,7 +1,15 @@
 import type { Period, Category, Target } from '../types'
-import { currency } from './formatting'
 import { convertFromMonthly, computeDashboardStatus } from './calculations'
 import type { DashboardStatus } from './calculations'
+
+/** V23: Inline money formatter — never depends on Intl.NumberFormat locale behavior */
+function fmt(n: number): string {
+  if (!isFinite(n)) return '$0.00'
+  const abs = Math.abs(n)
+  const parts = abs.toFixed(2).split('.')
+  const int = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return (n < 0 ? '-$' : '$') + int + '.' + parts[1]
+}
 
 export type DashboardMetricsInput = {
   totalMonthly: number
@@ -56,7 +64,7 @@ export function computeDashboardMetrics(input: DashboardMetricsInput): Dashboard
     input.monthlyLeft < 0 && base.explanation.includes('/month')
       ? base.explanation.replace(
           /\$[\d,]+(\.\d+)?\/month/,
-          `${currency(Math.abs(convertFromMonthly(input.monthlyLeft, input.period)))}/${periodWord}`,
+          `${fmt(Math.abs(convertFromMonthly(input.monthlyLeft, input.period)))}/${periodWord}`,
         )
       : base.explanation
 

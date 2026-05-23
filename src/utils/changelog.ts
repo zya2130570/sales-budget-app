@@ -7,6 +7,22 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V23',
+    date: '5/23/2026 at 5:00 PM',
+    what: [
+      'Period bug ACTUALLY fixed — dashboardMetrics.ts now uses its own inline formatter instead of currency() from formatting.ts. The $ sign cannot be lost regardless of which files get deployed',
+      'Light mode improved — comprehensive CSS that changes backgrounds, text, borders, inputs. No more xray effect',
+      'Starter data card is now dynamic — only shows on Dashboard when app is empty. Otherwise accessible from your profile',
+      'Profile panel — click your email in the header to open a dropdown with: your account, Load starter data, Settings, Sign out',
+    ],
+    test: [
+      'Dashboard → Attention Needed banner → should now show $X,XXX.XX with a real dollar sign',
+      'Settings → Appearance → toggle light mode → full app should go light, not xray',
+      'Add some data then check Dashboard — the starter data card should be gone',
+      'Click your email in the header → profile dropdown with 4 options appears',
+    ],
+  },
+  {
     version: 'V22',
     date: '5/23/2026 at 3:00 PM',
     what: [
