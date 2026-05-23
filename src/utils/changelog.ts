@@ -7,6 +7,23 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V20',
+    date: '5/23/2026 at 12:00 PM',
+    what: [
+      'Schema Repair fixed — now uses Supabase Management API instead of direct pg connection (no more 500 error). Needs two new Vercel env vars: SUPABASE_PROJECT_REF and SUPABASE_ACCESS_TOKEN',
+      'Budget Templates — saved budgets renamed to "Apply" with a confirmation, so it\'s clear applying a template replaces your current categories',
+      'Mobile nav — tab bar now scrolls horizontally on small screens, utility buttons (cloud, settings) stay pinned right',
+      'PDF export — "↓ Export PDF" button on Dashboard opens browser print dialog, formatted for paper',
+      'Removed pg package — no longer needed after schema repair rewrite',
+    ],
+    test: [
+      'Settings → Add SUPABASE_PROJECT_REF and SUPABASE_ACCESS_TOKEN to Vercel → Repair database schema → should show success',
+      'Budget tab → Saved budgets section → "Apply" button → confirm dialog → categories should update',
+      'On a narrow window, the tab nav should scroll horizontally. Cloud/settings buttons stay visible on the right',
+      'Dashboard → "↓ Export PDF" button → browser print dialog opens with the dashboard formatted for paper',
+    ],
+  },
+  {
     version: 'V19',
     date: '5/23/2026 at 11:00 AM',
     what: [
