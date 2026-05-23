@@ -517,7 +517,13 @@ export function estimateTaxBreakdown(grossAnnual: number): TaxBreakdown {
 // --- Internal helpers (not exported) -----------------------------------------
 
 function formatMoney(n: number): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
+  // V22 FIX: Intl.NumberFormat was rendering $ as a period in some Chromium builds.
+  // Using explicit manual formatting instead — always produces $X,XXX.XX reliably.
+  if (!isFinite(n)) return '$0.00'
+  const abs = Math.abs(n)
+  const [int, dec = '00'] = abs.toFixed(2).split('.')
+  const intFormatted = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+  return (n < 0 ? '-$' : '$') + intFormatted + '.' + dec
 }
 
 function pLabel(p: Period): string {

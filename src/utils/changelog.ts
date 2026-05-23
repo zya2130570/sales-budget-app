@@ -7,6 +7,20 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V22',
+    date: '5/23/2026 at 3:00 PM',
+    what: [
+      'Period bug FIXED — $ was rendering as . in some Chromium builds. Replaced Intl.NumberFormat with explicit manual formatting. Every $ now always shows as $',
+      'Dark/Light mode — toggle in Settings → Appearance. Switches the entire app theme',
+      'Budget approach notifications — new amber insight when a category hits 75-99% of its monthly budget',
+    ],
+    test: [
+      'Dashboard → "Attention Needed" banner — the $ sign should now show correctly before every number',
+      'Settings → Appearance → toggle the switch — app should switch between dark and light',
+      'Enter some actuals that are close to (but not over) a category budget → Dashboard Insights → amber ⚡ warning should appear',
+    ],
+  },
+  {
     version: 'V21',
     date: '5/23/2026 at 1:30 PM',
     what: [

@@ -218,6 +218,25 @@ export function generateSpendingInsights(input: InsightInput): SpendingInsight[]
     }
   }
 
+  // ── MEDIUM: Approaching budget limit (75–99%) ────────────────────────────────
+  const approachingBudget = input.catBreakdown
+    .filter(c => c.planned > 0 && c.actual >= c.planned * 0.75 && c.actual < c.planned)
+    .sort((a, b) => (b.actual / b.planned) - (a.actual / a.planned))
+
+  for (const cat of approachingBudget.slice(0, 2)) {
+    const pct = Math.round((cat.actual / cat.planned) * 100)
+    const remaining = cat.planned - cat.actual
+    insights.push({
+      id: `approaching_budget_${cat.catId}`,
+      priority: 'medium',
+      icon: '⚡',
+      title: `${cat.name} is ${pct}% through its budget`,
+      body: `${currency(cat.actual)} spent of ${currency(cat.planned)} plan — ${currency(remaining)} remaining before you're over.`,
+      actionLabel: 'Review budget',
+      actionTab: 'Budget',
+    })
+  }
+
   // ── POSITIVE: All categories within budget ───────────────────────────────────
   if (
     input.overBudget.length === 0 &&
