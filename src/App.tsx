@@ -121,6 +121,7 @@ import { useInlineEditTimer } from './hooks/useInlineEdit'
 import { useNeedsReview } from './hooks/useNeedsReview'
 // V12.2 — Supabase auth foundation
 import { AuthPanel } from './components/AuthPanel'
+import { ProfilePanel } from './components/ProfilePanel'
 import { CloudStatusButton } from './components/CloudStatusButton'
 import { ConflictResolutionModal } from './components/ConflictResolutionModal'
 import { useCloudPersistence } from './hooks/useCloudPersistence'
@@ -2485,8 +2486,15 @@ txnMerchantRef.current?.focus()
               <p className="text-slate-400 text-xs md:text-sm hidden sm:block">Personal Finance Dashboard</p>
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              {/* V12.2 — Auth panel */}
-              <AuthPanel />
+              {/* V23 — Profile panel (signed in) or Auth form (signed out) */}
+              {appAuth.user
+                ? <ProfilePanel
+                    hasData={!isAppEmpty}
+                    onLoadStarterData={handleLoadPersonalPreload}
+                    onOpenSettings={() => setSettingsOpen(true)}
+                  />
+                : <AuthPanel />
+              }
               {/* V17 — Cloud status button */}
               <CloudStatusButton
                 status={cloudPersistence.status}
@@ -2580,10 +2588,13 @@ txnMerchantRef.current?.focus()
               />
             )}
 
+            {/* V23 — Starter data card only shown when app is empty */}
+            {isAppEmpty && (
             <PersonalPreloadCard
               onLoadPersonalData={handleLoadPersonalPreload}
               onDownloadBackup={downloadBackupFile}
             />
+            )}
 
             {/* ── V7.3 Dashboard Status Banner ── */}
             <DashboardStatusBanner status={dashboardStatus} />
