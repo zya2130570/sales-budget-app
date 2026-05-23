@@ -9,7 +9,6 @@ import {
 import type { DatasetSummary, ReconciliationAnalysis } from '../utils/reconciliationEngine'
 import { fetchCloudDataForRestore, type CloudRestoreSummary } from '../utils/cloudRestore'
 import {
-  downloadBackupFile,
   applyCloudRestoreToLocalStorage,
   loadAccounts, loadCategories, loadTargets, loadTransactionRules,
   loadSavedBudgets, loadSavedScenarios, loadSavedTargetSets,
@@ -100,13 +99,9 @@ export function useCloudSync() {
     setRestoring(true)
     setError(null)
     setSelectedChoice('cloud')
-    setStatus('Downloading local backup…')
+    setStatus('Fetching cloud data…')
 
     try {
-      // Always download a local backup before overwriting
-      downloadBackupFile()
-
-      setStatus('Fetching cloud data…')
       const restored = await fetchCloudDataForRestore(supabase, auth.user.id)
 
       if (restored.summary.errors.length > 0) {

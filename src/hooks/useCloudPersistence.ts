@@ -8,7 +8,7 @@
  * - Soft delete awareness (schema supports deleted_at; local delete propagation in V12.6)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { Account, Category, ImportBatch, SavedBudget, SavedScenarioSet, SavedTargetSet, Target, Transaction, TransactionRule } from '../types'
+import type { Account, Category, ImportBatch, SavedBudget, SavedScenarioSet, SavedTargetSet, Target, Transaction, TransactionRule, TakeHomeSettings } from '../types'
 import { supabase } from '../lib/supabaseClient'
 import { useAuth } from './useAuth'
 import {
@@ -47,6 +47,9 @@ export type UseCloudPersistenceArgs = {
   monthlyNotes: Record<string, string>
   reviewedMonths: Record<string, string>
   pendingDeletes: CloudPendingDelete[]
+  takeHomeSettings?: TakeHomeSettings | null
+  scenarioNotes?: Record<string, string>
+  categoryMemory?: Record<string, string>
   actualsperiod?: string
   actualsPeriodStart?: string
 }
