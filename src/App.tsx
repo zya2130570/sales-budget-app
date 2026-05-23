@@ -2461,62 +2461,66 @@ txnMerchantRef.current?.focus()
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100">
-      <div className="max-w-7xl mx-auto p-4 md:p-8 space-y-6">
+    <div className="min-h-screen bg-slate-900 text-slate-100 overflow-x-hidden">
+      <div className="max-w-7xl mx-auto w-full px-4 md:px-8 py-4 md:py-8 space-y-6">
 
-        <header className="rounded-2xl border border-slate-700 bg-slate-800/80 shadow-xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-3xl font-bold tracking-tight">Flow</h1>
-              <VersionBadge version={CURRENT_VERSION} className="mt-1" />
+        <header className="rounded-2xl border border-slate-700 bg-slate-800/80 shadow-xl p-4 md:p-5 space-y-3">
+
+          {/* Row 1: Logo (left) + Utility buttons (right) — always visible, never wrapped */}
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Flow</h1>
+                <VersionBadge version={CURRENT_VERSION} className="mt-0.5" />
+              </div>
+              <p className="text-slate-400 text-xs md:text-sm hidden sm:block">Personal Finance Dashboard</p>
             </div>
-            <p className="text-slate-400">Personal Finance Dashboard</p>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {/* V12.2 — Auth panel */}
+              <AuthPanel />
+              {/* V17 — Cloud status button */}
+              <CloudStatusButton
+                status={cloudPersistence.status}
+                canSync={cloudPersistence.canSync}
+                connectionTested={cloudPersistence.connectionTested}
+                connectionTestError={cloudPersistence.connectionTestError}
+                autoSyncEnabled={cloudPersistence.autoSyncEnabled}
+                autoSyncPaused={cloudPersistence.autoSyncPaused}
+                pendingCount={cloudPersistence.pendingCount}
+                lastSyncedAt={cloudPersistence.lastSyncedAt}
+                error={cloudPersistence.error}
+                lastResult={cloudPersistence.lastResult}
+                onTestConnection={cloudPersistence.runConnectionTest}
+                onSyncNow={cloudPersistence.syncNow}
+                onToggleAutoSync={cloudPersistence.setAutoSyncEnabled}
+                onDownloadBackup={downloadBackupFile}
+                onOpenSettings={() => setSettingsOpen(true)}
+              />
+              {/* V16 — Settings */}
+              <button
+                onClick={() => setSettingsOpen(true)}
+                className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors flex-shrink-0"
+                title="Settings"
+              >
+                ⚙
+              </button>
+            </div>
           </div>
-          {/* Tabs + utility row — tabs scroll on mobile, utility buttons stay right */}
-          <div className="flex items-start gap-2 flex-wrap md:flex-nowrap">
-            <div className="flex overflow-x-auto gap-2 flex-1 min-w-0 pb-1 md:pb-0 scrollbar-none">
+
+          {/* Row 2: Tab navigation — scrolls horizontally, never pushes page wider */}
+          <div className="flex overflow-x-auto gap-1.5 scrollbar-none -mx-4 px-4 md:-mx-5 md:px-5">
             {(['Dashboard', 'Income', 'Budget', 'Accounts', 'Transactions', 'Scenarios', 'Targets'] as Tab[]).map(t => (
               <button
                 title={tabTips[t]}
                 key={t}
                 onClick={() => setTab(t)}
-                className={`px-4 py-2 rounded-lg transition-all duration-200 hover:-translate-y-0.5 whitespace-nowrap flex-shrink-0 ${tab === t ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600'}`}
+                className={`px-3 md:px-4 py-2 rounded-lg transition-all duration-200 hover:-translate-y-0.5 whitespace-nowrap flex-shrink-0 text-sm ${tab === t ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600'}`}
               >
                 {t === 'Targets' ? 'Savings Goals' : t}
               </button>
             ))}
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-            {/* V12.2 — Auth panel (guest/local mode when Supabase not configured) */}
-            <AuthPanel />
-            {/* V17 — Cloud status button */}
-            <CloudStatusButton
-              status={cloudPersistence.status}
-              canSync={cloudPersistence.canSync}
-              connectionTested={cloudPersistence.connectionTested}
-              connectionTestError={cloudPersistence.connectionTestError}
-              autoSyncEnabled={cloudPersistence.autoSyncEnabled}
-              autoSyncPaused={cloudPersistence.autoSyncPaused}
-              pendingCount={cloudPersistence.pendingCount}
-              lastSyncedAt={cloudPersistence.lastSyncedAt}
-              error={cloudPersistence.error}
-              lastResult={cloudPersistence.lastResult}
-              onTestConnection={cloudPersistence.runConnectionTest}
-              onSyncNow={cloudPersistence.syncNow}
-              onToggleAutoSync={cloudPersistence.setAutoSyncEnabled}
-              onDownloadBackup={downloadBackupFile}
-              onOpenSettings={() => setSettingsOpen(true)}
-            />
-            {/* V16 — Settings */}
-            <button
-              onClick={() => setSettingsOpen(true)}
-              className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors"
-              title="Settings"
-            >
-              ⚙
-            </button>
-            </div>{/* end utility buttons */}
-          </div>{/* end tabs+utility row */}
+          </div>
+
         </header>
 
       {cloudPersistence.pendingConflicts.length > 0 && (
@@ -2820,7 +2824,8 @@ txnMerchantRef.current?.focus()
                 {monthlyReview.catBreakdown.length > 0 && (
                   <div>
                     <p className="text-xs text-slate-400 font-medium mb-2">Category Breakdown</p>
-                    <table className="w-full text-xs">
+                    <div className="overflow-x-auto">
+                    <table className="w-full text-xs min-w-[300px]">
                       <thead><tr className="text-left text-slate-500 border-b border-slate-700/60">
                         <th className="pb-1 pr-2 font-medium">Category</th>
                         <th className="pb-1 pr-2 text-right font-medium">Planned</th>
@@ -2840,6 +2845,7 @@ txnMerchantRef.current?.focus()
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 )}
                 {monthlyReview.bigTxns.length > 0 && (
@@ -3333,7 +3339,8 @@ txnMerchantRef.current?.focus()
                   </div>
                 ))}
               </div>
-              <table className="w-full text-sm mt-3">
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm mt-3 min-w-[480px]">
                 <thead>
                   <tr className="text-left text-slate-400 border-b border-slate-700">
                     <th className="pb-1.5 pr-2">Name</th>
@@ -3661,6 +3668,7 @@ txnMerchantRef.current?.focus()
                   })}
                 </tbody>
               </table>
+              </div>
             </Card></div>
 
             {/* V19 — Budget History */}
