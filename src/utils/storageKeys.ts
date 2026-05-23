@@ -22,6 +22,7 @@ export const STORAGE_KEYS = {
   reviewMonth: 'flow_review_month',
   monthlyNotes: 'flow_monthly_notes',
   reviewedMonths: 'flow_reviewed_months',
+  categoryRollovers: 'flow_category_rollovers',
 
   // Reserved centralized names for state that may become persisted later.
   importHistory: 'flow_import_history',
@@ -40,3 +41,6 @@ export const PENDING_DELETES_KEY = STORAGE_KEYS.pendingDeletes
 // V18 — last sync timestamp (moved from hardcoded string in useCloudPersistence)
 // Note: appended separately so existing key values are not changed
 export const LAST_SYNC_AT_KEY = 'flow_cloud_last_sync_at'
+
+// V19 — Category rollover flags persistence
+// (categoryRollovers was in React state but lost on refresh before this)

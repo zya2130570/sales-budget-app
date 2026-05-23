@@ -7,6 +7,26 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V19',
+    date: '5/23/2026 at 11:00 AM',
+    what: [
+      'Schema Repair button in Settings — creates missing Supabase tables without manually running SQL',
+      'Contribution delete propagation — deleting a savings goal contribution now marks it deleted in cloud on next sync',
+      'AI assistant API key message — clear setup instructions when ANTHROPIC_API_KEY is not configured',
+      'Period-keyed actuals — budget actuals now stored per calendar month (YYYY-MM), enabling real history',
+      'Budget History browser — view past months\' actuals vs plan in the Budget tab',
+      'Category rollover math — enabled categories carry underspend forward from previous month',
+      'Rollover persistence — rollover toggles no longer lost on page refresh',
+    ],
+    test: [
+      'Settings → Repair database schema → should show success or list missing tables',
+      'Delete a savings goal contribution → Sync now → Supabase savings_goal_contributions → row should have deleted_at set',
+      'Budget tab → scroll to bottom → "Budget History" section should appear (after actuals exist for multiple months)',
+      'Enable Rollover on a category → next month it should show "+$X rolled" if you underspent last month',
+      'Refresh the page after enabling rollover toggles → toggles should still be on',
+    ],
+  },
+  {
     version: 'V18',
     date: '5/22/2026 at 9:00 AM',
     what: [

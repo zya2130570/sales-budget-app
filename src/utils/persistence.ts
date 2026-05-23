@@ -135,3 +135,18 @@ export function loadManualRecurringItems(): ManualRecurringItem[] {
 export function saveManualRecurringItems(items: ManualRecurringItem[]): void {
   saveToStorage(STORAGE_KEYS.recurringState, items)
 }
+
+// V19 — Category rollover persistence
+export function loadCategoryRollovers(): Record<string, boolean> {
+  return loadFromStorage<Record<string, boolean>>(STORAGE_KEYS.categoryRollovers, {})
+}
+export function saveCategoryRollovers(rollovers: Record<string, boolean>): void {
+  saveToStorage(STORAGE_KEYS.categoryRollovers, rollovers)
+}
+
+/** Previous calendar month in YYYY-MM format. */
+export function prevMonthKey(yyyyMM: string): string {
+  const [y, m] = yyyyMM.split('-').map(Number)
+  const d = new Date(y, m - 2, 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
