@@ -7,6 +7,22 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V21',
+    date: '5/23/2026 at 1:30 PM',
+    what: [
+      'Responsive layout fix — page no longer scrolls horizontally at any viewport width',
+      'Header redesigned — logo + utility buttons always pinned top row, tab bar always scrolls in its own row below',
+      'All tables now scroll within their card rather than expanding the page',
+      'Mobile-first: works correctly at 320px phone width all the way to ultra-wide desktop',
+    ],
+    test: [
+      'Drag browser window to any width — no horizontal scrollbar should appear on the page itself',
+      'At 400px width: logo and Cloud/⚙ buttons visible top-right; tabs scroll left/right below them',
+      'Budget tab → Budget Categories table should scroll within the card, not expand the page',
+      'On phone: open the app — it should fit the screen without zooming or scrolling sideways',
+    ],
+  },
+  {
     version: 'V20',
     date: '5/23/2026 at 12:00 PM',
     what: [
