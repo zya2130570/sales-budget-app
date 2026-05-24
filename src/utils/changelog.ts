@@ -11,7 +11,7 @@ export const CHANGELOG: VersionEntry[] = [
     version: 'V31',
     date: '5/24/2026 at 10:00 AM',
     what: [
-      'Gemini model fixed — was using gemini-2.0-flash (free tier limit: 0). Now uses gemini-1.5-flash which has confirmed 1M tokens/day free.',
+      'Gemini model fallback added — tries GEMINI_MODEL first, then current Flash model options if one model is unavailable.',
       'AI error message updated — now shows Gemini setup steps with all 3 environment checkboxes (Production + Preview + Development). The old ANTHROPIC_API_KEY message is gone.',
     ],
     test: [
@@ -65,7 +65,7 @@ export const CHANGELOG: VersionEntry[] = [
     date: '5/24/2026 at 12:00 AM',
     what: [
       'Period bug ACTUALLY fixed this time — .flow-dollar::before { content: "$" } CSS rule was missing from the deployed file in V26/V27 even though the class was being used. Now added.',
-      'Gemini model switched from gemini-2.0-flash → gemini-1.5-flash. The 2.0 model has limit:0 on the free tier. 1.5 Flash has confirmed 1M tokens/day free.',
+      'Gemini model handling updated to avoid hardcoding one unavailable model.',
       'Scrollbar fix strengthened — now explicitly targets html and body elements in addition to the universal * selector.',
       'AIAssistantPanel error messages updated — detects quota errors specifically, shows correct Gemini setup steps, clarifies key is set once in Vercel and never expires.',
     ],
