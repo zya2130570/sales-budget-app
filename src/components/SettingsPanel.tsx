@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { runSchemaRepair } from '../utils/schemaRepair'
 
 type SettingsPanelProps = {
@@ -28,6 +28,15 @@ export function SettingsPanel({
   const [importError, setImportError] = useState<string | null>(null)
   const [repairStatus, setRepairStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [repairMessage, setRepairMessage] = useState<string | null>(null)
+
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose])
 
   const handleImportFile = async (file: File | null) => {
     if (!file) return

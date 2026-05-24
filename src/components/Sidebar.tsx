@@ -44,11 +44,13 @@ type Props = {
   onOpenProfile?: () => void
   collapsed: boolean
   onToggle: () => void
+  theme?: 'dark' | 'light'
+  onToggleTheme?: () => void
 }
 
-export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile, collapsed, onToggle }: Props) {
+export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile, collapsed, onToggle, theme = 'dark', onToggleTheme }: Props) {
 
-  // Keyboard shortcuts: 1-7 navigate, 0 opens Settings, . opens Profile, [ toggles sidebar
+  // Keyboard shortcuts: 1-7 navigate, 0 toggles Settings, . toggles Profile, [ toggles sidebar, t toggles theme
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
@@ -57,12 +59,13 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
       if (e.key === '[') { onToggle(); return }
       if (e.key === '0') { e.preventDefault(); onOpenSettings(); return }
       if (e.key === '.') { e.preventDefault(); onOpenProfile?.(); return }
+      if (e.key.toLowerCase() === 't' && onToggleTheme) { e.preventDefault(); onToggleTheme(); return }
       const idx = parseInt(e.key) - 1
       if (idx >= 0 && idx < NAV.length) onNavigate(NAV[idx].id)
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onNavigate, onOpenSettings, onOpenProfile, onToggle])
+  }, [onNavigate, onOpenSettings, onOpenProfile, onToggle, onToggleTheme])
 
   const W = collapsed ? 56 : 220
 
@@ -133,6 +136,36 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
 
       {/* Bottom: Settings + Collapse */}
       <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', padding: '8px 0', flexShrink: 0 }}>
+
+        {/* Theme toggle */}
+        {onToggleTheme && (
+          <button
+            onClick={onToggleTheme}
+            title={collapsed ? `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode` : undefined}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+              padding: collapsed ? '8px 0' : '7px 16px',
+              justifyContent: collapsed ? 'center' : 'flex-start',
+              color: 'rgba(255,255,255,0.35)', fontSize: 13,
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              transition: 'color 0.12s ease',
+            }}
+            onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.65)'}
+            onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.35)'}
+          >
+            {theme === 'dark' ? (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="8" cy="8" r="3.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M2.8 2.8l1.4 1.4M11.8 11.8l1.4 1.4M2.8 13.2l1.4-1.4M11.8 4.2l1.4-1.4"/>
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13.5 10.5A6 6 0 0 1 5.5 2.5 6.5 6.5 0 1 0 13.5 10.5z"/>
+              </svg>
+            )}
+            {!collapsed && <><span style={{ flex: 1, textAlign: 'left' }}>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span><kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>T</kbd></>}
+          </button>
+        )}
+
         {/* Settings */}
         <button
           onClick={onOpenSettings}

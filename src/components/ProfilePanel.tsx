@@ -21,9 +21,9 @@ export function ProfilePanel({ hasData, onLoadStarterData, onOpenSettings, onOpe
   const ref = useRef<HTMLDivElement>(null)
 
 
-  // External keyboard shortcut support: pressing "." in the sidebar opens Profile.
+  // External keyboard shortcut support: pressing "." toggles Profile.
   useEffect(() => {
-    if (openSignal > 0) setOpen(true)
+    if (openSignal > 0) setOpen(v => !v)
   }, [openSignal])
 
   // Close on outside click
@@ -34,6 +34,16 @@ export function ProfilePanel({ hasData, onLoadStarterData, onOpenSettings, onOpe
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
+  }, [open])
+
+  // Escape closes profile menu.
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
   }, [open])
 
   if (!user) return null

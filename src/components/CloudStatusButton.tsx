@@ -7,7 +7,7 @@
  *
  * Merge Safe Data is a top-level button, not buried inside Compare.
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { runSchemaRepair } from '../utils/schemaRepair'
 import { useCloudSync } from '../hooks/useCloudSync'
 import type { CloudPersistenceStatus } from '../hooks/useCloudPersistence'
@@ -117,6 +117,16 @@ export function CloudStatusButton(props: SyncProps) {
 
   const cs = useCloudSync()
   const busy = props.status === 'syncing' || props.status === 'testing' || cs.loading || cs.restoring
+
+
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [open])
 
   const handleSchemaRepair = async () => {
     setRepairingSchema(true)
