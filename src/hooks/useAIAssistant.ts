@@ -19,7 +19,7 @@ export function useAIAssistant() {
       })
       const data = await res.json()
       if (!res.ok || data.error) { setError(data.error ?? `Server error ${res.status}`); setStatus('error'); setMessages(messages); return }
-      setMessages([...newMessages, { role: 'assistant', content: data.reply }])
+      setMessages([...newMessages, { role: 'assistant', content: data.content ?? data.reply ?? '' }])
       setStatus('idle')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Network error')
