@@ -3695,7 +3695,9 @@ txnMerchantRef.current?.focus()
                           <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); addPendingDelete('categories', c.id); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
                           {/* V9.11 — Rollover toggle */}
                           <button
-                            title={categoryRollovers[c.id] ? 'Rollover enabled — unused budget carries forward' : 'Enable rollover for this category'}
+                            title={categoryRollovers[c.id]
+                              ? `Rollover ON — if you underspend, the difference carries forward. Example: budget $400, spend $300 → next month gets $500. Click to disable.`
+                              : `Rollover OFF — enable for lumpy expenses (car repairs, haircuts, clothing). Underspend this month = bigger budget next month. Click to enable.`}
                             className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${categoryRollovers[c.id] ? 'text-teal-300 bg-teal-900/30 border-teal-700/30' : 'text-slate-600 border-slate-700/30 hover:text-slate-400'}`}
                             onClick={() => setCategoryRollovers(prev => ({ ...prev, [c.id]: !prev[c.id] }))}
                           >{categoryRollovers[c.id] ? 'Rollover ✓' : 'Rollover'}</button>
