@@ -687,6 +687,7 @@ export default function App() {
 
   useEffect(() => { saveCategoryRollovers(categoryRollovers) }, [categoryRollovers])
   const [budgetFilter, setBudgetFilter]               = useState<'all' | 'over-budget' | 'no-activity'>('all')
+  const [budgetSearch, setBudgetSearch]                 = useState('')  // V32 — category search
   // V9.11 — Uncategorized expenses collapsible (default open)
   const [uncatOpen, setUncatOpen]                     = useState(true)
   // V9.11 — Delete all duplicates confirmation
@@ -1032,8 +1033,10 @@ export default function App() {
   }, [targets])
 
   // V30: Scroll to top on every tab change — prevents landing mid-page
+  // V32: Also blur any focused input to prevent highlight carryover between tabs
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'instant' })
+    window.scrollTo({ top: 0, behavior: 'instant' });
+    (document.activeElement as HTMLElement)?.blur()
   }, [tab])
 
   // Close autocomplete on outside click
@@ -1162,7 +1165,7 @@ export default function App() {
   }, [categoryRollovers, categories, currentActualsPeriodKey])
 
   const budgetHealth = useMemo(() => {
-    const overBudget   = categories.filter(c => { const e = effectiveCatActual(c.id); return e !== null && e.total > convertFromMonthly(c.amount, period) })
+    const overBudget   = categories.filter(c => !budgetSearch || c.name.toLowerCase().includes(budgetSearch.toLowerCase())).filter(c => { const e = effectiveCatActual(c.id); return e !== null && e.total > convertFromMonthly(c.amount, period) })
     const noActivity   = categories.filter(c => effectiveCatActual(c.id) === null)
     const totalPlanned = categories.reduce((s, c) => s + convertFromMonthly(c.amount, period), 0)
     const totalActual  = categories.reduce((s, c) => { const e = effectiveCatActual(c.id); return s + (e?.total ?? 0) }, 0)
@@ -2524,6 +2527,7 @@ txnMerchantRef.current?.focus()
         onToggle={() => setSidebarCollapsed(v => !v)}
         theme={theme}
         onToggleTheme={toggleTheme}
+        onSync={() => cloudPersistence.syncNow()}
       />
 
       {/* Single inner container with dynamic left margin */}
@@ -2681,7 +2685,7 @@ txnMerchantRef.current?.focus()
               />
               <ActionCard
                 title="Adjust Income Forecast"
-                description="Update your gross profit to see how your take-home and commission change."
+                description="Update your gross income to see how your take-home and commission change."
                 onClick={goToIncomeAndFocus}
                 tone="neutral"
               />
@@ -2711,7 +2715,7 @@ txnMerchantRef.current?.focus()
             <Card title="Dashboard Summary">
               <div className="flex gap-2 mb-4">{periods.map(p => <Pill key={p} active={period === p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div>
               <p className="mb-4">
-                Monthly Gross Profit Reference:{' '}
+                Monthly Gross Income Reference:{' '}
                 <span
                   className={`${gp > 10000 ? 'text-green-400' : ''} font-semibold underline cursor-pointer hover:opacity-75 transition-opacity`}
                   onClick={goToIncomeAndFocus}
@@ -2990,7 +2994,7 @@ txnMerchantRef.current?.focus()
         {tab === 'Income' && (
           <section className="space-y-4 transition-all duration-300">
             <Card title="Income Input">
-              <label className="text-sm">Monthly Gross Profit</label>
+              <label className="text-sm">Monthly Gross Income</label>
               <div className="relative mt-2">
                 <span className="absolute left-3 top-2.5 text-slate-400">$</span>
                 <input
@@ -3137,7 +3141,16 @@ txnMerchantRef.current?.focus()
                 <div className="mt-4 pt-3 border-t border-slate-700/60">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">Budget Health</span>
-                    <div className="flex gap-1.5">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {/* V32 — Category search */}
+                      <input
+                        type="text"
+                        value={budgetSearch}
+                        onChange={e => setBudgetSearch(e.target.value)}
+                        placeholder="Search categories…"
+                        className="rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1 text-xs text-slate-200 placeholder-slate-500 focus:border-blue-500 focus:outline-none w-40"
+                      />
+                      <div className="flex gap-1.5">
                       <button
                         className={`text-[10px] px-2 py-0.5 rounded transition-colors ${budgetFilter === 'all' ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
                         onClick={() => { setBudgetFilter('all'); budgetCategoryTableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }}
@@ -3152,6 +3165,7 @@ txnMerchantRef.current?.focus()
                       >No Activity {budgetHealth.noActivity.length > 0 && `(${budgetHealth.noActivity.length})`}</button>
                     </div>
                   </div>
+                </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                     {[
                       { label: 'Total Planned', val: currency(budgetHealth.totalPlanned), color: 'text-slate-200' },
@@ -4947,8 +4961,8 @@ txnMerchantRef.current?.focus()
                       </div>
                     )}
 
-                    <Row l="Monthly Gross Profit" v={currency(gpForScenario)} />
-                    <Row l={`Gross Profit (${labelPeriod(period)})`} v={currency(convertFromMonthly(gpForScenario, period))} />
+                    <Row l="Monthly Gross Income" v={currency(gpForScenario)} />
+                    <Row l={`Gross Income (${labelPeriod(period)})`} v={currency(convertFromMonthly(gpForScenario, period))} />
                     <Row l="Commission (net)" v={currency(convertFromMonthly(ii.cMonthly, period))} />
                     <Row l="Base net income" v={currency(convertFromMonthly(ii.baseMonthly, period))} />
                     <Row l="Total net income" v={currency(convertFromMonthly(ii.totalMonthly, period))} />
