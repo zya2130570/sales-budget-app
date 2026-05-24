@@ -6,9 +6,11 @@ import { ZYAN_PERSONAL_PRELOAD } from '../utils/personalPreloadData'
 type Props = {
   onLoadPersonalData: () => void
   onDownloadBackup: () => void
+  onSavePersonalDefault: () => void
+  hasCustomDefault: boolean
 }
 
-export function PersonalPreloadCard({ onLoadPersonalData, onDownloadBackup }: Props) {
+export function PersonalPreloadCard({ onLoadPersonalData, onDownloadBackup, onSavePersonalDefault, hasCustomDefault }: Props) {
   const { user, loading } = useAuth()
   const [confirming, setConfirming] = useState(false)
   const [billsOpen, setBillsOpen] = useState(true)
@@ -44,6 +46,9 @@ export function PersonalPreloadCard({ onLoadPersonalData, onDownloadBackup }: Pr
           <p className="text-sm text-slate-400">
             Includes accounts, budget categories, goals, Apple Card history, rules, recurring savings, and saved views.
           </p>
+          {hasCustomDefault && (
+            <p className="mt-1 text-xs text-emerald-300">Using your saved custom default instead of the original starter baseline.</p>
+          )}
         </div>
         <div className="text-xs text-slate-400 md:text-right">
           <div>{ZYAN_PERSONAL_PRELOAD.metadata.transactionCount} Apple Card transactions</div>
@@ -80,13 +85,23 @@ export function PersonalPreloadCard({ onLoadPersonalData, onDownloadBackup }: Pr
           {loading ? 'Checking login…' : 'Please log in to load your personal data.'}
         </div>
       ) : !confirming ? (
-        <button
-          type="button"
-          onClick={() => setConfirming(true)}
-          className="rounded-xl bg-blue-600 hover:bg-blue-500 px-4 py-2 text-sm font-semibold text-white transition-colors"
-        >
-          Load my starter data
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setConfirming(true)}
+            className="rounded-xl bg-blue-600 hover:bg-blue-500 px-4 py-2 text-sm font-semibold text-white transition-colors"
+          >
+            {hasCustomDefault ? 'Load my saved default' : 'Load my starter data'}
+          </button>
+          <button
+            type="button"
+            onClick={onSavePersonalDefault}
+            className="rounded-xl bg-slate-700 hover:bg-slate-600 px-4 py-2 text-sm font-semibold text-slate-100 transition-colors"
+            title="Save the current accounts, budget, goals, transactions, and rules as your new personal default."
+          >
+            Save current as default
+          </button>
+        </div>
       ) : (
         <div className="rounded-xl border border-amber-700/50 bg-amber-950/20 p-3 space-y-3">
           <p className="text-sm font-semibold text-amber-100">This will overwrite the current local workspace.</p>
@@ -106,7 +121,7 @@ export function PersonalPreloadCard({ onLoadPersonalData, onDownloadBackup }: Pr
               onClick={() => { onLoadPersonalData(); setConfirming(false) }}
               className="rounded-lg bg-amber-600 hover:bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white transition-colors"
             >
-              Overwrite and load starter data
+              Overwrite and load data
             </button>
             <button
               type="button"
