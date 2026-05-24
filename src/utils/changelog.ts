@@ -3,9 +3,32 @@ export type VersionEntry = {
   date: string
   what: string[]
   test: string[]
+  roadmap?: string[]
 }
 
 export const CHANGELOG: VersionEntry[] = [
+  {
+    version: 'V25',
+    date: '5/23/2026 at 9:00 PM',
+    what: [
+      'Gemini Flash AI — free alternative to Anthropic (1M tokens/day free tier). Add GEMINI_API_KEY from aistudio.google.com to Vercel. If both keys are set, Gemini is used.',
+      'AI guide chat fixed — OnboardingGuide was sending systemOverride but chat.ts ignored it. Now handled correctly so the guide has its own focused context.',
+      'Response field normalized — API was returning { reply } but OnboardingGuide expected { content }. Now returns { content } everywhere. Financial assistant also updated.',
+      'Reconcile explanation added — Compare & Merge tab now has a plain-English explanation of what reconciliation is, what each button does, and when to use Merge Safe vs Use Cloud/Local.',
+      'Rollover explanation improved — hover tooltip on the Rollover button in Budget now explains exactly what it does with a concrete example.',
+    ],
+    test: [
+      'Add GEMINI_API_KEY to Vercel (aistudio.google.com → Get API key) → redeploy → AI assistant should work for free',
+      'Open Setup Guide (profile dropdown) → ask a question in the chat → response should be guide-focused, not financial-data-focused',
+      'Cloud button → Compare & Merge tab → should see plain-English explanation at the top',
+      'Budget tab → hover over any "Rollover" button → tooltip should explain with a $400/$300/$500 example',
+    ],
+    roadmap: [
+      'DEPLOYED: V19-V25 complete. Cloud sync, mobile layout, budget history, rollover, dark mode, onboarding guide, profile panel, AI chat (Gemini/Anthropic), reconcile explanation.',
+      'POST-LAUNCH (after real use): Net worth tracker, year-over-year comparison, recurring transaction detection, CSV export for tax season.',
+      'ON HOLD: Recurring transactions (RecurringSection.tsx exists but not wired to main flow), deeper scenario planning.',
+    ],
+  },
   {
     version: 'V24',
     date: '5/23/2026 at 7:00 PM',
