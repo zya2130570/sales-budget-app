@@ -8,6 +8,24 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V31.2',
+    date: '5/24/2026',
+    what: [
+      'Escape key now closes click-out overlays like Settings, Profile, and Cloud Status.',
+      'Profile shortcut is now a true toggle: press . to open and press . again to close.',
+      'Settings shortcut now toggles from the sidebar shortcut flow.',
+      'Light/Dark mode is now accessible directly from the sidebar, with T as a shortcut.',
+      'Dashboard status banner has a softer light-mode gradient instead of a flat card or harsh gradient.',
+    ],
+    test: [
+      'Open Settings, Profile, and Cloud Status → press Escape → each should close.',
+      'Press . twice → Profile opens, then closes.',
+      'Press 0 twice → Settings opens, then closes.',
+      'Press T → theme toggles between dark and light.',
+      'In light mode, Dashboard status banner should still have color but look softer.',
+    ],
+  },
+  {
     version: 'V31.1',
     date: '5/24/2026',
     what: [
