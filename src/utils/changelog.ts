@@ -8,6 +8,45 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V27',
+    date: '5/23/2026 at 11:30 PM',
+    what: [
+      'Setup Guide redesigned — pinned navigation (Next button always visible, never requires scrolling). Glassmorphism dark panel with gradient progress bar, cleaner tip cards, better typography.',
+      'Command palette — press Ctrl+K (⌘+K on Mac) anywhere to open a searchable action menu. Navigate tabs, open guide, sync, load demo. Arrow keys to select, Enter to confirm, Escape to close.',
+      'Global scrollbar removal — all scrollbars hidden site-wide for a clean interface. Scrolling still works, the bar just disappears.',
+      'Escape key closes the Setup Guide.',
+    ],
+    test: [
+      'Press Ctrl+K → command palette opens. Type "budget" → filtered results. Arrow keys navigate. Enter selects.',
+      'Open Setup Guide → expand panel → Next button is always visible at the bottom without scrolling',
+      'Check the entire app — no scrollbar visible anywhere',
+      'Open Setup Guide → press Escape → closes',
+    ],
+    roadmap: [
+      'COMPLETE V1-V27: Cloud sync, mobile, recurring, net worth, reconcile, rollover, dark mode, PDF export, AI (Gemini free), onboarding guide, profile panel, command palette.',
+      'NEXT (after 1 month of real use): Net worth chart in Dashboard, year-over-year comparison, CSV export for tax season.',
+    ],
+  },
+  {
+    version: 'V26',
+    date: '5/23/2026 at 10:00 PM',
+    what: [
+      'Dollar sign fix (final) — switched from JSX <span>$ approach to CSS ::before content property. CSS-generated content cannot be removed by browser extensions that manipulate DOM text nodes. This is the definitive fix.',
+      'AI setup instructions updated — error message now mentions Gemini Flash as the free option with step-by-step setup instructions (aistudio.google.com → Get API key → add GEMINI_API_KEY to Vercel).',
+      'AI assistant bottom note updated — now says "Free with GEMINI_API_KEY" instead of mentioning the paid Anthropic key.',
+    ],
+    test: [
+      'Dashboard → Attention Needed banner → dollar sign before the amount should now appear even with browser extensions enabled',
+      'Financial Assistant → send a message without any API key set → amber card should show Gemini setup steps',
+      'Add GEMINI_API_KEY to Vercel → AI assistant should work for free',
+    ],
+    roadmap: [
+      'COMPLETE: V1-V26. Cloud sync, mobile, budget history, rollover, dark mode, onboarding guide, profile panel, AI (Gemini free), reconcile, recurring detection, net worth in Accounts tab.',
+      'POST-LAUNCH (after 1 month of real use): Net worth in Dashboard, year-over-year comparison, CSV export for tax season.',
+      'DEFERRED: Recurring section is fully built and wired in Transactions tab — no code needed, just use it.',
+    ],
+  },
+  {
     version: 'V25',
     date: '5/23/2026 at 9:00 PM',
     what: [
