@@ -154,16 +154,30 @@ export function computeReconciliationData(
   computedBalances: Record<string, number>,
 ): Record<string, ReconciliationEntry> {
   const result: Record<string, ReconciliationEntry> = {}
+
   for (const acct of accounts) {
-    const startingBalance = (acct as Account & { startingBalance?: number }).startingBalance ?? acct.balance
-    const expectedBalance = computedBalances[acct.id] ?? acct.balance
-    const txnImpact       = expectedBalance - startingBalance
-    const actualBalance   = acct.balance
-    const difference      = actualBalance - expectedBalance
+    const currentBalance = Number(acct.balance) || 0
+    const startingBalance = (acct as Account & { startingBalance?: number }).startingBalance ?? currentBalance
+
+    // `computedBalances` is built in App.tsx as current balance + imported activity.
+    // The activity delta must be derived from current balance, not from the previous
+    // starting balance. Otherwise pressing Reconcile repeatedly compounds the same
+    // imported activity and the "unexplained" amount grows every click.
+    const computedBalance = computedBalances[acct.id] ?? currentBalance
+    const txnImpact = computedBalance - currentBalance
+    const expectedBalance = startingBalance + txnImpact
+    const actualBalance = currentBalance
+    const difference = actualBalance - expectedBalance
+
     result[acct.id] = {
-      startingBalance, txnImpact, expectedBalance, actualBalance, difference,
+      startingBalance,
+      txnImpact,
+      expectedBalance,
+      actualBalance,
+      difference,
       isReconciled: Math.abs(difference) <= RECON_THRESHOLD,
     }
   }
+
   return result
 }

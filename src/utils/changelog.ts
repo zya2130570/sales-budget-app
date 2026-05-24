@@ -8,6 +8,21 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V31.1',
+    date: '5/24/2026',
+    what: [
+      'Reconcile no longer compounds imported activity every time the button is clicked.',
+      'Dashboard status banner no longer uses the heavy gradient in light mode.',
+      'Keyboard shortcuts added: 0 opens Settings and . opens Profile.',
+      'Financial Assistant chat history now survives refresh on the same device.',
+    ],
+    test: [
+      'Accounts → click Reconcile repeatedly on the same account → unexplained amount should not keep growing.',
+      'Press 0 → Settings opens. Press . → Profile opens.',
+      'Ask the Financial Assistant something → refresh → recent chat should still be visible.',
+    ],
+  },
+  {
     version: 'V31',
     date: '5/24/2026 at 10:00 AM',
     what: [
