@@ -15,6 +15,26 @@ export function PersonalPreloadCard({ onLoadPersonalData, onDownloadBackup }: Pr
 
   const totalBills = ZYAN_PERSONAL_PRELOAD.billsToMomBreakdown.reduce((sum, item) => sum + item.amount, 0)
 
+  // V30 — guests see a minimal teaser, not sensitive data
+  if (!user && !loading) {
+    return (
+      <div className="rounded-2xl border border-blue-700/30 bg-blue-950/10 p-4 space-y-2">
+        <p className="text-xs uppercase tracking-wide text-blue-400 font-semibold">Personal starter data</p>
+        <p className="text-sm text-slate-300">Sign in to load your real budget setup — accounts, categories, goals, and transaction history.</p>
+        <div className="flex items-center gap-2 pt-1">
+          <button
+            disabled
+            className="rounded-lg bg-slate-700 text-slate-500 px-4 py-2 text-sm cursor-not-allowed opacity-60"
+            title="Sign in first to load your personal data"
+          >
+            Load my starter data
+          </button>
+          <span className="text-xs text-slate-600">Requires sign-in</span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="rounded-2xl border border-blue-700/50 bg-blue-950/20 p-4 shadow-lg space-y-3">
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
