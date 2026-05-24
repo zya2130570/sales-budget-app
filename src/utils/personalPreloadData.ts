@@ -172,62 +172,48 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
     {
       "id": "cat-tuition",
       "name": "Tuition Savings",
-      "amount": 216.5,
+      "amount": 200,
       "type": "savings",
       "updatedAt": "2026-05-22T12:00:00.000Z"
     },
     {
       "id": "cat-bike",
       "name": "Bike Savings",
-      "amount": 216.5,
+      "amount": 200,
       "type": "savings",
       "updatedAt": "2026-05-22T12:00:00.000Z"
     },
     {
       "id": "cat-emergency-fund",
       "name": "Emergency Fund",
-      "amount": 216.5,
+      "amount": 200,
       "type": "savings",
       "updatedAt": "2026-05-22T12:00:00.000Z"
     },
     {
       "id": "cat-long-term-savings",
       "name": "Long-Term Savings",
-      "amount": 216.5,
+      "amount": 200,
       "type": "savings",
       "updatedAt": "2026-05-22T12:00:00.000Z"
     },
     {
       "id": "cat-passive-roth",
       "name": "Passive Fund Investing",
-      "amount": 259.8,
+      "amount": 240,
       "type": "investing",
       "updatedAt": "2026-05-22T12:00:00.000Z"
     },
     {
       "id": "cat-story-roth",
       "name": "Story Fund Investing",
-      "amount": 259.8,
+      "amount": 240,
       "type": "investing",
       "updatedAt": "2026-05-22T12:00:00.000Z"
     },
     {
       "id": "cat-school",
-      "name": "School",
-      "amount": 50,
-      "type": "variable spending",
-      "updatedAt": "2026-05-22T12:00:00.000Z"
-    },
-    {
-      "id": "cat-entertainment",
-      "name": "Entertainment",
-      "amount": 40,
-      "type": "variable spending",
-      "updatedAt": "2026-05-22T12:00:00.000Z"
-    },
-    {
-      "id": "cat-misc",
-      "name": "Miscellaneous",
+      "name": "Tuition",
       "amount": 50,
       "type": "variable spending",
       "updatedAt": "2026-05-22T12:00:00.000Z"
@@ -308,7 +294,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
       "reviewStatus": "reviewed",
       "createdAt": "2026-05-22T12:00:00.000Z",
       "updatedAt": "2026-05-22T12:00:00.000Z",
-      "categoryId": "cat-misc"
+      "categoryId": "cat-shopping"
     },
     {
       "id": "tx-apple-d49f2dea4377",
@@ -593,7 +579,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
       "reviewStatus": "reviewed",
       "createdAt": "2026-05-22T12:00:00.000Z",
       "updatedAt": "2026-05-22T12:00:00.000Z",
-      "categoryId": "cat-misc"
+      "categoryId": "cat-shopping"
     },
     {
       "id": "tx-apple-be83e600559b",
@@ -612,7 +598,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
       "reviewStatus": "reviewed",
       "createdAt": "2026-05-22T12:00:00.000Z",
       "updatedAt": "2026-05-22T12:00:00.000Z",
-      "categoryId": "cat-misc"
+      "categoryId": "cat-shopping"
     },
     {
       "id": "tx-apple-155f6946a03e",
@@ -897,7 +883,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
       "reviewStatus": "reviewed",
       "createdAt": "2026-05-22T12:00:00.000Z",
       "updatedAt": "2026-05-22T12:00:00.000Z",
-      "categoryId": "cat-misc"
+      "categoryId": "cat-shopping"
     },
     {
       "id": "tx-apple-b6e317bc9c7d",
@@ -1296,7 +1282,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
       "reviewStatus": "reviewed",
       "createdAt": "2026-05-22T12:00:00.000Z",
       "updatedAt": "2026-05-22T12:00:00.000Z",
-      "categoryId": "cat-entertainment"
+      "categoryId": "cat-shopping"
     },
     {
       "id": "tx-apple-32b7beb19b87",
@@ -1315,7 +1301,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
       "reviewStatus": "reviewed",
       "createdAt": "2026-05-22T12:00:00.000Z",
       "updatedAt": "2026-05-22T12:00:00.000Z",
-      "categoryId": "cat-entertainment"
+      "categoryId": "cat-shopping"
     },
     {
       "id": "tx-apple-0cea3f8e3533",
@@ -1847,7 +1833,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
       "reviewStatus": "reviewed",
       "createdAt": "2026-05-22T12:00:00.000Z",
       "updatedAt": "2026-05-22T12:00:00.000Z",
-      "categoryId": "cat-misc"
+      "categoryId": "cat-shopping"
     },
     {
       "id": "tx-apple-24112855c4a5",
@@ -1923,7 +1909,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
       "reviewStatus": "reviewed",
       "createdAt": "2026-05-22T12:00:00.000Z",
       "updatedAt": "2026-05-22T12:00:00.000Z",
-      "categoryId": "cat-misc"
+      "categoryId": "cat-shopping"
     },
     {
       "id": "tx-apple-3d40bd3b4909",
@@ -2246,7 +2232,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
       "reviewStatus": "reviewed",
       "createdAt": "2026-05-22T12:00:00.000Z",
       "updatedAt": "2026-05-22T12:00:00.000Z",
-      "categoryId": "cat-entertainment"
+      "categoryId": "cat-shopping"
     },
     {
       "id": "tx-apple-6e128b3516d7",
@@ -2265,7 +2251,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
       "reviewStatus": "reviewed",
       "createdAt": "2026-05-22T12:00:00.000Z",
       "updatedAt": "2026-05-22T12:00:00.000Z",
-      "categoryId": "cat-entertainment"
+      "categoryId": "cat-shopping"
     },
     {
       "id": "tx-apple-e5f2fec1ddb0",
@@ -2987,7 +2973,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
       "reviewStatus": "reviewed",
       "createdAt": "2026-05-22T12:00:00.000Z",
       "updatedAt": "2026-05-22T12:00:00.000Z",
-      "categoryId": "cat-misc"
+      "categoryId": "cat-shopping"
     },
     {
       "id": "tx-apple-e0d013231908",
@@ -3291,7 +3277,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
       "reviewStatus": "reviewed",
       "createdAt": "2026-05-22T12:00:00.000Z",
       "updatedAt": "2026-05-22T12:00:00.000Z",
-      "categoryId": "cat-misc"
+      "categoryId": "cat-shopping"
     },
     {
       "id": "tx-apple-c537d6fa8a98",
@@ -3348,7 +3334,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
       "reviewStatus": "reviewed",
       "createdAt": "2026-05-22T12:00:00.000Z",
       "updatedAt": "2026-05-22T12:00:00.000Z",
-      "categoryId": "cat-misc"
+      "categoryId": "cat-shopping"
     },
     {
       "id": "tx-apple-7b1a9aab6b78",
@@ -4146,7 +4132,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
       "reviewStatus": "reviewed",
       "createdAt": "2026-05-22T12:00:00.000Z",
       "updatedAt": "2026-05-22T12:00:00.000Z",
-      "categoryId": "cat-misc"
+      "categoryId": "cat-shopping"
     },
     {
       "id": "tx-apple-54f5dabf95f9",
@@ -5123,21 +5109,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
         },
         {
           "id": "cat-school",
-          "name": "School",
-          "amount": 50,
-          "type": "variable spending",
-          "updatedAt": "2026-05-22T12:00:00.000Z"
-        },
-        {
-          "id": "cat-entertainment",
-          "name": "Entertainment",
-          "amount": 40,
-          "type": "variable spending",
-          "updatedAt": "2026-05-22T12:00:00.000Z"
-        },
-        {
-          "id": "cat-misc",
-          "name": "Miscellaneous",
+          "name": "Tuition",
           "amount": 50,
           "type": "variable spending",
           "updatedAt": "2026-05-22T12:00:00.000Z"
@@ -5172,7 +5144,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
     "chick fil a 02481": "cat-takeout",
     "state of mind barb": "cat-haircuts",
     "walmart": "cat-groceries",
-    "aaa chandler auto repair": "cat-misc",
+    "aaa chandler auto repair": "cat-shopping",
     "amazon marketplace": "cat-amazon",
     "qdoba mexican eats 32": "cat-takeout",
     "wm supercenter 3360": "cat-groceries",
@@ -5180,8 +5152,8 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
     "wm supercenter 2671": "cat-groceries",
     "burlington stores 1044": "cat-shopping",
     "baskin 365558": "cat-takeout",
-    "ls global bikes": "cat-misc",
-    "waymo": "cat-misc",
+    "ls global bikes": "cat-shopping",
+    "waymo": "cat-shopping",
     "apple services": "cat-subscriptions",
     "uber eats": "cat-takeout",
     "dd doordash thecheese": "cat-takeout",
@@ -5192,8 +5164,8 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
     "dollar tree": "cat-shopping",
     "culvers": "cat-takeout",
     "albertsons": "cat-groceries",
-    "axs com": "cat-entertainment",
-    "azsoupfestival": "cat-entertainment",
+    "axs com": "cat-shopping",
+    "azsoupfestival": "cat-shopping",
     "mcdonalds 18584": "cat-takeout",
     "payless market": "cat-groceries",
     "openai chatgpt subscr": "cat-subscriptions",
@@ -5203,12 +5175,12 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
     "scc dining": "cat-takeout",
     "scottsdale comm clg": "cat-school",
     "amazon": "cat-amazon",
-    "marshalls 1605": "cat-misc",
-    "dollartree": "cat-misc",
+    "marshalls 1605": "cat-shopping",
+    "dollartree": "cat-shopping",
     "red lobster": "cat-takeout",
     "safeway": "cat-groceries",
     "chick fil a": "cat-takeout",
-    "vivid seats": "cat-entertainment",
+    "vivid seats": "cat-shopping",
     "mcdonald s": "cat-takeout",
     "popeyes 11763": "cat-takeout",
     "ruggiero s ace 16364": "cat-shopping",
@@ -5218,15 +5190,15 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
     "sprouts farmers market": "cat-groceries",
     "walmart supercenter": "cat-groceries",
     "5guys 0597 ecomm": "cat-takeout",
-    "parcel pending": "cat-misc",
-    "paddle net keybr com": "cat-misc",
-    "cvs pharmacy": "cat-misc",
+    "parcel pending": "cat-shopping",
+    "paddle net keybr com": "cat-shopping",
+    "cvs pharmacy": "cat-shopping",
     "circle k": "cat-gas",
     "balfour co": "cat-shopping",
     "target 00027474": "cat-groceries",
     "oldnavy com": "cat-shopping",
     "little caesars": "cat-takeout",
-    "nbs facts pymt plan fe": "cat-misc",
+    "nbs facts pymt plan fe": "cat-shopping",
     "del taco 1128 olo": "cat-takeout",
     "jollibee": "cat-takeout",
     "beauty by jaycie l": "cat-hair-braiding",
@@ -5243,24 +5215,20 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
       "monthly:2026-01": {
         "cat-haircuts": "117.5",
         "cat-groceries": "330.77",
-        "cat-misc": "130.47",
+        "cat-shopping": "219.94",
         "cat-amazon": "252.96",
         "cat-takeout": "227.95",
         "cat-gas": "67.42",
-        "cat-shopping": "35.55",
         "cat-subscriptions": "38.73",
-        "cat-school": "40.0",
-        "cat-entertainment": "53.92"
+        "cat-school": "40.0"
       },
       "monthly:2026-02": {
         "cat-groceries": "334.29",
         "cat-takeout": "205.94",
         "cat-school": "105.38",
         "cat-amazon": "337.74",
-        "cat-misc": "20.47",
+        "cat-shopping": "188.59",
         "cat-subscriptions": "38.73",
-        "cat-entertainment": "146.84",
-        "cat-shopping": "21.28",
         "cat-gas": "42.85"
       },
       "monthly:2026-03": {
@@ -5268,19 +5236,17 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
         "cat-takeout": "114.45",
         "cat-amazon": "12.3",
         "cat-school": "145.38",
-        "cat-misc": "18.03",
+        "cat-shopping": "51.33",
         "cat-subscriptions": "38.73",
         "cat-haircuts": "60.0",
-        "cat-shopping": "33.3",
         "cat-gas": "99.58"
       },
       "monthly:2026-04": {
         "cat-takeout": "133.17",
         "cat-groceries": "256.03",
         "cat-amazon": "177.02",
-        "cat-shopping": "48.69",
+        "cat-shopping": "58.69",
         "cat-school": "432.76",
-        "cat-misc": "10.0",
         "cat-subscriptions": "38.73",
         "cat-hair-braiding": "48.0",
         "cat-haircuts": "60.0",
