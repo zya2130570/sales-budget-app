@@ -56,9 +56,9 @@
         .space-y-4 > * { break-inside: avoid; }
       }
 
-      /* Hide scrollbar while keeping scroll functionality */
-      .scrollbar-none { scrollbar-width: none; -ms-overflow-style: none; }
-      .scrollbar-none::-webkit-scrollbar { display: none; }
+      /* V27: Hide ALL scrollbars globally — clean interface */
+      * { scrollbar-width: none !important; -ms-overflow-style: none !important; }
+      *::-webkit-scrollbar { display: none !important; }
     </style>
   </head>
   <body>
