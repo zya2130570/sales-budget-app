@@ -8,6 +8,21 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V31.3',
+    date: '5/24/2026',
+    what: [
+      'Dark-mode dashboard status banner gradient restored; only light mode keeps the softer V31.2 treatment.',
+      'Keyboard shortcuts panel added to the sidebar with ? shortcut.',
+      'Sidebar now exposes quick controls for theme, keyboard shortcuts, settings, and collapse in one place.',
+    ],
+    test: [
+      'Dark mode → dashboard status banner should have a colored gradient again.',
+      'Light mode → dashboard status banner should keep the softer readable gradient.',
+      'Sidebar → click Keyboard shortcuts → panel opens. Press Escape → it closes.',
+      'Press ? when not typing → keyboard shortcuts panel opens.',
+    ],
+  },
+  {
     version: 'V31.2',
     date: '5/24/2026',
     what: [
