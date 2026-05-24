@@ -124,6 +124,7 @@ import { AuthPanel } from './components/AuthPanel'
 import { ProfilePanel } from './components/ProfilePanel'
 import { OnboardingGuide } from './components/OnboardingGuide'
 import { CommandPalette } from './components/CommandPalette'
+import { Sidebar } from './components/Sidebar'
 import { CloudStatusButton } from './components/CloudStatusButton'
 import { ConflictResolutionModal } from './components/ConflictResolutionModal'
 import { useCloudPersistence } from './hooks/useCloudPersistence'
@@ -284,15 +285,7 @@ const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
 // TXN_TYPES local constant (not exported, only used by Log Transaction form in App)
 const TXN_TYPES: TransactionType[] = ['expense', 'income', 'transfer', 'credit card payment']
 const targetPresets = ['Bike', 'Emergency Fund', 'Long-term Savings', 'Tuition', 'Custom']
-const tabTips: Record<Tab, string> = {
-  Dashboard:    'See your take-home pay, leftover money, warnings, and log savings from each paycheck.',
-  Income:       'Change gross profit to see how your paycheck and commission change.',
-  Budget:       'Plan your spending, savings, and investing.',
-  Accounts:     'Track your bank accounts, credit cards, and investment accounts.',
-  Transactions: 'Log and review manual transactions across your accounts.',
-  Scenarios:    'Compare different income levels like slow, medium, fast, or custom.',
-  Targets:      'Set savings goals, deadlines, and track what you actually save. Use goal cards to log contributions and monitor progress.',
-}
+// tabTips removed — navigation moved to Sidebar component (V29)
 
 // ── V8.4 Period date-range helper ────────────────────────────────────────────
 // Returns the [start, end] date strings (YYYY-MM-DD) for the current calendar
@@ -748,6 +741,7 @@ export default function App() {
   // V16 — Settings panel
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [onboardingGuideOpen, setOnboardingGuideOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   // V22 — dark/light theme
   const [theme, setTheme] = useState<'dark' | 'light'>(() =>
     (localStorage.getItem('flow_theme') as 'dark' | 'light') ?? 'dark'
@@ -995,9 +989,9 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targets])
 
-  // Tab focus — only Income gets autofocus; other tabs are too disruptive
+  // V30: Scroll to top on every tab change — prevents landing mid-page
   useEffect(() => {
-    if (tab === 'Income') incomeRef.current?.focus()
+    window.scrollTo({ top: 0, behavior: 'instant' })
   }, [tab])
 
   // Close autocomplete on outside click
@@ -2473,76 +2467,60 @@ txnMerchantRef.current?.focus()
 
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
 
+  const sidebarW = sidebarCollapsed ? 56 : 220
+
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 overflow-x-hidden" data-theme={theme}>
-      <div className="max-w-7xl mx-auto w-full px-4 md:px-8 py-4 md:py-8 space-y-6">
+    <div data-theme={theme} style={{ background: '#0B0B0F', minHeight: '100vh', color: '#f1f5f9' }}>
 
-        <header className="rounded-2xl border border-slate-700 bg-slate-800/80 shadow-xl p-4 md:p-5 space-y-3">
+      {/* V29 — Fixed left sidebar (position:fixed, no layout impact on divs) */}
+      <Sidebar
+        currentTab={tab}
+        onNavigate={setTab}
+        onOpenSettings={() => setSettingsOpen(true)}
+        collapsed={sidebarCollapsed}
+        onToggle={() => setSidebarCollapsed(v => !v)}
+      />
 
-          {/* Row 1: Logo (left) + Utility buttons (right) — always visible, never wrapped */}
-          <div className="flex items-center justify-between gap-2 min-w-0">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <h1 className="text-2xl md:text-3xl font-bold tracking-tight">Flow</h1>
-                <VersionBadge version={CURRENT_VERSION} className="mt-0.5" />
-              </div>
-              <p className="text-slate-400 text-xs md:text-sm hidden sm:block">Personal Finance Dashboard</p>
-            </div>
-            <div className="flex items-center gap-1.5 flex-shrink-0">
-              {/* V23 — Profile panel (signed in) or Auth form (signed out) */}
-              {appAuth.user
-                ? <ProfilePanel
-                    hasData={!isAppEmpty}
-                    onLoadStarterData={handleLoadPersonalPreload}
-                    onOpenSettings={() => setSettingsOpen(true)}
-                    onOpenGuide={() => setOnboardingGuideOpen(true)}
-                  />
-                : <AuthPanel />
-              }
-              {/* V17 — Cloud status button */}
-              <CloudStatusButton
-                status={cloudPersistence.status}
-                canSync={cloudPersistence.canSync}
-                connectionTested={cloudPersistence.connectionTested}
-                connectionTestError={cloudPersistence.connectionTestError}
-                autoSyncEnabled={cloudPersistence.autoSyncEnabled}
-                autoSyncPaused={cloudPersistence.autoSyncPaused}
-                pendingCount={cloudPersistence.pendingCount}
-                lastSyncedAt={cloudPersistence.lastSyncedAt}
-                error={cloudPersistence.error}
-                lastResult={cloudPersistence.lastResult}
-                onTestConnection={cloudPersistence.runConnectionTest}
-                onSyncNow={cloudPersistence.syncNow}
-                onToggleAutoSync={cloudPersistence.setAutoSyncEnabled}
-                onDownloadBackup={downloadBackupFile}
-                onOpenSettings={() => setSettingsOpen(true)}
-              />
-              {/* V16 — Settings */}
-              <button
-                onClick={() => setSettingsOpen(true)}
-                className="p-2 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors flex-shrink-0"
-                title="Settings"
-              >
-                ⚙
-              </button>
-            </div>
+      {/* Single inner container with dynamic left margin */}
+      <div className="min-h-screen" style={{ marginLeft: sidebarW, transition: 'margin-left 0.2s cubic-bezier(0.4,0,0.2,1)' }}>
+
+        {/* Compact sticky header — logo + utility only, no tabs */}
+        <header style={{ position: 'sticky', top: 0, zIndex: 30, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', height: 48, borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'rgba(11,11,15,0.95)', backdropFilter: 'blur(12px)' }}>
+          <div className="flex items-center gap-2">
+            <VersionBadge version={CURRENT_VERSION} />
           </div>
-
-          {/* Row 2: Tab navigation — scrolls horizontally, never pushes page wider */}
-          <div className="flex overflow-x-auto gap-1.5 scrollbar-none -mx-4 px-4 md:-mx-5 md:px-5">
-            {(['Dashboard', 'Income', 'Budget', 'Accounts', 'Transactions', 'Scenarios', 'Targets'] as Tab[]).map(t => (
-              <button
-                title={tabTips[t]}
-                key={t}
-                onClick={() => setTab(t)}
-                className={`px-3 md:px-4 py-2 rounded-lg transition-all duration-200 hover:-translate-y-0.5 whitespace-nowrap flex-shrink-0 text-sm ${tab === t ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600'}`}
-              >
-                {t === 'Targets' ? 'Savings Goals' : t}
-              </button>
-            ))}
+          <div className="flex items-center gap-1.5">
+            {appAuth.user
+              ? <ProfilePanel
+                  hasData={!isAppEmpty}
+                  onLoadStarterData={handleLoadPersonalPreload}
+                  onOpenSettings={() => setSettingsOpen(true)}
+                  onOpenGuide={() => setOnboardingGuideOpen(true)}
+                />
+              : <AuthPanel />
+            }
+            <CloudStatusButton
+              status={cloudPersistence.status}
+              canSync={cloudPersistence.canSync}
+              connectionTested={cloudPersistence.connectionTested}
+              connectionTestError={cloudPersistence.connectionTestError}
+              autoSyncEnabled={cloudPersistence.autoSyncEnabled}
+              autoSyncPaused={cloudPersistence.autoSyncPaused}
+              pendingCount={cloudPersistence.pendingCount}
+              lastSyncedAt={cloudPersistence.lastSyncedAt}
+              error={cloudPersistence.error}
+              lastResult={cloudPersistence.lastResult}
+              onTestConnection={cloudPersistence.runConnectionTest}
+              onSyncNow={cloudPersistence.syncNow}
+              onToggleAutoSync={cloudPersistence.setAutoSyncEnabled}
+              onDownloadBackup={downloadBackupFile}
+              onOpenSettings={() => setSettingsOpen(true)}
+            />
           </div>
-
         </header>
+
+        {/* Main content — max-width constraint + padding */}
+        <div className="max-w-5xl mx-auto px-5 py-5 space-y-4">
 
       {cloudPersistence.pendingConflicts.length > 0 && (
         <ConflictResolutionModal
@@ -2554,7 +2532,7 @@ txnMerchantRef.current?.focus()
 
       {/* V27 — Command Palette (Ctrl+K / ⌘+K) */}
       <CommandPalette
-        onNavigate={(tab) => setTab(tab)}
+        onNavigate={(tab) => setTab(tab as Tab)}
         onOpenGuide={() => setOnboardingGuideOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
         onLoadDemo={handleLoadDemo}
@@ -2565,7 +2543,7 @@ txnMerchantRef.current?.focus()
       {onboardingGuideOpen && (
         <OnboardingGuide
           onClose={() => setOnboardingGuideOpen(false)}
-          onNavigate={(tab) => { setTab(tab); }}
+          onNavigate={(tab) => { setTab(tab as Tab); }}
         />
       )}
 
@@ -2665,7 +2643,7 @@ txnMerchantRef.current?.focus()
             {/* ── V13 Spending Insights ── */}
             <SpendingInsightsPanel
               insights={spendingInsights}
-              onAction={(tab) => setTab(tab as import('./types').Tab)}
+              onAction={(tab) => setTab(tab as Tab)}
             />
 
             {/* ── V14 AI Financial Assistant ── */}
@@ -5373,6 +5351,7 @@ txnMerchantRef.current?.focus()
           )}
         </div>
       )}
+      </div>
     </div>
   )
 }

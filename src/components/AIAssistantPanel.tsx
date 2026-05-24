@@ -14,7 +14,7 @@ function Bubble({ msg }: { msg: ChatMessage }) {
 export function AIAssistantPanel({ messages, status, error, onSend, onClear }: { messages: ChatMessage[]; status: AIAssistantStatus; error: string | null; onSend: (t: string) => void; onClear: () => void }) {
   const [input, setInput] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }, [messages])
   const send = () => { if (!input.trim() || status === 'loading') return; onSend(input.trim()); setInput('') }
   return (
     <div className="rounded-2xl border border-slate-700 bg-slate-800/60 overflow-hidden">
