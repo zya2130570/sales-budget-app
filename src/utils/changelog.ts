@@ -8,6 +8,18 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V31',
+    date: '5/24/2026 at 10:00 AM',
+    what: [
+      'Gemini model fixed — was using gemini-2.0-flash (free tier limit: 0). Now uses gemini-1.5-flash which has confirmed 1M tokens/day free.',
+      'AI error message updated — now shows Gemini setup steps with all 3 environment checkboxes (Production + Preview + Development). The old ANTHROPIC_API_KEY message is gone.',
+    ],
+    test: [
+      'Financial Assistant → send a message → should get a real response (no more error)',
+      'If still seeing error: Vercel → GEMINI_API_KEY → Edit → check Preview box → Save → Redeploy',
+    ],
+  },
+  {
     version: 'V30',
     date: '5/24/2026 at 8:00 AM',
     what: [
