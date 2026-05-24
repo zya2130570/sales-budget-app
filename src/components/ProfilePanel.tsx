@@ -12,12 +12,19 @@ type Props = {
   onLoadStarterData: () => void
   onOpenSettings: () => void
   onOpenGuide: () => void
+  openSignal?: number
 }
 
-export function ProfilePanel({ hasData, onLoadStarterData, onOpenSettings, onOpenGuide }: Props) {
+export function ProfilePanel({ hasData, onLoadStarterData, onOpenSettings, onOpenGuide, openSignal = 0 }: Props) {
   const { user, signOut } = useAuth()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
+
+
+  // External keyboard shortcut support: pressing "." in the sidebar opens Profile.
+  useEffect(() => {
+    if (openSignal > 0) setOpen(true)
+  }, [openSignal])
 
   // Close on outside click
   useEffect(() => {
@@ -39,7 +46,7 @@ export function ProfilePanel({ hasData, onLoadStarterData, onOpenSettings, onOpe
         className="inline-flex items-center gap-1.5 rounded-full border border-green-700/60 bg-green-900/30 px-3 py-1 text-xs text-green-300 hover:bg-green-900/50 transition-colors"
       >
         <span className="h-1.5 w-1.5 rounded-full bg-green-400 flex-shrink-0" />
-        <span className="truncate max-w-[140px]">{user.email}</span>
+        <span className="truncate max-w-[140px]">{user.email}</span><kbd className="hidden sm:inline rounded border border-green-700/50 bg-green-950/40 px-1 text-[9px] text-green-400">.</kbd>
       </button>
 
       {/* Dropdown panel */}

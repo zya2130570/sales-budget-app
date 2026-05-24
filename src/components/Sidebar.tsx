@@ -41,25 +41,28 @@ type Props = {
   currentTab: Tab
   onNavigate: (tab: Tab) => void
   onOpenSettings: () => void
+  onOpenProfile?: () => void
   collapsed: boolean
   onToggle: () => void
 }
 
-export function Sidebar({ currentTab, onNavigate, onOpenSettings, collapsed, onToggle }: Props) {
+export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile, collapsed, onToggle }: Props) {
 
-  // Keyboard shortcuts: 1-7 navigate, [ toggles sidebar
+  // Keyboard shortcuts: 1-7 navigate, 0 opens Settings, . opens Profile, [ toggles sidebar
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === '[') { onToggle(); return }
+      if (e.key === '0') { e.preventDefault(); onOpenSettings(); return }
+      if (e.key === '.') { e.preventDefault(); onOpenProfile?.(); return }
       const idx = parseInt(e.key) - 1
       if (idx >= 0 && idx < NAV.length) onNavigate(NAV[idx].id)
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onNavigate, onToggle])
+  }, [onNavigate, onOpenSettings, onOpenProfile, onToggle])
 
   const W = collapsed ? 56 : 220
 
@@ -148,7 +151,7 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, collapsed, onT
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/>
           </svg>
-          {!collapsed && <span>Settings</span>}
+          {!collapsed && <><span style={{ flex: 1, textAlign: 'left' }}>Settings</span><kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>0</kbd></>}
         </button>
 
         {/* Collapse toggle */}
