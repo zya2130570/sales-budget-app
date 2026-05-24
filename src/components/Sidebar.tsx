@@ -1,0 +1,180 @@
+/**
+ * Sidebar.tsx — V29
+ * Linear-style fixed left sidebar. Collapsible. Keyboard shortcuts.
+ */
+import { useEffect } from 'react'
+
+type Tab = 'Dashboard' | 'Income' | 'Budget' | 'Accounts' | 'Transactions' | 'Scenarios' | 'Targets'
+
+const NAV: { id: Tab; label: string; shortcut: string; icon: React.ReactNode }[] = [
+  {
+    id: 'Dashboard', label: 'Dashboard', shortcut: '1',
+    icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>,
+  },
+  {
+    id: 'Income', label: 'Income', shortcut: '2',
+    icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5v7M6 6.5c0-.83.67-1.5 2-1.5s2 .67 2 1.5-.67 1.5-2 1.5-2 .67-2 1.5.67 1.5 2 1.5 2-.67 2-1.5"/></svg>,
+  },
+  {
+    id: 'Budget', label: 'Budget', shortcut: '3',
+    icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12V6l4-3 4 3v6"/><path d="M6 12V9h4v3"/><rect x="1" y="12" width="14" height="1.5" rx="0.5"/></svg>,
+  },
+  {
+    id: 'Accounts', label: 'Accounts', shortcut: '4',
+    icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="3" width="14" height="10" rx="1.5"/><path d="M1 6.5h14"/><path d="M4 9.5h2M10 9.5h2"/></svg>,
+  },
+  {
+    id: 'Transactions', label: 'Transactions', shortcut: '5',
+    icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 4h12M2 8h8M2 12h10"/><path d="M12 10l2 2-2 2"/></svg>,
+  },
+  {
+    id: 'Scenarios', label: 'Scenarios', shortcut: '6',
+    icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 2H5L3 8h4l-2 6 8-8H9l2-4z"/></svg>,
+  },
+  {
+    id: 'Targets', label: 'Savings Goals', shortcut: '7',
+    icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6.5"/><circle cx="8" cy="8" r="3"/><circle cx="8" cy="8" r="0.75" fill="currentColor" stroke="none"/></svg>,
+  },
+]
+
+type Props = {
+  currentTab: Tab
+  onNavigate: (tab: Tab) => void
+  onOpenSettings: () => void
+  collapsed: boolean
+  onToggle: () => void
+}
+
+export function Sidebar({ currentTab, onNavigate, onOpenSettings, collapsed, onToggle }: Props) {
+
+  // Keyboard shortcuts: 1-7 navigate, [ toggles sidebar
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.key === '[') { onToggle(); return }
+      const idx = parseInt(e.key) - 1
+      if (idx >= 0 && idx < NAV.length) onNavigate(NAV[idx].id)
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onNavigate, onToggle])
+
+  const W = collapsed ? 56 : 220
+
+  return (
+    <aside
+      style={{
+        position: 'fixed', top: 0, left: 0, bottom: 0, width: W, zIndex: 40,
+        background: '#0D0D11',
+        borderRight: '1px solid rgba(255,255,255,0.05)',
+        transition: 'width 0.2s cubic-bezier(0.4,0,0.2,1)',
+        display: 'flex', flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Logo */}
+      <div style={{ padding: collapsed ? '18px 0' : '18px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        {collapsed
+          ? <div style={{ width: 56, display: 'flex', justifyContent: 'center' }}>
+              <div style={{ width: 24, height: 24, borderRadius: 6, background: 'linear-gradient(135deg,#5B6AF0,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ color: 'white', fontSize: 12, fontWeight: 700, letterSpacing: '-0.5px' }}>F</span>
+              </div>
+            </div>
+          : <>
+              <div style={{ width: 24, height: 24, borderRadius: 6, background: 'linear-gradient(135deg,#5B6AF0,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <span style={{ color: 'white', fontSize: 12, fontWeight: 700 }}>F</span>
+              </div>
+              <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: 14, fontWeight: 600, letterSpacing: '-0.3px', whiteSpace: 'nowrap' }}>Flow</span>
+            </>
+        }
+      </div>
+
+      {/* Nav items */}
+      <nav style={{ flex: 1, padding: '8px 0', overflowY: 'auto', overflowX: 'hidden' }}>
+        {NAV.map(item => {
+          const isActive = currentTab === item.id
+          return (
+            <button
+              key={item.id}
+              onClick={() => onNavigate(item.id)}
+              title={collapsed ? `${item.label} (${item.shortcut})` : undefined}
+              style={{
+                width: '100%', display: 'flex', alignItems: 'center',
+                gap: 10, padding: collapsed ? '8px 0' : '7px 16px',
+                justifyContent: collapsed ? 'center' : 'flex-start',
+                background: isActive ? 'rgba(255,255,255,0.07)' : 'transparent',
+                borderLeft: isActive ? '2px solid #5B6AF0' : '2px solid transparent',
+                color: isActive ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.42)',
+                fontSize: 13, fontWeight: isActive ? 500 : 400,
+                cursor: 'pointer', border: 'none', outline: 'none',
+                transition: 'all 0.12s ease',
+                whiteSpace: 'nowrap',
+                borderRadius: 0,
+              }}
+              onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.72)'; (e.currentTarget as HTMLElement).style.background = isActive ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.03)' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = isActive ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.42)'; (e.currentTarget as HTMLElement).style.background = isActive ? 'rgba(255,255,255,0.07)' : 'transparent' }}
+            >
+              <span style={{ flexShrink: 0, opacity: isActive ? 1 : 0.7 }}>{item.icon}</span>
+              {!collapsed && (
+                <>
+                  <span style={{ flex: 1, textAlign: 'left' }}>{item.label}</span>
+                  <kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>{item.shortcut}</kbd>
+                </>
+              )}
+            </button>
+          )
+        })}
+      </nav>
+
+      {/* Bottom: Settings + Collapse */}
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', padding: '8px 0', flexShrink: 0 }}>
+        {/* Settings */}
+        <button
+          onClick={onOpenSettings}
+          title={collapsed ? 'Settings' : undefined}
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+            padding: collapsed ? '8px 0' : '7px 16px',
+            justifyContent: collapsed ? 'center' : 'flex-start',
+            color: 'rgba(255,255,255,0.35)', fontSize: 13,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            transition: 'color 0.12s ease',
+          }}
+          onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.65)'}
+          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.35)'}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/>
+          </svg>
+          {!collapsed && <span>Settings</span>}
+        </button>
+
+        {/* Collapse toggle */}
+        <button
+          onClick={onToggle}
+          title={collapsed ? 'Expand sidebar ([)' : 'Collapse sidebar ([)'}
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+            padding: collapsed ? '8px 0' : '7px 16px',
+            justifyContent: collapsed ? 'center' : 'flex-start',
+            color: 'rgba(255,255,255,0.25)', fontSize: 13,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            transition: 'color 0.12s ease',
+          }}
+          onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.55)'}
+          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.25)'}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            {collapsed
+              ? <path d="M6 3l5 5-5 5M2 8h9"/>
+              : <path d="M10 3L5 8l5 5M14 8H5"/>
+            }
+          </svg>
+          {!collapsed && <span style={{ fontSize: 12, letterSpacing: '0.02em' }}>Collapse <kbd style={{ fontSize: 10, padding: '0 4px', borderRadius: 3, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', fontFamily: 'monospace' }}>[</kbd></span>}
+        </button>
+      </div>
+    </aside>
+  )
+}
