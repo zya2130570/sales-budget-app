@@ -60,38 +60,56 @@ export default async function handler(req: any, res: any) {
         parts: [{ text: m.content }],
       }))
 
-      const r = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: system }] },
-            contents: geminiMessages,
-            generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
-          }),
-        },
-      )
+      const requestedModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite'
+      const fallbackModels = [
+        requestedModel,
+        'gemini-2.0-flash-lite',
+        'gemini-2.0-flash',
+        'gemini-1.5-flash-latest',
+        'gemini-1.5-flash',
+      ].filter((model, index, arr) => model && arr.indexOf(model) === index)
 
-      const data = await r.json() as Record<string, unknown>
+      let lastGeminiError = ''
 
-      if (!r.ok) {
-        const errData = data as { error?: { message?: string; status?: string; code?: number } }
-        const geminiMsg = errData.error?.message ?? 'Unknown Gemini error'
-        const geminiStatus = errData.error?.status ?? ''
-        const fullErr = `Gemini API error: ${geminiMsg}${geminiStatus ? ` [${geminiStatus}]` : ''} (HTTP ${r.status})`
-        console.error('[chat.ts] Gemini failed:', fullErr)
-        if (!anthropicKey) return res.status(200).json({ error: fullErr, isGeminiError: true })
-        // else fall through to Anthropic below
-      } else {
+      for (const model of fallbackModels) {
+        const r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              systemInstruction: { parts: [{ text: system }] },
+              contents: geminiMessages,
+              generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
+            }),
+          },
+        )
+
+        const data = await r.json() as Record<string, unknown>
+
+        if (!r.ok) {
+          const errData = data as { error?: { message?: string; status?: string; code?: number } }
+          const geminiMsg = errData.error?.message ?? 'Unknown Gemini error'
+          const geminiStatus = errData.error?.status ?? ''
+          lastGeminiError = `${model}: ${geminiMsg}${geminiStatus ? ` [${geminiStatus}]` : ''} (HTTP ${r.status})`
+          console.error('[chat.ts] Gemini failed:', lastGeminiError)
+          continue
+        }
+
         const candidates = (data as { candidates?: { content?: { parts?: { text?: string }[] } }[] }).candidates
         const text = candidates?.[0]?.content?.parts?.[0]?.text ?? ''
         if (!text) {
+          lastGeminiError = `${model}: Gemini returned empty response. Full data: ${JSON.stringify(data).slice(0, 200)}`
           console.error('[chat.ts] Gemini returned no text. Full response:', JSON.stringify(data).slice(0, 500))
-          return res.status(200).json({ error: 'Gemini returned empty response. Full data: ' + JSON.stringify(data).slice(0, 200), isGeminiError: true })
+          continue
         }
-        return res.status(200).json({ content: text })
+
+        return res.status(200).json({ content: text, model })
       }
+
+      const fullErr = `Gemini API error — all configured models failed. Last error: ${lastGeminiError || 'Unknown Gemini error'}`
+      if (!anthropicKey) return res.status(200).json({ error: fullErr, isGeminiError: true })
+      // else fall through to Anthropic below
     } catch (err) {
       if (!anthropicKey) {
         return res.status(500).json({ error: err instanceof Error ? err.message : 'Gemini request failed' })
