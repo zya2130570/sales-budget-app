@@ -7,6 +7,22 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V24',
+    date: '5/23/2026 at 7:00 PM',
+    what: [
+      'Setup Guide — interactive 8-step onboarding walkthrough with AI-powered Q&A. Open from profile dropdown or Dashboard button',
+      'Period bug fix (nuclear) — dollar sign now renders as a JSX element split from the number, so Chrome extensions targeting text nodes cannot strip the $',
+      'Profile dropdown now includes Setup Guide option alongside starter data, settings, and sign out',
+      'Setup Guide button appears on empty Dashboard alongside the onboarding card',
+    ],
+    test: [
+      'Click your email → profile dropdown → Setup Guide → 8-step modal opens',
+      'Empty Dashboard → "Open Setup Guide" blue button appears',
+      'Dashboard attention banner → dollar sign should now display correctly as $X,XXX.XX',
+      'Setup Guide → ask a question in the chat → AI responds about Flow workflow',
+    ],
+  },
+  {
     version: 'V23',
     date: '5/23/2026 at 5:00 PM',
     what: [
