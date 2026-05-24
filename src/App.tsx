@@ -1235,8 +1235,8 @@ export default function App() {
 
   // V9.2/V9.3.1 — Net worth summary (computeNetWorth extracted to utils/accountMath)
   const netWorthSummary = useMemo(
-    () => computeNetWorth(accounts, computedAccountBalances),
-    [accounts, computedAccountBalances]
+    () => computeNetWorth(accounts),
+    [accounts]
   )
 
   // V9.3 — Reconciliation (computeReconciliationData extracted to utils/accountMath)
@@ -1253,9 +1253,8 @@ export default function App() {
 
   // needsReviewCount: accounts whose balance isn't explained by tracked transactions
   const needsReviewCount = accounts.filter(a => {
-    if (a.type !== 'credit card') return false  // non-CC never shows unexplained without baseline
     const bc = balanceCheckData[a.id]
-    return bc ? !bc.isMatched : false
+    return bc ? bc.hasReconciliationBaseline && !bc.isMatched : false
   }).length
 
   // ── V8.6.3 Uncategorized expense count ──────────────────────────────────────
@@ -3977,9 +3976,9 @@ txnMerchantRef.current?.focus()
                 )}
                 {/* V9.3.4 — Balance check helper text */}
                 <p className="text-xs text-slate-500 mb-3">
-                  <span className="text-slate-400 font-medium">Current Balance</span> = what you entered for this account.{' '}
-                  <span className="text-slate-400 font-medium">Tracked Activity</span> = net effect of all logged transactions.{' '}
-                  <span className="text-slate-400 font-medium">Unexplained</span> = the gap — may reflect unlogged history, transfers not yet entered, or a partial transaction import.
+                  <span className="text-slate-400 font-medium">Current Balance</span> = what you entered or restored for this account.{' '}
+                  <span className="text-slate-400 font-medium">Imported Activity</span> = net effect of logged transactions for review only.{' '}
+                  <span className="text-slate-400 font-medium">Unexplained</span> only appears after you reconcile an account; partial imports are not treated as errors.
                 </p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -3988,7 +3987,7 @@ txnMerchantRef.current?.focus()
                         <th className="pb-1.5 pr-4 font-medium">Name</th>
                         <th className="pb-1.5 pr-4 font-medium">Type</th>
                         <th className="pb-1.5 pr-4 font-medium text-right">Current Balance</th>
-                        <th className="pb-1.5 pr-4 font-medium text-right">Tracked Activity</th>
+                        <th className="pb-1.5 pr-4 font-medium text-right">Imported Activity</th>
                         <th className="pb-1.5 pr-4 font-medium">Unexplained</th>
                         <th className="pb-1.5 pr-4 font-medium">Institution</th>
                         <th className="pb-1.5" />
@@ -4085,23 +4084,20 @@ txnMerchantRef.current?.focus()
                               {(() => {
                                 const bc = balanceCheckData[a.id]
                                 if (!bc) return null
-                                // CC: comparing |balance| vs tracked charges is meaningful without a baseline
-                                if (a.type === 'credit card') {
-                                  if (bc.isMatched) return <span className="text-green-400 font-medium">Looks matched.</span>
-                                  const amt = Math.abs(bc.unexplained)
-                                  const cls = `font-medium ${amt > 100 ? 'text-red-400' : 'text-amber-300'}`
-                                  return bc.unexplained > 0
-                                    ? <span className={cls}>{currency(amt)} of card debt is not explained yet.</span>
-                                    : <span className={cls}>Tracked activity is {currency(amt)} higher than current card balance.</span>
+                                if (!bc.hasReconciliationBaseline) {
+                                  return (
+                                    <span className="text-slate-600 text-[10px] leading-snug">
+                                      Not reconciled yet<br />
+                                      <span className="text-slate-700">Current balance is still trusted.</span>
+                                    </span>
+                                  )
                                 }
-                                // Non-CC: unexplained requires a known starting balance — we don't have one yet.
-                                // Showing current balance minus tracked delta produces misleading numbers.
-                                return (
-                                  <span className="text-slate-600 text-[10px] leading-snug">
-                                    Baseline not set yet<br />
-                                    <span className="text-slate-700">Set after importing a full month.</span>
-                                  </span>
-                                )
+                                if (bc.isMatched) return <span className="text-green-400 font-medium">Looks matched.</span>
+                                const amt = Math.abs(bc.unexplained)
+                                const cls = `font-medium ${amt > 100 ? 'text-red-400' : 'text-amber-300'}`
+                                return bc.unexplained > 0
+                                  ? <span className={cls}>{currency(amt)} is not explained yet.</span>
+                                  : <span className={cls}>Imported activity is {currency(amt)} higher than current balance.</span>
                               })()}
                             </td>
                             {/* Institution */}
@@ -4130,9 +4126,8 @@ txnMerchantRef.current?.focus()
                                 <>
                                   <button className="text-blue-400 hover:text-blue-300 text-xs" onClick={() => startInlineAccountEdit(a)}>Edit</button>
                                   <button
-                                    disabled
-                                    className="text-xs text-slate-600 cursor-not-allowed"
-                                    title="Full reconciliation coming after account-aware CSV import"
+                                    className="text-blue-400 hover:text-blue-300 text-xs"
+                                    title="Set this account’s current balance as the trusted reconciliation baseline"
                                     onClick={() => reconcileAccount(a.id)}
                                   >
                                     Reconcile
