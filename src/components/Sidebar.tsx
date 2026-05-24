@@ -47,13 +47,16 @@ type Props = {
   onToggle: () => void
   theme?: 'dark' | 'light'
   onToggleTheme?: () => void
+  onSync?: () => void
 }
 
-export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, collapsed, onToggle, theme = 'dark', onToggleTheme }: Props) {
+export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, collapsed, onToggle, theme = 'dark', onToggleTheme, onSync }: Props) {
 
   // Keyboard shortcuts: 1-7 navigate, 0 toggles Settings, . toggles Profile, ? opens shortcuts, [ toggles sidebar, t toggles theme
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Cmd/Ctrl+S — sync to cloud (works from anywhere, including input fields)
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); onSync?.(); return }
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.ctrlKey || e.metaKey || e.altKey) return
@@ -67,7 +70,7 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, onToggle, onToggleTheme])
+  }, [onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, onToggle, onToggleTheme, onSync])
 
   const W = collapsed ? 56 : 220
 

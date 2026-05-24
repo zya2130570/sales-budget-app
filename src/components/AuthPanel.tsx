@@ -25,7 +25,7 @@ export function AuthPanel() {
       <div className="flex items-center gap-2 text-xs text-slate-500 select-none">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-700 bg-slate-800 px-3 py-1">
           <span className="h-1.5 w-1.5 rounded-full bg-slate-500" />
-          Guest mode
+          <span title="Local mode: data saved in this browser only. Sign in to sync across devices and keep your data safe." style={{cursor: "help", borderBottom: "1px dashed rgba(148,163,184,0.4)"}}>Guest mode</span>
         </span>
       </div>
     )

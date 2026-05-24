@@ -13,6 +13,7 @@ function Bubble({ msg }: { msg: ChatMessage }) {
 }
 export function AIAssistantPanel({ messages, status, error, onSend, onClear }: { messages: ChatMessage[]; status: AIAssistantStatus; error: string | null; onSend: (t: string) => void; onClear: () => void }) {
   const [input, setInput] = useState('')
+  const [collapsed, setCollapsed] = useState(false)  // V32 — collapsible panel
   const bottomRef = useRef<HTMLDivElement>(null)
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }) }, [messages])
   const send = () => { if (!input.trim() || status === 'loading') return; onSend(input.trim()); setInput('') }
@@ -24,8 +25,14 @@ export function AIAssistantPanel({ messages, status, error, onSend, onClear }: {
           <h2 className="text-sm font-semibold text-slate-100">Financial Assistant</h2>
           <span className="text-[10px] text-slate-500 bg-slate-700 px-1.5 py-0.5 rounded">AI</span>
         </div>
-        {messages.length > 0 && <button onClick={onClear} className="text-[11px] text-slate-500 hover:text-slate-300 transition-colors">Clear</button>}
+        <div className="flex items-center gap-2">
+          {messages.length > 0 && !collapsed && <button onClick={onClear} className="text-[11px] text-slate-500 hover:text-slate-300 transition-colors">Clear</button>}
+          <button onClick={() => setCollapsed(v => !v)} title={collapsed ? 'Expand' : 'Collapse'} className="text-slate-500 hover:text-slate-300 transition-colors text-xs px-1.5 py-0.5 rounded hover:bg-slate-700">
+            {collapsed ? '▼ Show' : '▲ Hide'}
+          </button>
+        </div>
       </div>
+      {!collapsed && <div>
       <div className="px-4 py-3 space-y-3 min-h-[80px] max-h-72 overflow-y-auto">
         {messages.length === 0 ? (
           <div>
@@ -62,6 +69,7 @@ export function AIAssistantPanel({ messages, status, error, onSend, onClear }: {
         </div>
         <p className="text-[10px] text-slate-600 mt-1">Your financial data is sent to the AI with each message. Free with GEMINI_API_KEY (aistudio.google.com). Set for Production + Preview in Vercel.</p>
       </div>
+    </div>}
     </div>
   )
 }
