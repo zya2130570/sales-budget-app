@@ -989,9 +989,9 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targets])
 
-  // Tab focus — only Income gets autofocus; other tabs are too disruptive
+  // V30: Scroll to top on every tab change — prevents landing mid-page
   useEffect(() => {
-    if (tab === 'Income') incomeRef.current?.focus()
+    window.scrollTo({ top: 0, behavior: 'instant' })
   }, [tab])
 
   // Close autocomplete on outside click
