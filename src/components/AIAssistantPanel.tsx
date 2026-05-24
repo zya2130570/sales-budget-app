@@ -34,13 +34,21 @@ export function AIAssistantPanel({ messages, status, error, onSend, onClear }: {
           </div>
         ) : (<>{messages.map((m, i) => <Bubble key={i} msg={m} />)}{status==='loading' && <div className="flex justify-start"><div className="bg-slate-700/80 border border-slate-600/50 rounded-2xl rounded-bl-sm px-3.5 py-2.5"><span className="flex gap-1">{[0,150,300].map(d => <span key={d} className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{animationDelay:`${d}ms`}} />)}</span></div></div>}</>)}
         {error && (
-          error.toLowerCase().includes('anthropic_api_key') || error.toLowerCase().includes('not set') || error.toLowerCase().includes('not configured')
+          error.toLowerCase().includes('not configured') || error.toLowerCase().includes('gemini') || error.toLowerCase().includes('anthropic') || error.toLowerCase().includes('quota') || error.toLowerCase().includes('no ai provider')
             ? (
               <div className="rounded-xl border border-amber-700/50 bg-amber-950/20 p-3">
-                <p className="text-xs font-semibold text-amber-200 mb-1">AI assistant needs setup</p>
-                <p className="text-xs text-amber-300/80 leading-relaxed">
-                  Add <code className="bg-slate-700 px-1 rounded">ANTHROPIC_API_KEY</code> to your Vercel project environment variables, then redeploy. Get a key at <span className="underline">console.anthropic.com</span>.
+                <p className="text-xs font-semibold text-amber-200 mb-1">
+                  {error.toLowerCase().includes('quota') ? 'Gemini quota — check model or key' : 'AI assistant needs a free API key'}
                 </p>
+                <p className="text-xs text-amber-300/80 leading-relaxed mb-2">
+                  Add <code className="bg-slate-700 px-1 rounded">GEMINI_API_KEY</code> to Vercel env vars — free, 1M tokens/day. Set it for <strong>Production + Preview + Development</strong>.
+                </p>
+                <ol className="text-xs text-amber-300/70 space-y-0.5 list-decimal list-inside">
+                  <li>Go to <span className="underline">aistudio.google.com</span> → Get API key → copy it</li>
+                  <li>Vercel → project → Settings → Environment Variables → Add <code className="bg-slate-700 px-0.5 rounded">GEMINI_API_KEY</code></li>
+                  <li>Check all 3 boxes: Production + Preview + Development</li>
+                  <li>Save → Redeploy</li>
+                </ol>
               </div>
             )
             : <p className="text-xs text-red-300 bg-red-950/30 border border-red-700/40 rounded-lg px-3 py-2">{error}</p>
@@ -52,7 +60,7 @@ export function AIAssistantPanel({ messages, status, error, onSend, onClear }: {
           <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()} }} disabled={status==='loading'} rows={1} placeholder="Ask about your finances… (Enter to send)" className="flex-1 resize-none rounded-xl bg-slate-700 border border-slate-600 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 disabled:opacity-50" />
           <button onClick={send} disabled={!input.trim()||status==='loading'} className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">Send</button>
         </div>
-        <p className="text-[10px] text-slate-600 mt-1">Your financial data is sent to the AI with each message. Needs ANTHROPIC_API_KEY in Vercel env.</p>
+        <p className="text-[10px] text-slate-600 mt-1">Your financial data is sent to the AI with each message. Free with GEMINI_API_KEY (aistudio.google.com). Set for Production + Preview in Vercel.</p>
       </div>
     </div>
   )
