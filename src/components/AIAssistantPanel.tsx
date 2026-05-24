@@ -34,21 +34,21 @@ export function AIAssistantPanel({ messages, status, error, onSend, onClear }: {
           </div>
         ) : (<>{messages.map((m, i) => <Bubble key={i} msg={m} />)}{status==='loading' && <div className="flex justify-start"><div className="bg-slate-700/80 border border-slate-600/50 rounded-2xl rounded-bl-sm px-3.5 py-2.5"><span className="flex gap-1">{[0,150,300].map(d => <span key={d} className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{animationDelay:`${d}ms`}} />)}</span></div></div>}</>)}
         {error && (
-          error.toLowerCase().includes('not configured') || error.toLowerCase().includes('gemini') || error.toLowerCase().includes('anthropic') || error.toLowerCase().includes('quota') || error.toLowerCase().includes('no ai provider')
+          error.toLowerCase().includes('not configured') || error.toLowerCase().includes('no ai provider')
             ? (
               <div className="rounded-xl border border-amber-700/50 bg-amber-950/20 p-3">
-                <p className="text-xs font-semibold text-amber-200 mb-1">
-                  {error.toLowerCase().includes('quota') ? 'Gemini quota — check model or key' : 'AI assistant needs a free API key'}
-                </p>
+                <p className="text-xs font-semibold text-amber-200 mb-1">AI assistant needs a free API key</p>
                 <p className="text-xs text-amber-300/80 leading-relaxed mb-2">
-                  Add <code className="bg-slate-700 px-1 rounded">GEMINI_API_KEY</code> to Vercel env vars — free, 1M tokens/day. Set it for <strong>Production + Preview + Development</strong>.
+                  Add <code className="bg-slate-700 px-1 rounded">GEMINI_API_KEY</code> to Vercel env vars (free at aistudio.google.com), set for Production + Preview, then redeploy.
                 </p>
-                <ol className="text-xs text-amber-300/70 space-y-0.5 list-decimal list-inside">
-                  <li>Go to <span className="underline">aistudio.google.com</span> → Get API key → copy it</li>
-                  <li>Vercel → project → Settings → Environment Variables → Add <code className="bg-slate-700 px-0.5 rounded">GEMINI_API_KEY</code></li>
-                  <li>Check all 3 boxes: Production + Preview + Development</li>
-                  <li>Save → Redeploy</li>
-                </ol>
+              </div>
+            )
+            : error.toLowerCase().includes('gemini api error') || error.toLowerCase().includes('isgemini') || error.toLowerCase().includes('quota') || error.toLowerCase().includes('api key') || error.toLowerCase().includes('permission') || error.toLowerCase().includes('returned empty')
+            ? (
+              <div className="rounded-xl border border-orange-700/50 bg-orange-950/20 p-3">
+                <p className="text-xs font-semibold text-orange-200 mb-1">Gemini API error — key found but rejected</p>
+                <p className="text-xs text-orange-300/80 leading-relaxed font-mono break-all">{error}</p>
+                <p className="text-xs text-orange-400/70 mt-2">This usually means the key is valid but the model is unavailable or quota is hit. Try regenerating your key at aistudio.google.com.</p>
               </div>
             )
             : <p className="text-xs text-red-300 bg-red-950/30 border border-red-700/40 rounded-lg px-3 py-2">{error}</p>
