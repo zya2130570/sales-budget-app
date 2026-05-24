@@ -76,13 +76,20 @@ export default async function handler(req: any, res: any) {
       const data = await r.json() as Record<string, unknown>
 
       if (!r.ok) {
-        const errMsg = (data as { error?: { message?: string } }).error?.message ?? `Gemini error ${r.status}`
-        // If Gemini fails and Anthropic is available, fall through
-        if (!anthropicKey) return res.status(r.status).json({ error: errMsg })
+        const errData = data as { error?: { message?: string; status?: string; code?: number } }
+        const geminiMsg = errData.error?.message ?? 'Unknown Gemini error'
+        const geminiStatus = errData.error?.status ?? ''
+        const fullErr = `Gemini API error: ${geminiMsg}${geminiStatus ? ` [${geminiStatus}]` : ''} (HTTP ${r.status})`
+        console.error('[chat.ts] Gemini failed:', fullErr)
+        if (!anthropicKey) return res.status(200).json({ error: fullErr, isGeminiError: true })
         // else fall through to Anthropic below
       } else {
         const candidates = (data as { candidates?: { content?: { parts?: { text?: string }[] } }[] }).candidates
         const text = candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+        if (!text) {
+          console.error('[chat.ts] Gemini returned no text. Full response:', JSON.stringify(data).slice(0, 500))
+          return res.status(200).json({ error: 'Gemini returned empty response. Full data: ' + JSON.stringify(data).slice(0, 200), isGeminiError: true })
+        }
         return res.status(200).json({ content: text })
       }
     } catch (err) {
