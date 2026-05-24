@@ -122,6 +122,7 @@ import { useNeedsReview } from './hooks/useNeedsReview'
 // V12.2 — Supabase auth foundation
 import { AuthPanel } from './components/AuthPanel'
 import { ProfilePanel } from './components/ProfilePanel'
+import { OnboardingGuide } from './components/OnboardingGuide'
 import { CloudStatusButton } from './components/CloudStatusButton'
 import { ConflictResolutionModal } from './components/ConflictResolutionModal'
 import { useCloudPersistence } from './hooks/useCloudPersistence'
@@ -745,6 +746,7 @@ export default function App() {
 
   // V16 — Settings panel
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [onboardingGuideOpen, setOnboardingGuideOpen] = useState(false)
   // V22 — dark/light theme
   const [theme, setTheme] = useState<'dark' | 'light'>(() =>
     (localStorage.getItem('flow_theme') as 'dark' | 'light') ?? 'dark'
@@ -2492,6 +2494,7 @@ txnMerchantRef.current?.focus()
                     hasData={!isAppEmpty}
                     onLoadStarterData={handleLoadPersonalPreload}
                     onOpenSettings={() => setSettingsOpen(true)}
+                    onOpenGuide={() => setOnboardingGuideOpen(true)}
                   />
                 : <AuthPanel />
               }
@@ -2548,6 +2551,14 @@ txnMerchantRef.current?.focus()
         />
       )}
 
+      {/* V24 — Onboarding Guide */}
+      {onboardingGuideOpen && (
+        <OnboardingGuide
+          onClose={() => setOnboardingGuideOpen(false)}
+          onNavigate={(tab) => { setTab(tab); }}
+        />
+      )}
+
       {/* V16 — Settings panel */}
       {settingsOpen && (
         <SettingsPanel
@@ -2580,12 +2591,22 @@ txnMerchantRef.current?.focus()
               </div>
             )}
 
-            {/* ── V16 Onboarding — shown when app is empty ── */}
+            {/* V16 — Onboarding card when empty */}
             {isAppEmpty && (
+              <>
               <OnboardingCard
                 onLoadDemo={handleLoadDemo}
                 onOpenSettings={() => setSettingsOpen(true)}
               />
+              <div className="flex justify-center">
+                <button
+                  onClick={() => setOnboardingGuideOpen(true)}
+                  className="flex items-center gap-2 px-5 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm transition-colors shadow-lg"
+                >
+                  📖 Open Setup Guide
+                </button>
+              </div>
+              </>
             )}
 
             {/* V23 — Starter data card only shown when app is empty */}
@@ -5401,7 +5422,16 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
               {s.signal}
             </span>
           </div>
-          <p className="text-sm text-slate-200 leading-relaxed">{status.explanation}</p>
+          {/* V24: Split on currency amounts so $ renders as JSX, not a text node extension can strip */}
+          <p className="text-sm text-slate-200 leading-relaxed">
+            {status.explanation.split(/(\$[\d,]+\.\d{2})/g).map((part, i) =>
+              /^\$[\d,]+\.\d{2}$/.test(part)
+                ? <span key={i} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                    <span aria-hidden>{'$'}</span>{part.slice(1)}
+                  </span>
+                : part
+            )}
+          </p>
           {status.context && (
             <p className="mt-2 text-xs text-slate-400 leading-relaxed border-t border-slate-700/60 pt-2">{status.context}</p>
           )}
