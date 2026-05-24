@@ -744,6 +744,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [onboardingGuideOpen, setOnboardingGuideOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [profileOpenSignal, setProfileOpenSignal] = useState(0)
   // V22 — dark/light theme
   const [theme, setTheme] = useState<'dark' | 'light'>(() =>
     (localStorage.getItem('flow_theme') as 'dark' | 'light') ?? 'dark'
@@ -2515,6 +2516,7 @@ txnMerchantRef.current?.focus()
         currentTab={tab}
         onNavigate={setTab}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenProfile={() => setProfileOpenSignal(v => v + 1)}
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed(v => !v)}
       />
@@ -2534,6 +2536,7 @@ txnMerchantRef.current?.focus()
                   onLoadStarterData={handleLoadPersonalPreload}
                   onOpenSettings={() => setSettingsOpen(true)}
                   onOpenGuide={() => setOnboardingGuideOpen(true)}
+                  openSignal={profileOpenSignal}
                 />
               : <AuthPanel />
             }
@@ -5431,7 +5434,7 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
   const toneStyles: Record<string, { border: string; bg: string; labelColor: string; dot: string; badgeBg: string; badgeText: string; badgeBorder: string; signal: string }> = {
     excellent: {
       border: 'border-emerald-500/60',
-      bg: 'bg-gradient-to-r from-emerald-900/40 via-slate-800/80 to-slate-800/80',
+      bg: 'bg-slate-800/85',
       labelColor: 'text-emerald-300',
       dot: 'bg-emerald-400',
       badgeBg: 'bg-emerald-900/60', badgeText: 'text-emerald-300', badgeBorder: 'border-emerald-500/40',
@@ -5439,7 +5442,7 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
     },
     good: {
       border: 'border-green-500/50',
-      bg: 'bg-gradient-to-r from-green-900/30 via-slate-800/80 to-slate-800/80',
+      bg: 'bg-slate-800/85',
       labelColor: 'text-green-300',
       dot: 'bg-green-400',
       badgeBg: 'bg-green-900/60', badgeText: 'text-green-300', badgeBorder: 'border-green-500/40',
@@ -5447,7 +5450,7 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
     },
     warn: {
       border: 'border-yellow-500/50',
-      bg: 'bg-gradient-to-r from-yellow-900/30 via-slate-800/80 to-slate-800/80',
+      bg: 'bg-slate-800/85',
       labelColor: 'text-yellow-300',
       dot: 'bg-yellow-400',
       badgeBg: 'bg-yellow-900/60', badgeText: 'text-yellow-300', badgeBorder: 'border-yellow-500/40',
@@ -5455,7 +5458,7 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
     },
     risk: {
       border: 'border-orange-500/50',
-      bg: 'bg-gradient-to-r from-orange-900/30 via-slate-800/80 to-slate-800/80',
+      bg: 'bg-slate-800/85',
       labelColor: 'text-orange-300',
       dot: 'bg-orange-400',
       badgeBg: 'bg-orange-900/60', badgeText: 'text-orange-300', badgeBorder: 'border-orange-500/40',
@@ -5463,7 +5466,7 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
     },
     danger: {
       border: 'border-red-500/60',
-      bg: 'bg-gradient-to-r from-red-900/40 via-slate-800/80 to-slate-800/80',
+      bg: 'bg-slate-800/85',
       labelColor: 'text-red-300',
       dot: 'bg-red-400',
       badgeBg: 'bg-red-900/60', badgeText: 'text-red-300', badgeBorder: 'border-red-500/40',
