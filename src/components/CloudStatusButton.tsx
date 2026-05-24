@@ -284,6 +284,13 @@ export function CloudStatusButton(props: SyncProps) {
 
               {tab === 'compare' && (
                 <>
+                  {/* V25 — Plain-English reconciliation explanation */}
+                  <div className="rounded-xl bg-slate-700/30 border border-slate-600/40 px-3 py-2.5 mb-3 text-xs text-slate-400 leading-relaxed">
+                    <p className="font-semibold text-slate-300 mb-1">What is reconciliation?</p>
+                    <p>This tab compares your <span className="text-slate-200">local data</span> (on this device) against your <span className="text-slate-200">cloud data</span> (Supabase backup) and lets you choose which version wins.</p>
+                    <p className="mt-1.5"><span className="text-emerald-400 font-medium">Merge Safe</span> is the safest option — it only fills in records that exist in the cloud but are missing locally. It never overwrites anything you have locally.</p>
+                    <p className="mt-1.5"><span className="text-blue-300 font-medium">Use Cloud</span> replaces local with cloud. <span className="text-amber-300 font-medium">Use Local</span> keeps what you have and overwrites cloud on next sync.</p>
+                  </div>
                   {/* Top-level merge actions — NOT buried */}
                   <div className="grid grid-cols-3 gap-2">
                     <button onClick={cs.chooseLocal} disabled={!cs.summary.isSignedIn || busy}
