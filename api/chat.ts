@@ -52,7 +52,7 @@ export default async function handler(req: any, res: any) {
     ? systemOverride
     : defaultSystem
 
-  // ── Gemini Flash (preferred — free tier) ────────────────────────────────────
+  // ── Gemini (preferred — free tier) ─────────────────────────────────────────
   if (geminiKey) {
     try {
       const geminiMessages = messages.map((m: { role: string; content: string }) => ({
@@ -60,14 +60,46 @@ export default async function handler(req: any, res: any) {
         parts: [{ text: m.content }],
       }))
 
-      const requestedModel = process.env.GEMINI_MODEL || 'gemini-2.0-flash-lite'
-      const fallbackModels = [
+      const normalizeModel = (name: string) => name.startsWith('models/') ? name.slice('models/'.length) : name
+
+      async function getAvailableGeminiModels(): Promise<string[]> {
+        const r = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models?key=${geminiKey}`,
+          { method: 'GET' },
+        )
+        const data = await r.json() as { models?: { name?: string; supportedGenerationMethods?: string[] }[]; error?: { message?: string } }
+        if (!r.ok) {
+          const msg = data.error?.message ?? `ListModels failed with HTTP ${r.status}`
+          throw new Error(`Gemini ListModels error: ${msg}`)
+        }
+        return (data.models ?? [])
+          .filter(model => model.name && (model.supportedGenerationMethods ?? []).includes('generateContent'))
+          .map(model => normalizeModel(model.name ?? ''))
+          .filter(Boolean)
+      }
+
+      const requestedModel = process.env.GEMINI_MODEL ? normalizeModel(process.env.GEMINI_MODEL) : ''
+      const preferredModels = [
         requestedModel,
+        'gemini-2.5-flash-lite',
+        'gemini-2.5-flash',
         'gemini-2.0-flash-lite',
         'gemini-2.0-flash',
         'gemini-1.5-flash-latest',
         'gemini-1.5-flash',
-      ].filter((model, index, arr) => model && arr.indexOf(model) === index)
+      ].filter(Boolean)
+
+      const availableModels = await getAvailableGeminiModels()
+      const selectedPreferred = preferredModels.filter(model => availableModels.includes(model))
+      const fallbackModels = [
+        ...selectedPreferred,
+        ...availableModels.filter(model => !selectedPreferred.includes(model)),
+      ]
+
+      if (fallbackModels.length === 0) {
+        const fullErr = 'Gemini API error — key works, but ListModels returned no models that support generateContent.'
+        if (!anthropicKey) return res.status(200).json({ error: fullErr, isGeminiError: true })
+      }
 
       let lastGeminiError = ''
 
@@ -107,12 +139,14 @@ export default async function handler(req: any, res: any) {
         return res.status(200).json({ content: text, model })
       }
 
-      const fullErr = `Gemini API error — all configured models failed. Last error: ${lastGeminiError || 'Unknown Gemini error'}`
+      const attempted = fallbackModels.slice(0, 8).join(', ')
+      const fullErr = `Gemini API error — all available generateContent models failed. Attempted: ${attempted}. Last error: ${lastGeminiError || 'Unknown Gemini error'}`
       if (!anthropicKey) return res.status(200).json({ error: fullErr, isGeminiError: true })
       // else fall through to Anthropic below
     } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Gemini request failed'
       if (!anthropicKey) {
-        return res.status(500).json({ error: err instanceof Error ? err.message : 'Gemini request failed' })
+        return res.status(200).json({ error: msg, isGeminiError: true })
       }
       // Fall through to Anthropic
     }
