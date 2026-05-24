@@ -144,6 +144,8 @@ import { OnboardingCard } from './components/OnboardingCard'
 import { PersonalPreloadCard } from './components/PersonalPreloadCard'
 import { DEMO_ACCOUNTS, DEMO_CATEGORIES, DEMO_TRANSACTIONS, DEMO_TARGETS, DEMO_RULES } from './utils/demoData'
 import { ZYAN_PERSONAL_PRELOAD } from './utils/personalPreloadData'
+import type { PersonalPreloadData } from './utils/personalPreloadData'
+import { loadZyanCustomPreload, saveZyanCustomPreload } from './utils/personalDefault'
 import { STORAGE_KEYS } from './utils/storageKeys'
 import { useAuth } from './hooks/useAuth'
 import { fetchCloudDataForRestore } from './utils/cloudRestore'
@@ -753,6 +755,8 @@ export default function App() {
   }
   // V17 — Collapsible dashboard sections
   const [forecastOpen, setForecastOpen] = useState(false)
+  const [billsToMomBudgetOpen, setBillsToMomBudgetOpen] = useState(true)
+  const [hasCustomPersonalDefault, setHasCustomPersonalDefault] = useState(() => !!loadZyanCustomPreload())
   // reviewOpen already provided by useUiState()
 
   const isAppEmpty = accounts.length === 0 && categories.length === 0 && transactions.length === 0
@@ -782,7 +786,7 @@ export default function App() {
   }
 
   const handleLoadPersonalPreload = () => {
-    const data = ZYAN_PERSONAL_PRELOAD
+    const data = loadZyanCustomPreload() ?? ZYAN_PERSONAL_PRELOAD
     setAccountsWithHistory(() => data.accounts)
     setCategories(data.categories)
     setTxnWithHistory(() => data.transactions)
@@ -802,6 +806,41 @@ export default function App() {
     saveToStorage(STORAGE_KEYS.budgetActuals, data.budgetActualsEnvelope)
     saveImportBatches(data.importBatches)
     showToast('Loaded Zyan starter data. Sync to cloud when ready.')
+  }
+
+  const handleSavePersonalDefault = () => {
+    const currentDefault: PersonalPreloadData = {
+      accounts,
+      categories,
+      transactions,
+      importBatches,
+      rules,
+      targets,
+      savedTargetSets,
+      savedBudgets,
+      savedScenarios,
+      takeHomeSettings: loadTakeHomeSettings() ?? ZYAN_PERSONAL_PRELOAD.takeHomeSettings,
+      scenarioNotes,
+      categoryMemory,
+      budgetActualsEnvelope: {
+        version: 2,
+        lastPeriodKey: currentActualsPeriodKey,
+        actualsByPeriod: loadAllBudgetActualsByPeriod(),
+      },
+      monthlyNotes,
+      reviewedMonths,
+      manualRecurringItems,
+      billsToMomBreakdown: ZYAN_PERSONAL_PRELOAD.billsToMomBreakdown,
+      metadata: {
+        name: 'Zyan Custom Default',
+        createdAt: new Date().toISOString(),
+        transactionCount: transactions.length,
+        importBatchCount: importBatches.length,
+      },
+    }
+    saveZyanCustomPreload(currentDefault)
+    setHasCustomPersonalDefault(true)
+    showToast('Saved current setup as Zyan default. Re-load it anytime from the starter data card.')
   }
   // V9.7.1 — Collapsible main transaction list
   const [txnListOpen, setTxnListOpen]             = useState(true)
@@ -2460,7 +2499,7 @@ txnMerchantRef.current?.focus()
     reviewedMonths,
     pendingDeletes: getPendingDeletes(),
     // V18 — previously unsynced entities
-    takeHomeSettings: loadTakeHomeSettings(),
+    takeHomeSettings: loadTakeHomeSettings() ?? ZYAN_PERSONAL_PRELOAD.takeHomeSettings,
     scenarioNotes,
     categoryMemory,
   })
@@ -2602,6 +2641,8 @@ txnMerchantRef.current?.focus()
             <PersonalPreloadCard
               onLoadPersonalData={handleLoadPersonalPreload}
               onDownloadBackup={downloadBackupFile}
+              onSavePersonalDefault={handleSavePersonalDefault}
+              hasCustomDefault={hasCustomPersonalDefault}
             />
             )}
 
@@ -3547,7 +3588,8 @@ txnMerchantRef.current?.focus()
                     }
 
                     // ── Normal display row ────────────────────────────────────
-                    return (
+                    const isBillsToMom = c.id === 'cat-bills-mom' || c.name.toLowerCase() === 'bills to mom'
+                    const normalRow = (
                       <tr
                         key={c.id}
                         className={`border-b border-slate-800 transition-colors duration-300 ${
@@ -3558,7 +3600,11 @@ txnMerchantRef.current?.focus()
                               : ''
                         }`}
                       >
-                        <td className="py-1.5 pr-2">{c.name}</td>
+                        <td className="py-1.5 pr-2">{isBillsToMom ? (
+                          <button type="button" onClick={() => setBillsToMomBudgetOpen(v => !v)} className="inline-flex items-center gap-1 text-left hover:text-blue-300" title="Show Bills to Mom breakdown">
+                            <span>{billsToMomBudgetOpen ? '▾' : '▸'}</span><span>{c.name}</span>
+                          </button>
+                        ) : c.name}</td>
                         <td className="py-1.5 pr-2 text-slate-400 text-xs">
                           {c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}
                         </td>
@@ -3697,6 +3743,34 @@ txnMerchantRef.current?.focus()
                           )}
                         </td>
                       </tr>
+                    )
+
+                    if (!isBillsToMom) return normalRow
+
+                    return (
+                      <>
+                        {normalRow}
+                        {billsToMomBudgetOpen && (
+                          <tr className="border-b border-slate-800 bg-slate-900/40">
+                            <td colSpan={8} className="py-2 pl-6 pr-2">
+                              <div className="rounded-xl border border-slate-700 bg-slate-950/40 p-3">
+                                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                  <div className="text-xs font-semibold text-slate-200">Bills to Mom breakdown</div>
+                                  <div className="text-[11px] text-slate-400">Rounded to {currency(300)} monthly. Priority: increase this over time when extra money is available.</div>
+                                </div>
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                                  {ZYAN_PERSONAL_PRELOAD.billsToMomBreakdown.map(item => (
+                                    <div key={item.name} className="rounded-lg border border-slate-700 bg-slate-800/70 p-2">
+                                      <div className="text-[11px] text-slate-400">{item.name}</div>
+                                      <div className="text-sm font-semibold text-slate-100">{currency(item.amount)}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     )
                   })}
                 </tbody>
