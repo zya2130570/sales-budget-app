@@ -126,6 +126,7 @@ import { OnboardingGuide } from './components/OnboardingGuide'
 import { CommandPalette } from './components/CommandPalette'
 import { Sidebar } from './components/Sidebar'
 import { CloudStatusButton } from './components/CloudStatusButton'
+import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
 import { ConflictResolutionModal } from './components/ConflictResolutionModal'
 import { useCloudPersistence } from './hooks/useCloudPersistence'
 import { supabase } from './lib/supabaseClient'
@@ -745,6 +746,7 @@ export default function App() {
   const [onboardingGuideOpen, setOnboardingGuideOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [profileOpenSignal, setProfileOpenSignal] = useState(0)
+  const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false)
   // V22 — dark/light theme
   const [theme, setTheme] = useState<'dark' | 'light'>(() =>
     (localStorage.getItem('flow_theme') as 'dark' | 'light') ?? 'dark'
@@ -2517,6 +2519,7 @@ txnMerchantRef.current?.focus()
         onNavigate={setTab}
         onOpenSettings={() => setSettingsOpen(v => !v)}
         onOpenProfile={() => setProfileOpenSignal(v => v + 1)}
+        onOpenKeyboardShortcuts={() => setKeyboardShortcutsOpen(true)}
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed(v => !v)}
         theme={theme}
@@ -2571,6 +2574,11 @@ txnMerchantRef.current?.focus()
           onResolve={cloudPersistence.resolveConflicts}
           onDismiss={cloudPersistence.dismissConflicts}
         />
+      )}
+
+
+      {keyboardShortcutsOpen && (
+        <KeyboardShortcutsPanel onClose={() => setKeyboardShortcutsOpen(false)} />
       )}
 
       {/* V27 — Command Palette (Ctrl+K / ⌘+K) */}
@@ -5436,7 +5444,7 @@ function DashboardStatusBanner({ status, theme }: { status: DashboardStatus; the
   const toneStyles: Record<string, { border: string; bg: string; bgLight: string; labelColor: string; labelColorLight: string; dot: string; badgeBg: string; badgeText: string; badgeBorder: string; signal: string }> = {
     excellent: {
       border: 'border-emerald-500/60',
-      bg: 'bg-slate-800/85',
+      bg: 'bg-gradient-to-br from-emerald-950/70 via-slate-800/92 to-slate-900/95',
       bgLight: 'bg-gradient-to-br from-emerald-50 via-white to-emerald-100/70',
       labelColor: 'text-emerald-300',
       labelColorLight: 'text-emerald-800',
@@ -5446,7 +5454,7 @@ function DashboardStatusBanner({ status, theme }: { status: DashboardStatus; the
     },
     good: {
       border: 'border-green-500/50',
-      bg: 'bg-slate-800/85',
+      bg: 'bg-gradient-to-br from-green-950/70 via-slate-800/92 to-slate-900/95',
       bgLight: 'bg-gradient-to-br from-green-50 via-white to-green-100/70',
       labelColor: 'text-green-300',
       labelColorLight: 'text-green-800',
@@ -5456,7 +5464,7 @@ function DashboardStatusBanner({ status, theme }: { status: DashboardStatus; the
     },
     warn: {
       border: 'border-yellow-500/50',
-      bg: 'bg-slate-800/85',
+      bg: 'bg-gradient-to-br from-yellow-950/70 via-slate-800/92 to-slate-900/95',
       bgLight: 'bg-gradient-to-br from-amber-50 via-white to-yellow-100/80',
       labelColor: 'text-yellow-300',
       labelColorLight: 'text-amber-800',
@@ -5466,7 +5474,7 @@ function DashboardStatusBanner({ status, theme }: { status: DashboardStatus; the
     },
     risk: {
       border: 'border-orange-500/50',
-      bg: 'bg-slate-800/85',
+      bg: 'bg-gradient-to-br from-orange-950/70 via-slate-800/92 to-slate-900/95',
       bgLight: 'bg-gradient-to-br from-orange-50 via-white to-amber-100/80',
       labelColor: 'text-orange-300',
       labelColorLight: 'text-orange-800',
@@ -5476,7 +5484,7 @@ function DashboardStatusBanner({ status, theme }: { status: DashboardStatus; the
     },
     danger: {
       border: 'border-red-500/60',
-      bg: 'bg-slate-800/85',
+      bg: 'bg-gradient-to-br from-red-950/75 via-slate-800/92 to-slate-900/95',
       bgLight: 'bg-gradient-to-br from-red-50 via-white to-orange-100/80',
       labelColor: 'text-red-300',
       labelColorLight: 'text-red-800',
