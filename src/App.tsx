@@ -123,6 +123,7 @@ import { useNeedsReview } from './hooks/useNeedsReview'
 import { AuthPanel } from './components/AuthPanel'
 import { ProfilePanel } from './components/ProfilePanel'
 import { OnboardingGuide } from './components/OnboardingGuide'
+import { CommandPalette } from './components/CommandPalette'
 import { CloudStatusButton } from './components/CloudStatusButton'
 import { ConflictResolutionModal } from './components/ConflictResolutionModal'
 import { useCloudPersistence } from './hooks/useCloudPersistence'
@@ -2550,6 +2551,15 @@ txnMerchantRef.current?.focus()
           onDismiss={cloudPersistence.dismissConflicts}
         />
       )}
+
+      {/* V27 — Command Palette (Ctrl+K / ⌘+K) */}
+      <CommandPalette
+        onNavigate={(tab) => setTab(tab)}
+        onOpenGuide={() => setOnboardingGuideOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onLoadDemo={handleLoadDemo}
+        onSync={() => cloudPersistence.syncNow()}
+      />
 
       {/* V24 — Onboarding Guide */}
       {onboardingGuideOpen && (
@@ -5424,13 +5434,11 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
               {s.signal}
             </span>
           </div>
-          {/* V24: Split on currency amounts so $ renders as JSX, not a text node extension can strip */}
+          {/* V26: Dollar sign via CSS ::before — cannot be stripped by browser extensions */}
           <p className="text-sm text-slate-200 leading-relaxed">
             {status.explanation.split(/(\$[\d,]+\.\d{2})/g).map((part, i) =>
               /^\$[\d,]+\.\d{2}$/.test(part)
-                ? <span key={i} style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    <span aria-hidden>{'$'}</span>{part.slice(1)}
-                  </span>
+                ? <span key={i} className="flow-dollar">{part.slice(1)}</span>
                 : part
             )}
           </p>
