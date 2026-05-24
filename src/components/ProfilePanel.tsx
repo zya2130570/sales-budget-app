@@ -11,9 +11,10 @@ type Props = {
   hasData: boolean
   onLoadStarterData: () => void
   onOpenSettings: () => void
+  onOpenGuide: () => void
 }
 
-export function ProfilePanel({ hasData, onLoadStarterData, onOpenSettings }: Props) {
+export function ProfilePanel({ hasData, onLoadStarterData, onOpenSettings, onOpenGuide }: Props) {
   const { user, signOut } = useAuth()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -70,6 +71,17 @@ export function ProfilePanel({ hasData, onLoadStarterData, onOpenSettings }: Pro
               <div className="min-w-0">
                 <p className="font-medium">Load starter data</p>
                 <p className="text-xs text-slate-500 truncate">Zyan's real budget setup</p>
+              </div>
+            </button>
+
+            <button
+              onClick={() => { setOpen(false); onOpenGuide() }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm text-slate-300 hover:bg-slate-700 hover:text-slate-100 transition-colors"
+            >
+              <span className="text-base">📖</span>
+              <div>
+                <p className="font-medium">Setup Guide</p>
+                <p className="text-xs text-slate-500">Step-by-step walkthrough</p>
               </div>
             </button>
 
