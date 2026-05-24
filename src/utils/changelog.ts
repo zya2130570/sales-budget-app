@@ -8,6 +8,47 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V29',
+    date: '5/24/2026 at 2:00 AM',
+    what: [
+      'Linear-style sidebar — fixed left nav with icons + labels. Shows Dashboard, Income, Budget, Accounts, Transactions, Scenarios, Savings Goals. Active page highlighted with left border accent.',
+      'Sidebar collapses to icon-only (56px) or expands to full labels (220px). Toggle with [ key or the collapse button at the bottom.',
+      'Keyboard navigation: press 1-7 to jump to any section instantly. Works from anywhere in the app.',
+      'Compact sticky header — logo/version badge on left, utility buttons (profile, cloud, settings) on right. No more tab pills in the header.',
+      'Command palette (Ctrl+K) updated to include sidebar navigation shortcuts.',
+    ],
+    test: [
+      'Sidebar visible on left — click Dashboard, Income, Budget etc to navigate',
+      'Press [ to collapse sidebar to icons only. Press [ again to expand.',
+      'Press 1 → Dashboard, 2 → Income, 3 → Budget (from anywhere, not in a text field)',
+      'Press Ctrl+K → command palette with all navigation shortcuts',
+      'Header should show only Flow badge + profile/cloud/settings — no tab pills',
+    ],
+    roadmap: [
+      'COMPLETE V1-V29: Full Linear-style sidebar nav, keyboard shortcuts, command palette, cloud sync, AI assistant (Gemini free), onboarding guide, all finance features.',
+      'NEXT (after 1 month real use): Visual polish pass (card redesign, typography, spacing), net worth chart, year-over-year comparison.',
+    ],
+  },
+  {
+    version: 'V28',
+    date: '5/24/2026 at 12:00 AM',
+    what: [
+      'Period bug ACTUALLY fixed this time — .flow-dollar::before { content: "$" } CSS rule was missing from the deployed file in V26/V27 even though the class was being used. Now added.',
+      'Gemini model switched from gemini-2.0-flash → gemini-1.5-flash. The 2.0 model has limit:0 on the free tier. 1.5 Flash has confirmed 1M tokens/day free.',
+      'Scrollbar fix strengthened — now explicitly targets html and body elements in addition to the universal * selector.',
+      'AIAssistantPanel error messages updated — detects quota errors specifically, shows correct Gemini setup steps, clarifies key is set once in Vercel and never expires.',
+    ],
+    test: [
+      'Dashboard → Attention Needed banner → should show $63,912.91 with a real dollar sign',
+      'Financial Assistant → send a message → should get a response (no quota error)',
+      'Check entire app — no scrollbar visible anywhere including the main page',
+    ],
+    roadmap: [
+      'COMPLETE V1-V28. Next: UI/UX redesign (Linear/Raycast-inspired, pending design questions).',
+      'Post-redesign: Net worth chart in Dashboard, year-over-year comparison.',
+    ],
+  },
+  {
     version: 'V27',
     date: '5/23/2026 at 11:30 PM',
     what: [
