@@ -1,28 +1,27 @@
 /**
- * OnboardingGuide.tsx — V24
+ * OnboardingGuide.tsx — V27
  *
- * Fullscreen walkthrough overlay. The actual app is visible behind it.
- * A spotlight ring highlights the relevant section. A bottom panel shows
- * step content, AI chat (or static FAQ fallback), and Next/Back navigation.
+ * Fullscreen walkthrough. App is visible + highlighted behind it.
+ * Top bar: progress + step pills. Bottom panel: content (scrolls) + nav (pinned).
+ * Next button is ALWAYS visible — never requires scrolling.
  */
 import { useState, useRef, useEffect, useCallback } from 'react'
 
 type Tab = 'Dashboard' | 'Income' | 'Budget' | 'Accounts' | 'Transactions' | 'Scenarios' | 'Targets'
 
-// ── Static FAQ fallback (shown when AI key is not configured) ─────────────────
 const STATIC_FAQ: Record<string, string> = {
   'How do I export Apple Card transactions?':
-    'In the Wallet app on iPhone: tap your Apple Card → tap ⋯ (top right) → Export Transactions. This downloads a CSV you can import in Flow → Transactions → Import CSV.',
+    'Wallet app on iPhone → tap Apple Card → ⋯ (top right) → Export Transactions → CSV. Then import in Flow → Transactions → Import CSV.',
   'What take-home rate should I use?':
-    'Start with 82% as an estimate. Divide any net pay stub by its gross pay to get your real rate. Enter it in the Income tab under "Take-home rate".',
-  'Savings vs Investment category — what\'s the difference?':
-    'Savings (Type 3) is liquid money you can access anytime — emergency fund, a vacation fund. Investment (Type 4) is long-term and usually locked — Roth IRA, brokerage, 401k contributions.',
+    'Start at 82%. Check a pay stub: net ÷ gross = your real rate. Enter it in the Income tab.',
+  'Savings vs Investment — what\'s the difference?':
+    'Savings (Type 3): liquid and accessible — emergency fund, vacation fund. Investment (Type 4): long-term and locked — Roth IRA, brokerage, 401k.',
   'How do I fix the "Attention Needed" banner?':
-    'Your total planned budget exceeds your income. Go to Budget tab → reduce amounts in your variable categories, or check that your Income tab has the correct salary entered.',
+    'Your planned budget exceeds your income. Reduce category amounts in the Budget tab, or correct your salary in the Income tab.',
   'How do auto-categorization rules work?':
-    'Go to Transactions → Rules. Add a rule like "contains: DoorDash → category: Takeout". Every future import will auto-assign matching transactions. You can also just categorize one transaction and Flow learns the merchant.',
+    'Transactions → Rules. Add "contains: DoorDash → Takeout". All future imports auto-assign. Or just categorize one transaction — Flow remembers the merchant.',
   'How do I add a savings goal?':
-    'Go to Savings Goals tab → click "Add Goal". Enter the name, target amount, and a deadline. Flow tells you how much to save per month. Log contributions with "Add Contribution" each time you move money.',
+    'Savings Goals tab → Add Goal → name, target amount, deadline. Flow calculates monthly savings needed. Log contributions with "Add Contribution."',
 }
 
 type Step = {
@@ -30,128 +29,94 @@ type Step = {
   title: string
   emoji: string
   tab?: Tab
-  zyanSetup: string
+  subtitle: string
   description: string
-  tips: { label: string; text: string }[]
+  tips: { icon: string; label: string; text: string }[]
 }
 
 const STEPS: Step[] = [
   {
-    id: 'welcome',
-    emoji: '👋',
-    title: 'Welcome to Flow',
-    zyanSetup: '17 categories · 7 accounts · 235 transactions · 8 goals',
-    description:
-      'Flow connects your income, budget, savings goals, and real bank transactions in one place — so you always know where you stand financially. This guide walks you through setting it up, section by section.',
+    id: 'welcome', emoji: '👋', title: 'Welcome to Flow', tab: 'Dashboard',
+    subtitle: 'Your personal finance command center',
+    description: 'Flow connects your income, budget, savings goals, and real bank transactions in one place so you always know where you stand. This guide walks through setup, section by section.',
     tips: [
-      { label: 'Load example data', text: 'Click your email in the header → "Load starter data" to see a fully configured example (Zyan\'s real setup) at any time.' },
-      { label: 'Come back anytime', text: 'Re-open this guide from your profile dropdown whenever you need a refresher on any section.' },
+      { icon: '📦', label: 'Load an example', text: 'Click your email → "Load starter data" to see a fully configured real-world example (Zyan\'s setup) at any time.' },
+      { icon: '⌨️', label: 'Keyboard shortcut', text: 'Press Ctrl+K (or ⌘K on Mac) anywhere in the app to open a quick-action menu for navigation and shortcuts.' },
+      { icon: '☁️', label: 'Save your work', text: 'Click Cloud in the header → Sync now after each setup step. Your data is always stored locally first.' },
     ],
   },
   {
-    id: 'income',
-    emoji: '💵',
-    title: 'Income',
-    tab: 'Income',
-    zyanSetup: 'Base salary + commission side income · ~82% take-home rate',
-    description:
-      'The Income tab is the foundation of everything. Your take-home income determines whether your budget is healthy or over-stretched. Enter your gross annual salary first — Flow handles all the period conversions automatically.',
+    id: 'income', emoji: '💵', title: 'Income', tab: 'Income',
+    subtitle: 'The foundation — everything else derives from this',
+    description: 'Enter your gross annual salary and take-home rate. Flow handles all period conversions (weekly/monthly/yearly) automatically.',
     tips: [
-      { label: 'Gross vs net', text: 'Enter your GROSS salary (before taxes). Then set your take-home rate — what % actually hits your bank. 82% is a reasonable estimate; refine it using a real pay stub (net ÷ gross).' },
-      { label: 'Side income', text: 'Add variable income (freelance, bonuses, commission) separately. Since it fluctuates, keep it separate from your base so your baseline budget is always conservative.' },
-      { label: 'Period selector', text: 'At the top of the Budget tab you can switch between Weekly, Bi-weekly, Monthly, and Yearly views. Flow converts everything automatically.' },
+      { icon: '📊', label: 'Gross vs net', text: 'Enter GROSS salary (before taxes). Set take-home rate to what % hits your bank. 82% is a safe start — check a pay stub (net ÷ gross = your rate).' },
+      { icon: '🔀', label: 'Side income', text: 'Add commissions, freelance, or bonuses separately. Since they vary, keep them separate so your baseline budget is always conservative.' },
+      { icon: '📅', label: 'Period selector', text: 'Switch between Weekly / Bi-weekly / Monthly / Yearly at the top of the Budget tab. Flow converts everything automatically.' },
     ],
   },
   {
-    id: 'budget',
-    emoji: '📊',
-    title: 'Budget Categories',
-    tab: 'Budget',
-    zyanSetup: '17 categories: bills, groceries, gas, takeout, subscriptions, savings funds, investments',
-    description:
-      'Categories define where your money goes each period. Create one for every area of spending or saving. Flow has 4 types — Fixed Bills, Variable spending, Savings, and Investment — to help you see your spending structure at a glance.',
+    id: 'budget', emoji: '📊', title: 'Budget Categories', tab: 'Budget',
+    subtitle: 'Define where your money goes each period',
+    description: 'Create a category for every area of spending or saving. Four types help you understand your money structure at a glance.',
     tips: [
-      { label: '4 category types', text: 'Fixed Bill (rent, insurance, subscriptions), Variable (groceries, gas, takeout), Savings (emergency fund, specific goals), Investment (Roth IRA, brokerage, 401k). Use these types — they drive your Budget Health score.' },
-      { label: 'Start broad', text: 'Start with 8–12 categories before getting granular. It\'s easier to split a category later than to merge many small ones.' },
-      { label: 'Monthly amounts', text: 'Always enter amounts as MONTHLY, even if you pay quarterly or annually. Flow converts to your selected period view. Divide annual costs by 12.' },
-      { label: 'Rollover', text: 'Enable the Rollover toggle on a variable category to carry underspend forward to next month — great for irregular expenses like car maintenance.' },
+      { icon: '📌', label: '4 types', text: 'Fixed Bill: rent/insurance. Variable: groceries/gas/takeout. Savings: emergency fund/goals. Investment: Roth IRA/brokerage.' },
+      { icon: '💡', label: 'Start broad', text: 'Start with 8–12 categories. Easier to split one later than merge many small ones. Always enter MONTHLY amounts even for annual expenses.' },
+      { icon: '🔁', label: 'Rollover', text: 'Enable Rollover on lumpy categories (car maintenance, clothing). Underspend this month = bigger budget next month. Hover the Rollover button for an example.' },
     ],
   },
   {
-    id: 'accounts',
-    emoji: '🏦',
-    title: 'Accounts',
-    tab: 'Accounts',
-    zyanSetup: 'Apple Card, Chase Checking, Ally Checking, Ally Savings, Chase Roth IRA, Fidelity Roth IRA, Retirement',
-    description:
-      'Accounts represent your real financial accounts. You need at least one account before importing transactions — Flow needs to know which account each transaction belongs to.',
+    id: 'accounts', emoji: '🏦', title: 'Accounts', tab: 'Accounts',
+    subtitle: 'Set these up before importing transactions',
+    description: 'Accounts represent your real financial accounts. You need at least one before importing — Flow needs to know which account each transaction belongs to.',
     tips: [
-      { label: '4 account types', text: 'Checking (day-to-day), Savings (reserves), Credit Card (import statement CSVs here), Investment (brokerage/retirement). Each transaction import is linked to a specific account.' },
-      { label: 'Credit cards', text: 'Add your credit cards as Credit Card accounts. When you import an Apple Card or Chase CSV, select the matching account during import.' },
-      { label: 'Investment accounts', text: 'Add these too even if you don\'t import transactions — they\'re useful for your savings goals progress and overall net worth picture.' },
+      { icon: '💳', label: 'Credit cards', text: 'Add credit cards as "Credit Card" type accounts. When you import a CSV, select the matching account during import.' },
+      { icon: '📈', label: 'Investments', text: 'Add brokerage and retirement accounts even if you don\'t import transactions. They feed the Net Worth tracker in the Accounts tab.' },
+      { icon: '💰', label: 'Net worth', text: 'Once accounts have balances, scroll down in the Accounts tab to see Cash, Investments, Debt, and Net Worth totals.' },
     ],
   },
   {
-    id: 'transactions',
-    emoji: '📥',
-    title: 'Transactions',
-    tab: 'Transactions',
-    zyanSetup: '235 Apple Card transactions across 4 import batches · 10 auto-categorization rules',
-    description:
-      'Transactions bring your budget to life. Import a CSV from your bank or credit card to see real actual spending vs your planned budget. Then set up rules so future imports auto-categorize themselves.',
+    id: 'transactions', emoji: '📥', title: 'Transactions', tab: 'Transactions',
+    subtitle: 'Import real spending to see actuals vs planned',
+    description: 'Import a CSV from your bank or credit card to see real actual spending alongside your planned budget. Actuals auto-populate the Budget tab.',
     tips: [
-      { label: 'Export from Apple Card', text: 'Wallet app → Apple Card → ⋯ → Export Transactions. For Chase/Bank of America: log in online → Accounts → Download transactions → choose date range → CSV.' },
-      { label: 'Import flow', text: 'Transactions tab → Import CSV → select your account → Flow previews and maps columns → confirm import. Duplicates are detected automatically.' },
-      { label: 'Categorize & learn', text: 'After importing, yellow-dot transactions need a category. Assign them — Flow remembers the merchant pattern. Build rules (Transactions → Rules) for ones you\'ll see repeatedly.' },
-      { label: 'Actuals', text: 'Once transactions are categorized, the Budget tab shows real Actual vs Planned numbers for each category.' },
+      { icon: '🍎', label: 'Apple Card export', text: 'Wallet app → Apple Card → ⋯ → Export Transactions → choose date range → CSV. Works perfectly with Flow\'s importer.' },
+      { icon: '🏦', label: 'Other banks', text: 'Chase, Bank of America, Wells Fargo: log in online → Accounts → Download transactions → choose date range → CSV.' },
+      { icon: '🤖', label: 'Auto-rules', text: 'After importing, assign categories to merchants. Go to Transactions → Rules to create permanent rules. "DoorDash → Takeout" auto-assigns forever after.' },
     ],
   },
   {
-    id: 'goals',
-    emoji: '🎯',
-    title: 'Savings Goals',
-    tab: 'Targets',
-    zyanSetup: '8 active goals: emergency fund, vacation, laptop, car buffer, investment targets',
-    description:
-      'Savings Goals let you define what you\'re working toward — with a target amount, an optional deadline, and contribution tracking. Flow tells you how much you need to save each month to hit your goal on time.',
+    id: 'goals', emoji: '🎯', title: 'Savings Goals', tab: 'Targets',
+    subtitle: 'Track what you\'re building toward',
+    description: 'Define goals with a target amount and deadline. Flow tells you exactly how much to save per month and tracks your progress.',
     tips: [
-      { label: 'Link to a budget category', text: 'Create a budget category (e.g., "Emergency Fund" → Type: Savings → $200/month) that matches your goal\'s monthly requirement. This ties your planned budget to your goal progress.' },
-      { label: 'Log contributions', text: 'Every time you transfer money toward a goal, click "Add Contribution" in that goal\'s card and enter the amount. Your progress bar updates in real time.' },
-      { label: 'Goal sets', text: 'Save a "Goal Set" snapshot to track how your goals have changed over time — useful at the start of each quarter or year.' },
+      { icon: '🔗', label: 'Link to budget', text: 'Create a matching budget category (e.g., "Emergency Fund" → Type: Savings → $200/month) to tie your plan to your goal progress.' },
+      { icon: '📝', label: 'Log contributions', text: 'Every time you transfer money toward a goal, click "Add Contribution" in that goal\'s card. Progress bar updates instantly.' },
+      { icon: '📸', label: 'Goal sets', text: 'Save a "Goal Set" snapshot at the start of each year to track how goals evolve over time.' },
     ],
   },
   {
-    id: 'dashboard',
-    emoji: '📈',
-    title: 'Dashboard',
-    tab: 'Dashboard',
-    zyanSetup: 'Budget health, attention banner, insights panel, monthly review, AI assistant',
-    description:
-      'The Dashboard is your daily command center. Once income, budget, and transactions are set up, it gives you a complete financial picture at a glance — what needs attention, what\'s on track, and what to do next.',
+    id: 'dashboard', emoji: '📈', title: 'Dashboard', tab: 'Dashboard',
+    subtitle: 'Your daily financial command center',
+    description: 'Once income, budget, and transactions are set up, the Dashboard gives you a complete picture — what needs attention, what\'s on track, what to do next.',
     tips: [
-      { label: 'Attention Needed banner', text: 'Shows when planned budget > income. This is the most important signal. Fix it by reducing category amounts in Budget, or correcting your salary in Income.' },
-      { label: 'Budget Health', text: 'Tracks Planned vs Actual for all categories. Click "Over Budget" filter to see only problem categories. Green = on track, red = over.' },
-      { label: 'Insights panel', text: 'Auto-generated: uncategorized transactions, categories near their limit, spending trends. These update as you add data.' },
-      { label: 'Monthly Review', text: 'At month end: review what went well/poorly, mark as reviewed. Builds a historical record of your spending patterns.' },
+      { icon: '🚨', label: 'Attention Needed', text: 'Red banner = planned budget > income. Fix by reducing category amounts in Budget, or correcting salary in Income.' },
+      { icon: '📊', label: 'Budget Health', text: 'Shows Planned vs Actual for all categories. Click "Over Budget" filter to focus on problem areas. Green = on track, red = over.' },
+      { icon: '📋', label: 'Monthly Review', text: 'At month end, review what went well, mark reviewed, see category breakdown. Builds a historical record of your patterns.' },
     ],
   },
   {
-    id: 'sync',
-    emoji: '☁️',
-    title: 'Cloud Sync & Backup',
-    zyanSetup: 'Synced to Supabase · Auto-sync enabled · Local backup downloaded',
-    description:
-      'Flow stores everything locally by default. Cloud sync backs up all your data to Supabase so you never lose it and can access it from any device. Set it up once and forget about it.',
+    id: 'sync', emoji: '☁️', title: 'Cloud Sync', tab: 'Dashboard',
+    subtitle: 'Keep your data safe across devices',
+    description: 'Flow stores everything locally by default. Cloud sync backs up all data to Supabase so you never lose it and can access it from any device.',
     tips: [
-      { label: 'First sync', text: 'Click "Cloud" in the header → Test connection → once connected, click "Sync now". All your data pushes to the cloud.' },
-      { label: 'Auto-sync', text: 'Enable auto-sync in the Cloud panel. Flow syncs 5 seconds after any change, and pauses automatically if it detects connection issues.' },
-      { label: 'Backup file', text: 'Settings → Download Backup exports a local JSON file of all your data. Keep this as a manual safety net — store it in Google Drive or iCloud.' },
-      { label: 'Schema Repair', text: 'If you see sync errors about missing tables, go to Settings → Repair database schema. This creates any missing Supabase tables automatically.' },
+      { icon: '🔌', label: 'First sync', text: 'Click "Cloud" in the header → Test connection → once green, click "Sync now". All your data pushes to the cloud.' },
+      { icon: '⚡', label: 'Auto-sync', text: 'Enable auto-sync in the Cloud panel. Flow syncs 5 seconds after any change and pauses if it detects connection issues.' },
+      { icon: '💾', label: 'Local backup', text: 'Settings → Download Backup exports a JSON file. Store it in Google Drive or iCloud as an extra safety net.' },
     ],
   },
 ]
 
-// ── Chat component ──────────────────────────────────────────────────────────────
 type ChatMsg = { role: 'user' | 'assistant'; content: string }
 
 function GuideChat({ stepId }: { stepId: string }) {
@@ -159,128 +124,72 @@ function GuideChat({ stepId }: { stepId: string }) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [apiAvailable, setApiAvailable] = useState<boolean | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // Reset chat when step changes
-  useEffect(() => { setMsgs([]); setError(null) }, [stepId])
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [msgs, loading])
+  useEffect(() => { setMsgs([]) }, [stepId])
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [msgs])
 
   const send = useCallback(async (text: string) => {
     if (!text.trim() || loading) return
-    const question = text.trim()
-
-    // Try static FAQ first if API availability unknown or unavailable
+    const q = text.trim()
     if (apiAvailable === false) {
-      const faqAnswer = Object.entries(STATIC_FAQ).find(([q]) =>
-        question.toLowerCase().split(' ').some(w => w.length > 4 && q.toLowerCase().includes(w))
+      const faq = Object.entries(STATIC_FAQ).find(([k]) =>
+        q.toLowerCase().split(' ').some(w => w.length > 4 && k.toLowerCase().includes(w))
       )
-      setMsgs(prev => [
-        ...prev,
-        { role: 'user', content: question },
-        { role: 'assistant', content: faqAnswer ? faqAnswer[1] : 'I don\'t have a pre-written answer for that. Set up the ANTHROPIC_API_KEY in Vercel to enable AI-powered answers, or check the relevant tab in the app.' },
+      setMsgs(p => [...p,
+        { role: 'user', content: q },
+        { role: 'assistant', content: faq ? faq[1] : 'No pre-written answer — check the relevant app tab or enable AI in Vercel settings.' },
       ])
       setInput('')
       return
     }
-
-    const history: ChatMsg[] = [...msgs, { role: 'user', content: question }]
+    const history: ChatMsg[] = [...msgs, { role: 'user', content: q }]
     setMsgs(history)
     setInput('')
     setLoading(true)
-    setError(null)
-
-    const systemPrompt = `You are the built-in guide for Flow, a personal finance app. Answer concisely and practically in 2-4 sentences.
-
-Flow sections: Income (salary, take-home rate, side income), Budget (categories by type: Fixed Bill/Variable/Savings/Investment, monthly amounts), Accounts (checking/savings/credit/investment), Transactions (CSV import, auto-categorization rules), Savings Goals (target + deadline + contributions), Dashboard (health banner, actuals vs planned, insights), Cloud (Supabase sync, auto-sync, backup).
-
-Zyan's example: 17 categories, 7 accounts, 235 Apple Card transactions, 10 rules, 8 savings goals, ~82% take-home rate.
-
-Be direct. If unsure about specific user data, say so and point to the relevant tab.`
-
+    const system = `You are the setup guide for Flow, a personal finance app. Answer in 2-3 sentences, direct and practical. Topics: Income (salary, take-home), Budget (categories by type), Accounts (before importing), Transactions (CSV import, rules), Savings Goals (target + deadline), Dashboard (health, insights), Cloud (Supabase sync). Zyan's example: 17 categories, 7 accounts, 235 transactions, 10 rules, 8 goals, 82% take-home.`
     try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: history, systemOverride: systemPrompt }),
-      })
+      const res = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: history, systemOverride: system }) })
       const data = await res.json() as Record<string, unknown>
-      if (!res.ok) {
-        const errMsg = String(data.error ?? 'Chat failed')
-        if (errMsg.toLowerCase().includes('api_key') || errMsg.includes('not set') || res.status === 500) {
-          setApiAvailable(false)
-          // Retry with static FAQ
-          const faqAnswer = Object.entries(STATIC_FAQ).find(([q]) =>
-            question.toLowerCase().split(' ').some(w => w.length > 4 && q.toLowerCase().includes(w))
-          )
-          setMsgs([...msgs,
-            { role: 'user', content: question },
-            { role: 'assistant', content: '(AI not configured — using built-in answers)\n\n' + (faqAnswer ? faqAnswer[1] : 'No pre-written answer for that. Check the relevant app tab.') },
-          ])
-          setLoading(false)
-          return
-        }
-        throw new Error(errMsg)
-      }
+      if (!res.ok) { setApiAvailable(false); setMsgs([...msgs, { role: 'user', content: q }, { role: 'assistant', content: 'AI not configured — see the amber card in the Financial Assistant panel to set up a free Gemini key.' }]); setLoading(false); return }
       setApiAvailable(true)
-      const reply = String((data as {content?: string; message?: string}).content ?? (data as {message?: string}).message ?? '')
-      setMsgs([...history, { role: 'assistant', content: reply }])
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed')
-    } finally {
-      setLoading(false)
-    }
+      setMsgs([...history, { role: 'assistant', content: String(data.content ?? data.reply ?? '') }])
+    } catch { setMsgs([...msgs, { role: 'user', content: q }, { role: 'assistant', content: 'Connection error. Try again.' }]) }
+    setLoading(false)
   }, [msgs, loading, apiAvailable])
 
-  const quickQ = [
-    'How do I export Apple Card transactions?',
-    'What take-home rate should I use?',
-    'Savings vs Investment category — what\'s the difference?',
-    'How do I fix the "Attention Needed" banner?',
-    'How do auto-categorization rules work?',
-    'How do I add a savings goal?',
-  ]
+  const quickQ = ['How do I export Apple Card transactions?', 'What take-home rate should I use?', 'Savings vs Investment — what\'s the difference?', 'How do I fix the "Attention Needed" banner?']
 
   return (
     <div className="space-y-2">
-      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">
-        Questions {apiAvailable === false ? '(built-in answers)' : '(AI-powered)'}
+      <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest">
+        {apiAvailable === false ? 'Quick answers (built-in)' : 'Ask anything'}
       </p>
-
       {msgs.length === 0 && (
         <div className="flex flex-wrap gap-1.5">
           {quickQ.map(q => (
             <button key={q} onClick={() => send(q)}
-              className="text-[11px] px-2 py-1 rounded-lg bg-slate-700/60 hover:bg-slate-700 border border-slate-600/40 text-slate-300 transition-colors text-left">
+              className="text-[11px] px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700/60 text-slate-400 hover:text-slate-200 transition-all text-left leading-snug">
               {q}
             </button>
           ))}
         </div>
       )}
-
       {msgs.length > 0 && (
-        <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1">
+        <div className="space-y-1.5 max-h-28 overflow-y-auto pr-1">
           {msgs.map((m, i) => (
-            <div key={i} className={`text-xs rounded-lg px-2.5 py-1.5 leading-relaxed whitespace-pre-line ${
-              m.role === 'user' ? 'bg-blue-900/40 text-blue-100 ml-8' : 'bg-slate-700/40 text-slate-300 mr-8'
-            }`}>{m.content}</div>
+            <div key={i} className={`text-xs rounded-xl px-3 py-2 leading-relaxed whitespace-pre-line ${m.role === 'user' ? 'bg-blue-600/20 border border-blue-600/30 text-blue-100 ml-6' : 'bg-slate-800 border border-slate-700/40 text-slate-300 mr-6'}`}>{m.content}</div>
           ))}
-          {loading && <div className="text-xs text-slate-500 italic px-2.5">Thinking…</div>}
-          {error && <div className="text-xs text-red-400 px-2.5">{error}</div>}
+          {loading && <div className="text-xs text-slate-600 italic px-3 animate-pulse">Thinking…</div>}
           <div ref={bottomRef} />
         </div>
       )}
-
       <div className="flex gap-2">
-        <input type="text" value={input} onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && send(input)}
-          placeholder="Ask anything about setup…"
-          className="flex-1 text-xs px-2.5 py-1.5 rounded-lg bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200 placeholder-slate-600" />
+        <input type="text" value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && send(input)}
+          placeholder="Ask anything about setting up Flow…"
+          className="flex-1 text-xs px-3 py-2 rounded-xl bg-slate-800 border border-slate-700/40 focus:border-blue-500/60 focus:outline-none text-slate-200 placeholder-slate-600 transition-colors" />
         <button onClick={() => send(input)} disabled={!input.trim() || loading}
-          className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-xs text-white transition-colors flex-shrink-0">
+          className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-30 text-xs text-white transition-all font-medium flex-shrink-0">
           Ask
         </button>
       </div>
@@ -288,11 +197,7 @@ Be direct. If unsure about specific user data, say so and point to the relevant 
   )
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
-type Props = {
-  onClose: () => void
-  onNavigate: (tab: Tab) => void
-}
+type Props = { onClose: () => void; onNavigate: (tab: Tab) => void }
 
 export function OnboardingGuide({ onClose, onNavigate }: Props) {
   const [stepIdx, setStepIdx] = useState(0)
@@ -301,136 +206,144 @@ export function OnboardingGuide({ onClose, onNavigate }: Props) {
   const progress = ((stepIdx + 1) / STEPS.length) * 100
   const isLast = stepIdx === STEPS.length - 1
 
-  // Navigate app tab when step changes
-  useEffect(() => {
-    if (step.tab) onNavigate(step.tab)
-  }, [stepIdx])
+  useEffect(() => { if (step.tab) onNavigate(step.tab) }, [stepIdx])
 
-  const goNext = () => {
-    if (isLast) { onClose(); return }
-    setStepIdx(i => i + 1)
-  }
+  // Escape to close
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  const goNext = () => { if (isLast) { onClose(); return }; setStepIdx(i => i + 1) }
   const goPrev = () => setStepIdx(i => Math.max(0, i - 1))
 
   return (
     <>
-      {/* ── Spotlight overlay — dims everything outside main content ── */}
+      {/* Spotlight overlay */}
       <div className="fixed inset-0 z-40 pointer-events-none">
-        <div className="absolute inset-0"
-          style={{ background: 'radial-gradient(ellipse 80% 60% at 50% 40%, transparent 40%, rgba(15,23,42,0.65) 100%)' }}
-        />
+        <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse 85% 55% at 50% 38%, transparent 30%, rgba(2,6,23,0.7) 100%)' }} />
         {step.tab && (
-          /* Glowing ring around the app content area */
-          <div className="absolute left-3 right-3 top-[56px]"
-            style={{ bottom: panelExpanded ? '280px' : '52px' }}
-          >
-            <div className="w-full h-full rounded-2xl"
-              style={{ boxShadow: '0 0 0 2px rgba(99,179,237,0.5), 0 0 40px rgba(59,130,246,0.15)' }}
-            />
+          <div className="absolute left-3 right-3" style={{ top: '54px', bottom: panelExpanded ? '292px' : '56px', transition: 'bottom 0.3s ease' }}>
+            <div className="w-full h-full rounded-2xl" style={{ boxShadow: '0 0 0 1.5px rgba(99,179,237,0.4), 0 0 60px rgba(59,130,246,0.1), inset 0 0 30px rgba(59,130,246,0.03)' }} />
           </div>
         )}
       </div>
 
-      {/* ── Top bar: progress + step pills ── */}
-      <div className="fixed top-0 left-0 right-0 z-50 bg-slate-900/95 backdrop-blur-sm border-b border-slate-700/60 px-4 pt-2 pb-0">
-        {/* Progress bar */}
-        <div className="flex items-center gap-3 mb-2">
-          <div className="flex-1 h-1.5 bg-slate-700 rounded-full overflow-hidden">
-            <div className="h-full bg-blue-500 rounded-full transition-all duration-500"
-              style={{ width: `${progress}%` }} />
+      {/* Top bar */}
+      <div className="fixed top-0 left-0 right-0 z-50" style={{ background: 'rgba(9,11,20,0.96)', backdropFilter: 'blur(16px)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="flex items-center gap-3 px-4 pt-2.5 pb-1.5">
+          {/* Progress bar */}
+          <div className="flex-1 h-[3px] rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${progress}%`, background: 'linear-gradient(90deg, #3b82f6, #8b5cf6)' }} />
           </div>
-          <span className="text-[10px] text-slate-500 flex-shrink-0">
-            {stepIdx + 1} / {STEPS.length}
-          </span>
-          <button onClick={onClose}
-            className="text-slate-500 hover:text-slate-200 text-lg leading-none flex-shrink-0 ml-1">
-            ×
+          <span className="text-[10px] font-medium flex-shrink-0" style={{ color: 'rgba(148,163,184,0.6)' }}>{stepIdx + 1}/{STEPS.length}</span>
+          <button onClick={onClose} className="flex-shrink-0 w-5 h-5 flex items-center justify-center rounded-md transition-colors hover:bg-white/10" style={{ color: 'rgba(148,163,184,0.5)' }}>
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
           </button>
         </div>
-        {/* Step pills — scrollable */}
-        <div className="flex gap-1.5 overflow-x-auto scrollbar-none pb-2">
+        {/* Step pills */}
+        <div className="flex gap-1.5 px-4 pb-2 overflow-x-auto">
           {STEPS.map((s, i) => (
             <button key={s.id} onClick={() => setStepIdx(i)}
-              className={`flex-shrink-0 text-[10px] px-2.5 py-1 rounded-full border transition-colors whitespace-nowrap ${
-                i === stepIdx
-                  ? 'bg-blue-600 text-white border-blue-500'
-                  : i < stepIdx
-                  ? 'bg-emerald-900/40 text-emerald-400 border-emerald-700/40'
-                  : 'bg-slate-800 text-slate-500 border-slate-700/40'
-              }`}>
-              {i < stepIdx ? '✓ ' : ''}{s.emoji} {s.title}
+              className="flex-shrink-0 text-[10px] px-2.5 py-[5px] rounded-full transition-all whitespace-nowrap font-medium"
+              style={{
+                background: i === stepIdx ? 'rgba(59,130,246,0.2)' : i < stepIdx ? 'rgba(16,185,129,0.12)' : 'rgba(255,255,255,0.05)',
+                border: `1px solid ${i === stepIdx ? 'rgba(59,130,246,0.5)' : i < stepIdx ? 'rgba(16,185,129,0.3)' : 'rgba(255,255,255,0.08)'}`,
+                color: i === stepIdx ? '#93c5fd' : i < stepIdx ? '#6ee7b7' : 'rgba(148,163,184,0.5)',
+              }}>
+              {i < stepIdx ? '✓' : s.emoji} {s.title}
             </button>
           ))}
         </div>
       </div>
 
-      {/* ── Bottom guide panel ── */}
-      <div className={`fixed bottom-0 left-0 right-0 z-50 bg-slate-900/98 backdrop-blur-sm border-t-2 border-blue-500/40 rounded-t-2xl shadow-2xl transition-all duration-300 ${
-        panelExpanded ? 'h-72' : 'h-14'
-      }`}>
-        {/* Drag handle + title + expand toggle */}
-        <div className="flex items-center justify-between px-4 py-3 cursor-pointer select-none"
-          onClick={() => setPanelExpanded(v => !v)}>
-          <div className="flex items-center gap-2">
-            <span className="text-lg">{step.emoji}</span>
-            <div>
-              <p className="text-sm font-bold text-slate-100 leading-none">{step.title}</p>
-              <p className="text-[10px] text-slate-500 mt-0.5">{step.zyanSetup}</p>
+      {/* Bottom panel — flex column so nav is always pinned */}
+      <div className="fixed bottom-0 left-0 right-0 z-50 flex flex-col transition-all duration-300"
+        style={{
+          height: panelExpanded ? '292px' : '56px',
+          background: 'rgba(9,11,20,0.97)',
+          backdropFilter: 'blur(20px)',
+          borderTop: '1px solid rgba(255,255,255,0.07)',
+          borderRadius: '20px 20px 0 0',
+        }}>
+
+        {/* Panel header — always visible, click to collapse */}
+        <div className="flex items-center justify-between px-5 py-3.5 flex-shrink-0 cursor-pointer select-none" onClick={() => setPanelExpanded(v => !v)}>
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="text-base flex-shrink-0">{step.emoji}</span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold leading-none" style={{ color: '#f1f5f9' }}>{step.title}</p>
+              <p className="text-[11px] mt-0.5 truncate" style={{ color: 'rgba(148,163,184,0.5)' }}>{step.subtitle}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
             {step.tab && !panelExpanded && (
               <button onClick={e => { e.stopPropagation(); step.tab && onNavigate(step.tab) }}
-                className="text-[10px] px-2 py-1 rounded-md bg-slate-700 text-blue-300 hover:bg-slate-600 transition-colors">
-                → {step.tab}
+                className="text-[10px] px-2 py-1 rounded-lg transition-colors font-medium"
+                style={{ background: 'rgba(59,130,246,0.15)', border: '1px solid rgba(59,130,246,0.3)', color: '#93c5fd' }}>
+                Open {step.tab}
               </button>
             )}
-            <span className="text-slate-500 text-xs">{panelExpanded ? '▼' : '▲'}</span>
+            <div className="w-5 h-5 flex items-center justify-center rounded-md" style={{ color: 'rgba(148,163,184,0.4)' }}>
+              <svg width="10" height="6" viewBox="0 0 10 6" fill="none"><path d={panelExpanded ? 'M1 5l4-4 4 4' : 'M1 1l4 4 4-4'} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
           </div>
         </div>
 
-        {/* Expanded content */}
+        {/* Scrollable content — flex-1 so it fills space between header and nav */}
         {panelExpanded && (
-          <div className="px-4 overflow-y-auto" style={{ height: 'calc(100% - 56px)' }}>
-            <div className="space-y-3 pb-3">
-              <p className="text-xs text-slate-300 leading-relaxed">{step.description}</p>
+          <div className="flex-1 overflow-y-auto px-5 min-h-0">
+            <div className="space-y-3 pb-2">
+              <p className="text-xs leading-relaxed" style={{ color: 'rgba(203,213,225,0.8)' }}>{step.description}</p>
 
               {/* Tips */}
-              {step.tips.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
-                  {step.tips.map(tip => (
-                    <div key={tip.label} className="rounded-lg bg-slate-800/60 border border-slate-700/40 px-2.5 py-2">
-                      <p className="text-[10px] font-semibold text-blue-300 mb-0.5">{tip.label}</p>
-                      <p className="text-[11px] text-slate-400 leading-relaxed">{tip.text}</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                {step.tips.map(tip => (
+                  <div key={tip.label} className="rounded-xl p-2.5 flex gap-2.5"
+                    style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <span className="text-base flex-shrink-0 mt-0.5">{tip.icon}</span>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-semibold mb-0.5" style={{ color: '#93c5fd' }}>{tip.label}</p>
+                      <p className="text-[11px] leading-relaxed" style={{ color: 'rgba(148,163,184,0.7)' }}>{tip.text}</p>
                     </div>
-                  ))}
-                </div>
-              )}
+                  </div>
+                ))}
+              </div>
 
-              {/* AI Chat */}
-              <div className="border-t border-slate-700/60 pt-3">
+              {/* Chat */}
+              <div className="pt-2" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                 <GuideChat stepId={step.id} />
               </div>
+            </div>
+          </div>
+        )}
 
-              {/* Navigation */}
-              <div className="flex items-center justify-between border-t border-slate-700/60 pt-3 pb-1">
-                <button onClick={goPrev} disabled={stepIdx === 0}
-                  className="px-4 py-2 rounded-lg text-xs border border-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-800 disabled:opacity-30 disabled:cursor-default transition-colors">
-                  ← Back
+        {/* Navigation — PINNED TO BOTTOM, always visible */}
+        {panelExpanded && (
+          <div className="flex items-center justify-between px-5 py-3 flex-shrink-0"
+            style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+            <button onClick={goPrev} disabled={stepIdx === 0}
+              className="flex items-center gap-1.5 text-xs px-3.5 py-2 rounded-xl transition-all font-medium disabled:opacity-20"
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(148,163,184,0.8)' }}>
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M8 10L4 6l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              Back
+            </button>
+
+            <div className="flex items-center gap-2">
+              {step.tab && (
+                <button onClick={() => step.tab && onNavigate(step.tab)}
+                  className="text-xs px-3.5 py-2 rounded-xl transition-all font-medium"
+                  style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.25)', color: '#93c5fd' }}>
+                  Open {step.tab}
                 </button>
-                <div className="flex gap-2">
-                  {step.tab && (
-                    <button onClick={() => step.tab && onNavigate(step.tab)}
-                      className="px-3 py-2 rounded-lg text-xs border border-slate-700 text-blue-400 hover:bg-slate-800 transition-colors">
-                      Open {step.tab} →
-                    </button>
-                  )}
-                  <button onClick={goNext}
-                    className="px-4 py-2 rounded-lg text-xs bg-blue-600 hover:bg-blue-500 text-white transition-colors font-medium">
-                    {isLast ? '✓ Done' : 'Next →'}
-                  </button>
-                </div>
-              </div>
+              )}
+              <button onClick={goNext}
+                className="flex items-center gap-1.5 text-xs px-4 py-2 rounded-xl font-semibold transition-all"
+                style={{ background: isLast ? 'linear-gradient(135deg, #10b981, #059669)' : 'linear-gradient(135deg, #3b82f6, #6366f1)', color: 'white', boxShadow: isLast ? '0 0 20px rgba(16,185,129,0.3)' : '0 0 20px rgba(59,130,246,0.3)' }}>
+                {isLast ? '✓ Done' : 'Next'}
+                {!isLast && <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+              </button>
             </div>
           </div>
         )}
