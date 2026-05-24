@@ -8,6 +8,25 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V30',
+    date: '5/24/2026 at 8:00 AM',
+    what: [
+      'Version badge fixed — now opens an anchored popover below the badge, not a fullscreen modal. Click anywhere outside to close. Works at all screen sizes.',
+      'Dashboard tab now scrolls to top on every tab change — no more landing in the middle of the page.',
+      'Financial Assistant send button no longer scrolls the page — uses block:nearest scroll so only the chat scrolls, not the viewport.',
+      'PersonalPreloadCard is now guest-safe — unauthenticated visitors see only a brief teaser and a disabled button. No sensitive data visible until signed in.',
+      'Income tab auto-focus removed — keyboard tab navigation now works across all sections without being hijacked.',
+      'Gemini Flash is the financial assistant AI — add GEMINI_API_KEY from aistudio.google.com to Vercel env vars for free AI (1M tokens/day).',
+    ],
+    test: [
+      'Click the V30 badge → small popover appears below it. Click anywhere outside → closes. Press Escape → closes.',
+      'Click Dashboard in sidebar → page should snap to top',
+      'Financial Assistant → type and send → page should NOT scroll',
+      'Sign out → Dashboard → Personal Starter Data section shows disabled button only, no transaction counts or categories',
+      'Go to Income tab → no input should auto-focus → keyboard Tab key should work normally',
+    ],
+  },
+  {
     version: 'V29',
     date: '5/24/2026 at 2:00 AM',
     what: [
