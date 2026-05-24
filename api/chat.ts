@@ -1,29 +1,129 @@
+/**
+ * api/chat.ts — V25
+ *
+ * Unified chat endpoint supporting Gemini Flash (free, preferred) and
+ * Anthropic Claude (fallback). Handles systemOverride for guide-specific prompts.
+ *
+ * Required: ONE of these in Vercel env vars:
+ *   GEMINI_API_KEY      — from aistudio.google.com (free, 1M tokens/day)
+ *   ANTHROPIC_API_KEY   — from console.anthropic.com (paid)
+ *
+ * If both are set, Gemini is used. If neither is set, returns a clear setup error.
+ */
+
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set. Add it to Vercel environment variables.' })
-  const { messages, context } = req.body ?? {}
-  if (!messages || !Array.isArray(messages)) return res.status(400).json({ error: 'messages array required' })
-  const system = [
+
+  const geminiKey   = process.env.GEMINI_API_KEY
+  const anthropicKey = process.env.ANTHROPIC_API_KEY
+
+  if (!geminiKey && !anthropicKey) {
+    return res.status(500).json({
+      error:
+        'AI assistant not configured. Add GEMINI_API_KEY (free at aistudio.google.com) or ' +
+        'ANTHROPIC_API_KEY to your Vercel environment variables.',
+    })
+  }
+
+  const { messages, context, systemOverride } = req.body ?? {}
+  if (!messages || !Array.isArray(messages)) {
+    return res.status(400).json({ error: 'messages array required' })
+  }
+
+  // Default system prompt for the financial assistant
+  const defaultSystem = [
     'You are a personal finance assistant built into the Flow app.',
     'You have the user\'s real financial data below. Answer in 2-4 sentences unless more detail is asked.',
     'Always use real numbers. Be direct and actionable.',
-    'If data is missing/zero, say so and explain what the user needs to set up.',
-    '', '--- FINANCIAL DATA ---', JSON.stringify(context, null, 2), '--- END ---', '',
-    'Common questions: "Can I afford X?" (compare to safeToSpend/surplus), "Why budget over income?" (explain gap),',
-    '"How much to save?" (use goals+deadlines), "What to cut?" (suggest highest over-budget variable categories).',
+    'If data is missing or zero, say so and explain what the user needs to set up.',
+    '',
+    '--- FINANCIAL DATA ---',
+    JSON.stringify(context ?? {}, null, 2),
+    '--- END ---',
+    '',
+    'Common questions: "Can I afford X?" → compare to safeToSpend/surplus.',
+    '"Why is my budget over income?" → explain the gap between budget total and income.',
+    '"How much should I save?" → use goals with deadlines.',
+    '"What should I cut?" → suggest highest over-budget variable categories.',
   ].join('\n')
-  try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 1024, system, messages }),
-    })
-    const data = await r.json()
-    if (!r.ok) return res.status(r.status).json({ error: data?.error?.message ?? 'Anthropic API error' })
-    const text = Array.isArray(data.content) ? data.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n') : ''
-    return res.status(200).json({ reply: text })
-  } catch (err) {
-    return res.status(500).json({ error: err instanceof Error ? err.message : 'Unknown error' })
+
+  // systemOverride replaces the default prompt (used by OnboardingGuide)
+  const system = typeof systemOverride === 'string' && systemOverride.length > 0
+    ? systemOverride
+    : defaultSystem
+
+  // ── Gemini Flash (preferred — free tier) ────────────────────────────────────
+  if (geminiKey) {
+    try {
+      const geminiMessages = messages.map((m: { role: string; content: string }) => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }],
+      }))
+
+      const r = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: system }] },
+            contents: geminiMessages,
+            generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
+          }),
+        },
+      )
+
+      const data = await r.json() as Record<string, unknown>
+
+      if (!r.ok) {
+        const errMsg = (data as { error?: { message?: string } }).error?.message ?? `Gemini error ${r.status}`
+        // If Gemini fails and Anthropic is available, fall through
+        if (!anthropicKey) return res.status(r.status).json({ error: errMsg })
+        // else fall through to Anthropic below
+      } else {
+        const candidates = (data as { candidates?: { content?: { parts?: { text?: string }[] } }[] }).candidates
+        const text = candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+        return res.status(200).json({ content: text })
+      }
+    } catch (err) {
+      if (!anthropicKey) {
+        return res.status(500).json({ error: err instanceof Error ? err.message : 'Gemini request failed' })
+      }
+      // Fall through to Anthropic
+    }
   }
+
+  // ── Anthropic Claude (fallback) ─────────────────────────────────────────────
+  if (anthropicKey) {
+    try {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': anthropicKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1024,
+          system,
+          messages,
+        }),
+      })
+      const data = await r.json() as Record<string, unknown>
+      if (!r.ok) {
+        const errMsg = (data as { error?: { message?: string } }).error?.message ?? 'Anthropic API error'
+        return res.status(r.status).json({ error: errMsg })
+      }
+      const content = data.content as { type: string; text: string }[]
+      const text = Array.isArray(content)
+        ? content.filter(b => b.type === 'text').map(b => b.text).join('\n')
+        : ''
+      return res.status(200).json({ content: text })
+    } catch (err) {
+      return res.status(500).json({ error: err instanceof Error ? err.message : 'Anthropic request failed' })
+    }
+  }
+
+  return res.status(500).json({ error: 'No AI provider configured.' })
 }
