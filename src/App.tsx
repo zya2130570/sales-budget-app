@@ -2515,10 +2515,12 @@ txnMerchantRef.current?.focus()
       <Sidebar
         currentTab={tab}
         onNavigate={setTab}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => setSettingsOpen(v => !v)}
         onOpenProfile={() => setProfileOpenSignal(v => v + 1)}
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed(v => !v)}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
 
       {/* Single inner container with dynamic left margin */}
@@ -2649,7 +2651,7 @@ txnMerchantRef.current?.focus()
             )}
 
             {/* ── V7.3 Dashboard Status Banner ── */}
-            <DashboardStatusBanner status={dashboardStatus} />
+            <DashboardStatusBanner status={dashboardStatus} theme={theme} />
 
             {/* ── Action Cards ── */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -5430,12 +5432,14 @@ txnMerchantRef.current?.focus()
 
 // ── V7.3 Dashboard Status Banner ─────────────────────────────────────────────
 
-function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
-  const toneStyles: Record<string, { border: string; bg: string; labelColor: string; dot: string; badgeBg: string; badgeText: string; badgeBorder: string; signal: string }> = {
+function DashboardStatusBanner({ status, theme }: { status: DashboardStatus; theme: 'dark' | 'light' }) {
+  const toneStyles: Record<string, { border: string; bg: string; bgLight: string; labelColor: string; labelColorLight: string; dot: string; badgeBg: string; badgeText: string; badgeBorder: string; signal: string }> = {
     excellent: {
       border: 'border-emerald-500/60',
       bg: 'bg-slate-800/85',
+      bgLight: 'bg-gradient-to-br from-emerald-50 via-white to-emerald-100/70',
       labelColor: 'text-emerald-300',
+      labelColorLight: 'text-emerald-800',
       dot: 'bg-emerald-400',
       badgeBg: 'bg-emerald-900/60', badgeText: 'text-emerald-300', badgeBorder: 'border-emerald-500/40',
       signal: 'All signals clear',
@@ -5443,7 +5447,9 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
     good: {
       border: 'border-green-500/50',
       bg: 'bg-slate-800/85',
+      bgLight: 'bg-gradient-to-br from-green-50 via-white to-green-100/70',
       labelColor: 'text-green-300',
+      labelColorLight: 'text-green-800',
       dot: 'bg-green-400',
       badgeBg: 'bg-green-900/60', badgeText: 'text-green-300', badgeBorder: 'border-green-500/40',
       signal: 'On track',
@@ -5451,7 +5457,9 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
     warn: {
       border: 'border-yellow-500/50',
       bg: 'bg-slate-800/85',
+      bgLight: 'bg-gradient-to-br from-amber-50 via-white to-yellow-100/80',
       labelColor: 'text-yellow-300',
+      labelColorLight: 'text-amber-800',
       dot: 'bg-yellow-400',
       badgeBg: 'bg-yellow-900/60', badgeText: 'text-yellow-300', badgeBorder: 'border-yellow-500/40',
       signal: 'Worth watching',
@@ -5459,7 +5467,9 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
     risk: {
       border: 'border-orange-500/50',
       bg: 'bg-slate-800/85',
+      bgLight: 'bg-gradient-to-br from-orange-50 via-white to-amber-100/80',
       labelColor: 'text-orange-300',
+      labelColorLight: 'text-orange-800',
       dot: 'bg-orange-400',
       badgeBg: 'bg-orange-900/60', badgeText: 'text-orange-300', badgeBorder: 'border-orange-500/40',
       signal: 'Needs attention',
@@ -5467,26 +5477,29 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
     danger: {
       border: 'border-red-500/60',
       bg: 'bg-slate-800/85',
+      bgLight: 'bg-gradient-to-br from-red-50 via-white to-orange-100/80',
       labelColor: 'text-red-300',
+      labelColorLight: 'text-red-800',
       dot: 'bg-red-400',
       badgeBg: 'bg-red-900/60', badgeText: 'text-red-300', badgeBorder: 'border-red-500/40',
       signal: 'Action required',
     },
   }
   const s = toneStyles[status.tone] ?? toneStyles.warn
+  const isLight = theme === 'light'
   return (
-    <div className={`rounded-2xl border ${s.border} ${s.bg} shadow-lg p-4 md:p-5`}>
+    <div className={`rounded-2xl border ${s.border} ${isLight ? s.bgLight : s.bg} shadow-lg p-4 md:p-5`}>
       <div className="flex items-start gap-3">
         <span className={`mt-1.5 shrink-0 h-2.5 w-2.5 rounded-full ${s.dot}`} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1.5">
-            <div className={`text-xl font-bold tracking-tight ${s.labelColor}`}>{status.label}</div>
+            <div className={`text-xl font-bold tracking-tight ${isLight ? s.labelColorLight : s.labelColor}`}>{status.label}</div>
             <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${s.badgeBg} ${s.badgeText} ${s.badgeBorder}`}>
               {s.signal}
             </span>
           </div>
           {/* V26: Dollar sign via CSS ::before — cannot be stripped by browser extensions */}
-          <p className="text-sm text-slate-200 leading-relaxed">
+          <p className={`${isLight ? "text-slate-800" : "text-slate-200"} text-sm leading-relaxed`}>
             {status.explanation.split(/(\$[\d,]+\.\d{2})/g).map((part, i) =>
               /^\$[\d,]+\.\d{2}$/.test(part)
                 ? <span key={i} className="flow-dollar">{part.slice(1)}</span>
@@ -5494,7 +5507,7 @@ function DashboardStatusBanner({ status }: { status: DashboardStatus }) {
             )}
           </p>
           {status.context && (
-            <p className="mt-2 text-xs text-slate-400 leading-relaxed border-t border-slate-700/60 pt-2">{status.context}</p>
+            <p className={`mt-2 text-xs leading-relaxed border-t pt-2 ${isLight ? "text-slate-600 border-slate-300/80" : "text-slate-400 border-slate-700/60"}`}>{status.context}</p>
           )}
         </div>
       </div>
