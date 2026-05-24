@@ -8,6 +8,28 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V32',
+    date: '5/24/2026 at 6:00 PM',
+    what: [
+      '"Monthly Gross Profit" renamed to "Monthly Gross Income" throughout — Income tab, Dashboard, Scenarios. Profit is a business term; this is personal finance.',
+      'Financial Assistant panel is now collapsible — click "▲ Hide" to minimize the chat, "▼ Show" to expand. State is per-session.',
+      'Budget category search — type to filter categories instantly. Appears next to the All / Over Budget / No Activity filter pills.',
+      'Budget search filter applied to the category table — only matching rows render.',
+      'Tab change clears input focus — switching tabs now blurs any active input so text stays unselected and keyboard shortcuts (1-7) work immediately.',
+      'Guest mode tooltip — hovering "Guest mode" now shows a description: local = browser only, sign in = cross-device sync.',
+      'Cmd+S (⌘S / Ctrl+S) syncs to cloud from anywhere, including while typing.',
+      'Sidebar onSync prop wired — sidebar keyboard handler owns the Cmd+S shortcut cleanly.',
+    ],
+    test: [
+      'Income tab → label should say "Monthly Gross Income", not "Gross Profit"',
+      'Dashboard → Financial Assistant → click "▲ Hide" → panel collapses. Click "▼ Show" → expands.',
+      'Budget tab → type in search box → category list filters instantly. Clear with ✕.',
+      'Navigate from Accounts to Budget → no input should remain highlighted/focused',
+      'Sign out → hover "Guest mode" text → tooltip explains local vs cloud',
+      'Press Cmd+S anywhere → cloud sync triggers (check cloud status button for activity)',
+    ],
+  },
+  {
     version: 'V31.3',
     date: '5/24/2026',
     what: [
