@@ -1,10 +1,45 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
+
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 export type AIAssistantStatus = 'idle' | 'loading' | 'error'
+
+const AI_CHAT_HISTORY_KEY = 'flow_ai_chat_history_v1'
+
+function loadStoredMessages(): ChatMessage[] {
+  try {
+    const raw = localStorage.getItem(AI_CHAT_HISTORY_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .filter((m): m is ChatMessage =>
+        m &&
+        (m.role === 'user' || m.role === 'assistant') &&
+        typeof m.content === 'string'
+      )
+      .slice(-30)
+  } catch {
+    return []
+  }
+}
+
+function saveStoredMessages(messages: ChatMessage[]) {
+  try {
+    localStorage.setItem(AI_CHAT_HISTORY_KEY, JSON.stringify(messages.slice(-30)))
+  } catch {
+    // localStorage may be unavailable in private mode; chat still works for the session.
+  }
+}
+
 export function useAIAssistant() {
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>(() => loadStoredMessages())
   const [status, setStatus] = useState<AIAssistantStatus>('idle')
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    saveStoredMessages(messages)
+  }, [messages])
+
   const sendMessage = useCallback(async (userText: string, context: Record<string, unknown>) => {
     if (!userText.trim()) return
     const newMessages: ChatMessage[] = [...messages, { role: 'user', content: userText.trim() }]
@@ -27,6 +62,13 @@ export function useAIAssistant() {
       setMessages(messages)
     }
   }, [messages])
-  const clearHistory = useCallback(() => { setMessages([]); setError(null); setStatus('idle') }, [])
+
+  const clearHistory = useCallback(() => {
+    setMessages([])
+    saveStoredMessages([])
+    setError(null)
+    setStatus('idle')
+  }, [])
+
   return { messages, status, error, sendMessage, clearHistory }
 }
