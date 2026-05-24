@@ -4831,7 +4831,7 @@ export const ZYAN_PERSONAL_PRELOAD: PersonalPreloadData = {
     },
     {
       "id": "rule-school",
-      "name": "School",
+      "name": "Tuition",
       "matchText": "Scottsdale Cc, Scottsdale Comm Clg",
       "matchField": "merchant",
       "categoryId": "cat-school",

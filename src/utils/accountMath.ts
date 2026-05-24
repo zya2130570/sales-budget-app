@@ -23,17 +23,23 @@ export type NetWorthSummary = {
  */
 export function computeNetWorth(
   accounts: Account[],
-  computedBalances: Record<string, number>,
+  _computedBalances?: Record<string, number>,
 ): NetWorthSummary {
   let totalCash = 0, totalDebt = 0, totalInvestments = 0
   for (const acct of accounts) {
-    const computedBal = computedBalances[acct.id] ?? acct.balance
+    // Net worth should reflect the current balances the user entered or restored.
+    // Imported transaction history is useful for review/reconciliation, but it can
+    // be incomplete when only one account source has been imported. Using tracked
+    // activity here made cash look artificially negative when Apple Card history
+    // existed but Chase/Ally income history did not.
+    const currentBalance = Number(acct.balance) || 0
+
     if (acct.type === 'credit card') {
-      totalDebt += Math.abs(Math.min(0, acct.balance))
+      totalDebt += Math.abs(Math.min(0, currentBalance))
     } else if (acct.type === 'investment' || acct.type === 'roth ira' || acct.type === 'retirement') {
-      totalInvestments += Math.max(0, computedBal)
+      totalInvestments += Math.max(0, currentBalance)
     } else {
-      totalCash += computedBal
+      totalCash += currentBalance
     }
   }
   return { totalCash, totalDebt, totalInvestments, netWorth: totalCash + totalInvestments - totalDebt }
@@ -45,6 +51,10 @@ export type BalanceCheckEntry = {
   trackedActivity: number
   unexplained: number
   isMatched: boolean
+  /** True only after the user explicitly reconciles this account.
+   * Until then, transaction history may be partial, so unexplained gaps should
+   * not be treated as errors. */
+  hasReconciliationBaseline: boolean
 }
 
 /**
@@ -95,12 +105,30 @@ export function computeBalanceCheckData(
   const result: Record<string, BalanceCheckEntry> = {}
   for (const acct of accounts) {
     const trackedActivity = deltas[acct.id] ?? 0
-    const currentAmt = acct.type === 'credit card' ? Math.abs(acct.balance) : acct.balance
-    const unexplained = currentAmt - trackedActivity
+    const hasReconciliationBaseline = Boolean(acct.lastReconciledAt)
+
+    // Only compare against a baseline after the user explicitly reconciles the
+    // account. Before that, the app may only have partial history, for example
+    // Apple Card spending without Chase/Ally paycheck deposits.
+    let unexplained = 0
+    if (hasReconciliationBaseline) {
+      if (acct.type === 'credit card') {
+        const currentDebt = Math.abs(Math.min(0, acct.balance))
+        const startingDebt = Math.abs(Math.min(0, acct.startingBalance ?? acct.balance))
+        const expectedDebt = startingDebt + trackedActivity
+        unexplained = currentDebt - expectedDebt
+      } else {
+        const startingBalance = acct.startingBalance ?? acct.balance
+        const expectedBalance = startingBalance + trackedActivity
+        unexplained = acct.balance - expectedBalance
+      }
+    }
+
     result[acct.id] = {
       trackedActivity,
       unexplained,
-      isMatched: Math.abs(unexplained) <= RECON_THRESHOLD,
+      hasReconciliationBaseline,
+      isMatched: !hasReconciliationBaseline || Math.abs(unexplained) <= RECON_THRESHOLD,
     }
   }
   return result
