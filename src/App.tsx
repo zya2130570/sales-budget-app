@@ -126,6 +126,9 @@ import { OnboardingGuide } from './components/OnboardingGuide'
 import { CommandPalette } from './components/CommandPalette'
 import { Sidebar } from './components/Sidebar'
 import { CloudStatusButton } from './components/CloudStatusButton'
+import { AIChatDrawer } from './components/AIChatDrawer'
+import { BreakdownEditor } from './components/BreakdownEditor'
+import type { BreakdownItem } from './types'
 import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
 import { ConflictResolutionModal } from './components/ConflictResolutionModal'
 import { useCloudPersistence } from './hooks/useCloudPersistence'
@@ -746,6 +749,12 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [onboardingGuideOpen, setOnboardingGuideOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [aiChatOpen, setAiChatOpen] = useState(false)  // V33 — persistent AI chat
+  // V33 — category breakdowns stored locally (not synced)
+  const [breakdowns, setBreakdowns] = useState<Record<string, BreakdownItem[]>>(() => {
+    try { return JSON.parse(localStorage.getItem('flow_breakdowns') ?? '{}') } catch { return {} }
+  })
+  const [breakdownEditId, setBreakdownEditId] = useState<string | null>(null)
   const [profileOpenSignal, setProfileOpenSignal] = useState(0)
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false)
   // V22 — dark/light theme
@@ -2528,6 +2537,7 @@ txnMerchantRef.current?.focus()
         theme={theme}
         onToggleTheme={toggleTheme}
         onSync={() => cloudPersistence.syncNow()}
+        onOpenAIChat={() => setAiChatOpen(true)}
       />
 
       {/* Single inner container with dynamic left margin */}
@@ -2550,6 +2560,7 @@ txnMerchantRef.current?.focus()
               : <AuthPanel />
             }
             <CloudStatusButton
+              theme={theme}
               status={cloudPersistence.status}
               canSync={cloudPersistence.canSync}
               connectionTested={cloudPersistence.connectionTested}
@@ -2571,6 +2582,25 @@ txnMerchantRef.current?.focus()
 
         {/* Main content — max-width constraint + padding */}
         <div className="max-w-5xl mx-auto px-5 py-5 space-y-4">
+
+      {/* V33 — Persistent AI chat drawer */}
+      <AIChatDrawer open={aiChatOpen} onClose={() => setAiChatOpen(false)} />
+
+      {/* V33 — Breakdown editor modal */}
+      {breakdownEditId && (() => {
+        const cat = categories.find(c => c.id === breakdownEditId)
+        if (!cat) return null
+        return (
+          <BreakdownEditor
+            key={breakdownEditId}
+            categoryName={cat.name}
+            categoryAmount={cat.amount}
+            items={breakdowns[breakdownEditId] ?? []}
+            onSave={items => setBreakdowns(prev => ({ ...prev, [breakdownEditId]: items }))}
+            onClose={() => setBreakdownEditId(null)}
+          />
+        )
+      })()}
 
       {cloudPersistence.pendingConflicts.length > 0 && (
         <ConflictResolutionModal
@@ -3753,6 +3783,12 @@ txnMerchantRef.current?.focus()
                             setTimeout(() => { inlineCatAmountRef.current?.focus(); inlineCatAmountRef.current?.select() }, 0)
                           }}>Edit</button>
                           <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); addPendingDelete('categories', c.id); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
+                          {/* V33 — Breakdown group */}
+                          <button
+                            onClick={() => setBreakdownEditId(c.id)}
+                            className={`text-[10px] px-1.5 py-0.5 rounded border transition-colors ${ breakdowns[c.id]?.length ? 'text-violet-300 bg-violet-900/20 border-violet-700/30' : 'text-slate-600 border-slate-700/30 hover:text-slate-400'}`}
+                            title={breakdowns[c.id]?.length ? `Edit ${breakdowns[c.id].length} breakdown items` : 'Add breakdown'}
+                          >{breakdowns[c.id]?.length ? `${breakdowns[c.id].length} items` : '+ Group'}</button>
                           {/* V9.11 — Rollover toggle */}
                           <button
                             title={categoryRollovers[c.id]
@@ -3776,18 +3812,24 @@ txnMerchantRef.current?.focus()
                     return (
                       <>
                         {normalRow}
-                        {billsToMomBudgetOpen && (
+                        {/* V33 — Generalized breakdown: show for Bills to Mom (legacy) OR any category with breakdown data */}
+                        {(billsToMomBudgetOpen && breakdowns[c.id]?.length > 0) && (
                           <tr className="border-b border-slate-800 bg-slate-900/40">
                             <td colSpan={8} className="py-2 pl-6 pr-2">
-                              <div className="rounded-xl border border-slate-700 bg-slate-950/40 p-3">
+                              <div className="rounded-xl border border-violet-700/30 bg-violet-950/10 p-3">
                                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                                  <div className="text-xs font-semibold text-slate-200">Bills to Mom breakdown</div>
-                                  <div className="text-[11px] text-slate-400">Rounded to {currency(300)} monthly. Priority: increase this over time when extra money is available.</div>
+                                  <div className="text-xs font-semibold text-slate-200">{c.name} breakdown</div>
+                                  <div className="flex items-center gap-2">
+                                    <div className="text-[11px] text-slate-400">
+                                      Total: {currency(breakdowns[c.id].reduce((s, i) => s + i.amount, 0))}/mo
+                                    </div>
+                                    <button onClick={() => setBreakdownEditId(c.id)} className="text-[10px] text-violet-400 hover:text-violet-300 px-1.5 py-0.5 rounded border border-violet-700/30 transition-colors">Edit</button>
+                                  </div>
                                 </div>
                                 <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-                                  {ZYAN_PERSONAL_PRELOAD.billsToMomBreakdown.map(item => (
-                                    <div key={item.name} className="rounded-lg border border-slate-700 bg-slate-800/70 p-2">
-                                      <div className="text-[11px] text-slate-400">{item.name}</div>
+                                  {breakdowns[c.id].map(item => (
+                                    <div key={item.id} className="rounded-lg border border-slate-700 bg-slate-800/70 p-2">
+                                      <div className="text-[11px] text-slate-400">{item.label}</div>
                                       <div className="text-sm font-semibold text-slate-100">{currency(item.amount)}</div>
                                     </div>
                                   ))}
