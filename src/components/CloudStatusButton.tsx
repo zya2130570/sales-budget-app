@@ -112,10 +112,12 @@ export function CloudStatusButton(props: SyncProps & { theme?: 'dark' | 'light';
   const [open, setOpen] = useState(false)
   const panelRef = useRef<HTMLDivElement>(null)
 
-  // V34 — open from external trigger (Ctrl+S)
+  // V38 — Ctrl+S toggles: externalOpenSignal is a counter that bumps on each Ctrl+S press
   useEffect(() => {
-    if (props.externalOpen) setOpen(true)
-  }, [props.externalOpen])
+    if (!props.externalOpenSignal) return
+    setOpen(v => !v)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.externalOpenSignal])
 
   // V34 — when open closes, notify parent
   useEffect(() => {
@@ -139,15 +141,6 @@ export function CloudStatusButton(props: SyncProps & { theme?: 'dark' | 'light';
   const cs = useCloudSync()
   const busy = props.status === 'syncing' || props.status === 'testing' || cs.loading || cs.restoring
 
-
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [open])
 
   const handleSchemaRepair = async () => {
     setRepairingSchema(true)
