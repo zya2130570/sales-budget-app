@@ -71,7 +71,7 @@ function ConflictCard({ conflict, resolution, onPick }: ConflictCardProps) {
           <p className="text-slate-500 text-[10px]">{formatTs(conflict.cloudUpdatedAt)}</p>
           {conflict.fields.map(f => (
             <div key={f.label}>
-              <span className="text-slate-500">{f.label}: </span>
+              <span className="text-slate-500">{f.label}{f.label === "Amount" ? " (weekly)" : ""}: </span>
               <span className="text-slate-200">{f.cloudValue}</span>
             </div>
           ))}

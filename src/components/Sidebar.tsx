@@ -63,6 +63,7 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
       if (e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === '[') { onToggle(); return }
       if (e.key === '0') { e.preventDefault(); onOpenSettings(); return }
+      if (e.key === '8') { e.preventDefault(); onOpenAIChat?.(); return }
       if (e.key === '.') { e.preventDefault(); onOpenProfile?.(); return }
       if ((e.key === '?' || (e.shiftKey && e.key === '/')) && onOpenKeyboardShortcuts) { e.preventDefault(); onOpenKeyboardShortcuts(); return }
       if (e.key.toLowerCase() === 't' && onToggleTheme) { e.preventDefault(); onToggleTheme(); return }
@@ -212,7 +213,12 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
             onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.45)'}
           >
             <span style={{ fontSize: 14, flexShrink: 0 }}>✦</span>
-            {!collapsed && <span>AI Assistant</span>}
+            {!collapsed && (
+              <>
+                <span style={{ flex: 1 }}>AI Assistant</span>
+                <kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>8</kbd>
+              </>
+            )}
           </button>
         )}
 
