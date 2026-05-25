@@ -3,7 +3,6 @@
  * Step 1 of the import flow: choose your bank and see export instructions.
  * Shown at the top of CsvImportModal before file upload.
  */
-import type { BankTemplate } from '../utils/csv'
 import { BANK_TEMPLATES } from '../utils/csv'
 import type { ImportPreset } from '../types'
 
