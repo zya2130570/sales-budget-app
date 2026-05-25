@@ -251,6 +251,8 @@ function parsePdfText(raw: string): { rows: PdfImportRow[]; warning: string } {
 
   return { rows, warning }
 }
+// Reserved for the upcoming AI PDF parsing fallback flow. Do not remove; this keeps the parser available while the UI wiring is being completed.
+void parsePdfText
 
 // ── V9.7 Recurring detection ──────────────────────────────────────────────────
 // RecurringCadence and ManualRecurringItem types imported from forecastMath.ts
