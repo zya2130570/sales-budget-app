@@ -755,6 +755,27 @@ export default function App() {
     try { return JSON.parse(localStorage.getItem('flow_breakdowns') ?? '{}') } catch { return {} }
   })
   const [breakdownEditId, setBreakdownEditId] = useState<string | null>(null)
+
+  // V33.1: Persist breakdowns to localStorage when they change
+  useEffect(() => {
+    localStorage.setItem('flow_breakdowns', JSON.stringify(breakdowns))
+  }, [breakdowns])
+
+  // V33.1: Seed Bills to Mom breakdown from preload data (.name not .label)
+  useEffect(() => {
+    const btmCat = categories.find(c => c.name === 'Bills to Mom')
+    if (btmCat && !breakdowns[btmCat.id] && ZYAN_PERSONAL_PRELOAD.billsToMomBreakdown?.length) {
+      setBreakdowns(prev => ({
+        ...prev,
+        [btmCat.id]: ZYAN_PERSONAL_PRELOAD.billsToMomBreakdown.map(
+          (item: { name: string; amount: number }, i: number) => ({
+            id: `btm-${i}`, label: item.name, amount: item.amount
+          })
+        )
+      }))
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [categories.length])
   const [profileOpenSignal, setProfileOpenSignal] = useState(0)
   const [keyboardShortcutsOpen, setKeyboardShortcutsOpen] = useState(false)
   // V22 — dark/light theme
@@ -2596,6 +2617,8 @@ txnMerchantRef.current?.focus()
             categoryName={cat.name}
             categoryAmount={cat.amount}
             items={breakdowns[breakdownEditId] ?? []}
+            allCategories={categories}
+            excludeCategoryId={breakdownEditId}
             onSave={items => setBreakdowns(prev => ({ ...prev, [breakdownEditId]: items }))}
             onClose={() => setBreakdownEditId(null)}
           />
