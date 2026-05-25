@@ -2050,7 +2050,7 @@ txnMerchantRef.current?.focus()
       // Detect / normalize format based on preset or auto-detection
       const firstLine = text.split('\n')[0] ?? ''
       const isApple = csvImportPreset === 'apple-card' || (csvImportPreset === 'auto' && detectAppleCard(firstLine))
-      const isPdfPreset = csvImportPreset === 'chase-pdf-experimental'
+      const isPdfPreset = false // V36: All PDFs now use AI parsing via /api/parse-pdf
       setCsvIsAppleCard(isApple)
       const processedText = isApple ? normalizeAppleCardHeaders(text) : text
 
@@ -2091,28 +2091,57 @@ txnMerchantRef.current?.focus()
     setCsvImportError('')
     setCsvImportIsPdf(true)
     setCsvImportPreview(null)
+
+    // V36 — AI-powered PDF parsing via Gemini (replaces brittle text extraction)
     const reader = new FileReader()
-    reader.onload = ev => {
-      const text = ev.target?.result
-      if (typeof text !== 'string') { setCsvImportError('Could not read PDF.'); setCsvImportLoading(false); return }
-      const { rows, warning } = parsePdfText(text)
-      const effectiveAccountId = csvImportAccountId || (accounts[0]?.id ?? '')
-      const existingForAccount = transactions.filter(tx => tx.accountId === effectiveAccountId)
-      // Mark duplicate rows
-      const marked = rows.map(r => ({
-        ...r,
-        isDup: existingForAccount.some(tx =>
-          tx.date === r.date &&
-          tx.merchant.toLowerCase() === r.merchant.toLowerCase() &&
-          tx.amount === r.amount
-        ),
-      }))
-      setPdfPreviewRows(marked)
-      setPdfParseWarning(warning)
-      setCsvImportLoading(false)
+    reader.onload = async ev => {
+      try {
+        const dataUrl = ev.target?.result as string
+        if (!dataUrl) { setCsvImportError('Could not read PDF file.'); setCsvImportLoading(false); return }
+
+        // Strip the data URL prefix to get raw base64
+        const base64 = dataUrl.split(',')[1]
+        if (!base64) { setCsvImportError('Could not encode PDF.'); setCsvImportLoading(false); return }
+
+        const response = await fetch('/api/parse-pdf', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pdfBase64: base64 }),
+        })
+
+        const result = await response.json() as { transactions?: any[]; error?: string; count?: number }
+
+        if (result.error) {
+          setCsvImportError(result.error)
+          setCsvImportLoading(false)
+          return
+        }
+
+        const parsed = result.transactions ?? []
+        const effectiveAccountId = csvImportAccountId || (accounts[0]?.id ?? '')
+        const existingForAccount = transactions.filter(tx => tx.accountId === effectiveAccountId)
+
+        const marked = parsed.map((r: any) => ({
+          ...r,
+          isDup: existingForAccount.some(tx =>
+            tx.date === r.date &&
+            tx.merchant.toLowerCase() === r.merchant.toLowerCase() &&
+            Math.abs(tx.amount - Math.abs(r.amount)) < 0.01
+          ),
+        }))
+
+        setPdfPreviewRows(marked)
+        setPdfParseWarning(
+          `AI extracted ${marked.length} transaction${marked.length !== 1 ? 's' : ''} from your PDF. Review carefully before importing.`
+        )
+        setCsvImportLoading(false)
+      } catch (err: any) {
+        setCsvImportError(`Failed to parse PDF: ${err?.message ?? 'unknown error'}`)
+        setCsvImportLoading(false)
+      }
     }
     reader.onerror = () => { setCsvImportError('Could not read the PDF file.'); setCsvImportLoading(false) }
-    reader.readAsText(file)
+    reader.readAsDataURL(file)
   }
   const commitPdfImport = () => {
     const readyRows = pdfPreviewRows.filter(r => !r.isDup)
@@ -5808,15 +5837,17 @@ function CsvImportModal({
             >
               <div className="text-4xl mb-3">📄</div>
               <p className="text-slate-200 font-medium mb-1">Drop a CSV or PDF file here</p>
-              <p className="text-slate-400 text-sm mb-4">or click to browse</p>
-              <p className="text-slate-500 text-xs">
-                Apple Card CSV auto-detected. PDF support for text-based bank statements (Chase, BofA, etc.).
-              </p>
+              <p className="text-slate-400 text-sm mb-3">or click to browse</p>
+              <div className="inline-flex items-center gap-1.5 text-[11px] text-violet-300 bg-violet-900/25 border border-violet-700/40 px-3 py-1 rounded-full mb-2">
+                <span>✦</span>
+                <span>PDFs parsed by AI — works with any bank statement</span>
+              </div>
+              <p className="text-slate-600 text-[10px]">CSV or PDF · Apple Card, Chase, BofA, Wells Fargo, and more</p>
               <input type="file" accept=".csv,.pdf,text/csv,text/plain,application/pdf" className="hidden" onChange={onFileSelect} ref={fileInputRef} />
             </div>
           )}
 
-          {loading && <div className="text-center py-8 text-slate-400">{isPdf ? 'Parsing PDF…' : 'Parsing CSV…'}</div>}
+          {loading && <div className="text-center py-8 space-y-2"><div className="text-slate-400">{isPdf ? '✦ AI is reading your PDF…' : 'Parsing CSV…'}</div>{isPdf && <div className="text-xs text-slate-600">Gemini is extracting transactions from your statement</div>}</div>}
 
           {error && (
             <div className="rounded-lg border border-red-700/50 bg-red-900/20 px-4 py-3 text-sm text-red-300">{error}</div>
