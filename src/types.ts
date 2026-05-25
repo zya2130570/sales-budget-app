@@ -10,12 +10,14 @@ export const CURRENT_SCHEMA_VERSION = 4
 
 /** Budget category persisted in v42-cats. Cloud-important: stable id, amount, type, and updatedAt. */
 export type CategoryType = 'fixed bill' | 'variable spending' | 'savings' | 'investing'
+export type BreakdownItem = { id: string; label: string; amount: number }  // V33
 export type Category = {
   id: string
   name: string
   amount: number
   type: CategoryType
   updatedAt?: string  // Added v3 — set on every create/edit
+  breakdown?: BreakdownItem[]  // V33 — optional sub-item breakdown (local only)
 }
 
 /** Saved budget snapshot persisted in v42-budgets. */
