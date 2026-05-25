@@ -14,7 +14,7 @@ export const CHANGELOG: VersionEntry[] = [
       'AI Assistant is now in the sidebar — click ✦ AI Assistant (bottom of sidebar) from any page. Opens a full-height chat drawer. Escape or click backdrop to close.',
       'Budget breakdowns — every category now has a "+ Group" button. Click it to add/edit sub-items (e.g. "Bills to Mom" → Car insurance $121, Parking $53). Items show in a purple breakdown row under the category.',
       'Bills to Mom breakdown auto-migrates — when personal starter data is loaded, the Bills to Mom breakdown seeds into the new editable breakdown system automatically.',
-      'Conflict modal — Escape now closes it. Amount fields show "(weekly)" so you know what you're comparing.',
+      'Conflict modal — Escape now closes it. Amount fields show "(weekly)" so you know what period is being compared.',
       'Command palette — reduced top gap from 15vh to 8vh so the top is always visible on smaller screens.',
       'Cloud button light mode — button is now white with slate border/text in light mode instead of dark slate.',
     ],
