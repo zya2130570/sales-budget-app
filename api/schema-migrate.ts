@@ -8,8 +8,8 @@
  *   SUPABASE_ACCESS_TOKEN — personal access token from
  *                           supabase.com/dashboard/account/tokens
  *   SUPABASE_PROJECT_REF  — your project ref, visible in the Supabase URL
- *                           e.g. https://supabase.com/dashboard/project/eimtwxdjhnahsryylqyu
- *                           → ref is "eimtwxdjhnahsryylqyu"
+ *                           e.g. https://supabase.com/dashboard/project/your-project-ref
+ *                           → ref is "your-project-ref"
  *
  * Already required (should already be set):
  *   SUPABASE_URL (or VITE_SUPABASE_URL)
@@ -118,7 +118,7 @@ export default async function handler(req: any, res: any) {
       error:
         'Schema repair needs two Vercel env vars:\n' +
         '• SUPABASE_PROJECT_REF — from your Supabase URL ' +
-        '(e.g. supabase.com/dashboard/project/eimtwxdjhnahsryylqyu → ref is "eimtwxdjhnahsryylqyu")\n' +
+        '(e.g. supabase.com/dashboard/project/your-project-ref)\n' +
         '• SUPABASE_ACCESS_TOKEN — personal token from supabase.com/dashboard/account/tokens',
     })
   }
