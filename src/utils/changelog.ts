@@ -8,6 +8,22 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V33.1',
+    date: '5/24/2026 at 11:00 PM',
+    what: [
+      'Bills to Mom breakdown restored — seeding effect was missing from the deployed zip. Now correctly maps preload items (item.name, not item.label) and auto-populates on load.',
+      'Breakdown editor — now shows all existing budget categories as quick-add buttons. Click any category to add it with its monthly amount pre-filled. Useful for grouping related categories under an umbrella.',
+      'Sync conflict — both LOCAL and CLOUD versions now show "(weekly)" on the Amount field.',
+      'AI Assistant keyboard shortcut — press 8 anywhere (not in a text field) to open/close the chat drawer. Shortcut badge visible in sidebar.',
+    ],
+    test: [
+      'Load personal starter data → Budget tab → Bills to Mom should show the ▾ toggle with Car insurance/Parking/Phone items',
+      'Any category row → click "+ Group" → modal shows your existing categories as quick-add buttons at the top',
+      'Trigger a sync conflict → both Local and Cloud versions should show "Amount (weekly): $X.XX"',
+      'Press 8 from any tab → AI chat drawer opens. Press 8 again or Escape → closes.',
+    ],
+  },
+  {
     version: 'V33',
     date: '5/24/2026 at 9:00 PM',
     what: [
