@@ -341,10 +341,10 @@ const SAMPLE_BUDGET_CATS: Array<{ name: string; type: CategoryType; monthly: num
 
 const periods: Period[] = ['weekly', 'bi-weekly', 'monthly', 'yearly']
 
-export default // Reserved for upcoming AI PDF parsing fallback flow
+// Reserved for upcoming AI PDF parsing fallback flow
 void parsePdfText
 
-function App() {
+export default function App() {
   const appAuth = useAuth()
   const autoCloudRestoreAttemptedRef = useRef(false)
   const incomeRef = useRef<HTMLInputElement>(null)
