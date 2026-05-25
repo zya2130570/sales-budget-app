@@ -8,6 +8,23 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V36',
+    date: '5/25/2026 at 4:00 AM',
+    what: [
+      'AI PDF import — upload any bank statement PDF and Gemini reads it visually, extracting all transactions as structured data. Works with Chase, BofA, Wells Fargo, Citi, Capital One, and any other bank statement.',
+      'New endpoint: api/parse-pdf.ts — sends PDF as base64 to Gemini 1.5 Flash (multimodal), returns validated JSON array of transactions. Replaces the old brittle text-extraction approach.',
+      'Drop zone updated — shows AI badge: "PDFs parsed by AI — works with any bank statement". Loading message shows "✦ AI is reading your PDF…"',
+      'Old experimental Chase PDF text parser disabled — all PDFs now go through the AI path.',
+    ],
+    test: [
+      'Transactions → Import → drop zone shows purple AI badge: "PDFs parsed by AI"',
+      'Upload a PDF bank statement → loading shows "✦ AI is reading your PDF…" → then shows extracted transactions in the preview table',
+      'Review transactions before importing — amounts should be positive for charges, negative for credits',
+      'Import → transactions appear in your list with source "pdf"',
+      'If GEMINI_API_KEY is missing → clear error message with setup instructions',
+    ],
+  },
+  {
     version: 'V35',
     date: '5/25/2026 at 2:00 AM',
     what: [
