@@ -8,6 +8,26 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V33',
+    date: '5/24/2026 at 9:00 PM',
+    what: [
+      'AI Assistant is now in the sidebar — click ✦ AI Assistant (bottom of sidebar) from any page. Opens a full-height chat drawer. Escape or click backdrop to close.',
+      'Budget breakdowns — every category now has a "+ Group" button. Click it to add/edit sub-items (e.g. "Bills to Mom" → Car insurance $121, Parking $53). Items show in a purple breakdown row under the category.',
+      'Bills to Mom breakdown auto-migrates — when personal starter data is loaded, the Bills to Mom breakdown seeds into the new editable breakdown system automatically.',
+      'Conflict modal — Escape now closes it. Amount fields show "(weekly)" so you know what you're comparing.',
+      'Command palette — reduced top gap from 15vh to 8vh so the top is always visible on smaller screens.',
+      'Cloud button light mode — button is now white with slate border/text in light mode instead of dark slate.',
+    ],
+    test: [
+      'Click ✦ AI Assistant in sidebar → chat drawer opens from the right. Escape closes it. Same from any tab.',
+      'Budget tab → any category row → click "+ Group" → add items with labels and monthly amounts → Save → purple breakdown row appears',
+      'Load personal starter data → find Bills to Mom → should already show Car insurance/Parking/Phone breakdown',
+      'Sync and trigger a conflict → press Escape → conflict modal closes. Amount fields say "(weekly)"',
+      'Press Ctrl+K → command palette appears lower on screen (8vh from top)',
+      'Light mode → cloud status button should be white/readable',
+    ],
+  },
+  {
     version: 'V32',
     date: '5/24/2026 at 6:00 PM',
     what: [
