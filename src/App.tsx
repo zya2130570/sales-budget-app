@@ -754,7 +754,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [merchantSuggestList, setMerchantSuggestList] = useState<string[]>([]) // V37 — suggest panel
   const [aiChatOpen, setAiChatOpen] = useState(false)  // V33 — persistent AI chat
-  const [cloudOpen, setCloudOpen] = useState(false)    // V34 — Ctrl+S opens cloud panel
+  const [cloudOpenSignal, setCloudOpenSignal] = useState(0)    // V34 — Ctrl+S opens cloud panel
   const [versionOpen, setVersionOpen] = useState(false) // V34 — V opens version badge
   // V33 — category breakdowns stored locally (not synced)
   const [breakdowns, setBreakdowns] = useState<Record<string, BreakdownItem[]>>(() => {
@@ -2594,7 +2594,7 @@ txnMerchantRef.current?.focus()
         onToggleTheme={toggleTheme}
         onSync={() => cloudPersistence.syncNow()}
         onOpenAIChat={() => setAiChatOpen(true)}
-        onOpenCloud={() => setCloudOpen(true)}
+        onOpenCloud={() => setCloudOpenSignal(v => v + 1)}
         onOpenVersion={() => setVersionOpen(v => !v)}
       />
 
@@ -2619,8 +2619,8 @@ txnMerchantRef.current?.focus()
             }
             <CloudStatusButton
               theme={theme}
-              externalOpen={cloudOpen}
-              onExternalClose={() => setCloudOpen(false)}
+              externalOpenSignal={cloudOpenSignal}
+              onExternalClose={() => {}}
               status={cloudPersistence.status}
               canSync={cloudPersistence.canSync}
               connectionTested={cloudPersistence.connectionTested}
