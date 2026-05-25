@@ -750,6 +750,8 @@ export default function App() {
   const [onboardingGuideOpen, setOnboardingGuideOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [aiChatOpen, setAiChatOpen] = useState(false)  // V33 — persistent AI chat
+  const [cloudOpen, setCloudOpen] = useState(false)    // V34 — Ctrl+S opens cloud panel
+  const [versionOpen, setVersionOpen] = useState(false) // V34 — V opens version badge
   // V33 — category breakdowns stored locally (not synced)
   const [breakdowns, setBreakdowns] = useState<Record<string, BreakdownItem[]>>(() => {
     try { return JSON.parse(localStorage.getItem('flow_breakdowns') ?? '{}') } catch { return {} }
@@ -2559,6 +2561,8 @@ txnMerchantRef.current?.focus()
         onToggleTheme={toggleTheme}
         onSync={() => cloudPersistence.syncNow()}
         onOpenAIChat={() => setAiChatOpen(true)}
+        onOpenCloud={() => setCloudOpen(true)}
+        onOpenVersion={() => setVersionOpen(v => !v)}
       />
 
       {/* Single inner container with dynamic left margin */}
@@ -2567,7 +2571,7 @@ txnMerchantRef.current?.focus()
         {/* Compact sticky header — logo + utility only, no tabs */}
         <header style={{ position: 'sticky', top: 0, zIndex: 30, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', height: 48, borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'rgba(11,11,15,0.95)', backdropFilter: 'blur(12px)' }}>
           <div className="flex items-center gap-2">
-            <VersionBadge version={CURRENT_VERSION} />
+            <VersionBadge version={CURRENT_VERSION} open={versionOpen} onOpenChange={setVersionOpen} />
           </div>
           <div className="flex items-center gap-1.5">
             {appAuth.user
@@ -2582,6 +2586,8 @@ txnMerchantRef.current?.focus()
             }
             <CloudStatusButton
               theme={theme}
+              externalOpen={cloudOpen}
+              onExternalClose={() => setCloudOpen(false)}
               status={cloudPersistence.status}
               canSync={cloudPersistence.canSync}
               connectionTested={cloudPersistence.connectionTested}
@@ -2602,7 +2608,7 @@ txnMerchantRef.current?.focus()
         </header>
 
         {/* Main content — max-width constraint + padding */}
-        <div className="max-w-5xl mx-auto px-5 py-5 space-y-4">
+        <div className="max-w-7xl mx-auto px-5 py-5 space-y-4">
 
       {/* V33 — Persistent AI chat drawer */}
       <AIChatDrawer open={aiChatOpen} onClose={() => setAiChatOpen(false)} />
