@@ -68,7 +68,7 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
       if (e.key === '8') { e.preventDefault(); onOpenAIChat?.(); return }
       if (e.key === 'v' || e.key === 'V') { e.preventDefault(); onOpenVersion?.(); return }
       if (e.key === '.') { e.preventDefault(); onOpenProfile?.(); return }
-      if ((e.key === '?' || (e.shiftKey && e.key === '/')) && onOpenKeyboardShortcuts) { e.preventDefault(); onOpenKeyboardShortcuts(); return }
+      if ((e.key === '?' || e.key === '/') && onOpenKeyboardShortcuts) { e.preventDefault(); onOpenKeyboardShortcuts(); return }
       if (e.key.toLowerCase() === 't' && onToggleTheme) { e.preventDefault(); onToggleTheme(); return }
       const idx = parseInt(e.key) - 1
       if (idx >= 0 && idx < NAV.length) onNavigate(NAV[idx].id)
@@ -77,7 +77,7 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
     return () => window.removeEventListener('keydown', handler)
   }, [onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, onToggle, onToggleTheme, onSync, onOpenAIChat, onOpenCloud, onOpenVersion])
 
-  const W = collapsed ? 56 : 220
+  const W = collapsed ? 64 : 260
 
   return (
     <aside
@@ -93,16 +93,16 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
       {/* Logo */}
       <div style={{ padding: collapsed ? '18px 0' : '18px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
         {collapsed
-          ? <div style={{ width: 56, display: 'flex', justifyContent: 'center' }}>
-              <div style={{ width: 24, height: 24, borderRadius: 6, background: 'linear-gradient(135deg,#5B6AF0,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ color: 'white', fontSize: 12, fontWeight: 700, letterSpacing: '-0.5px' }}>F</span>
+          ? <div style={{ width: 64, display: 'flex', justifyContent: 'center' }}>
+              <div style={{ width: 28, height: 28, borderRadius: 6, background: 'linear-gradient(135deg,#5B6AF0,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ color: 'white', fontSize: 14, fontWeight: 700, letterSpacing: '-0.5px' }}>F</span>
               </div>
             </div>
           : <>
-              <div style={{ width: 24, height: 24, borderRadius: 6, background: 'linear-gradient(135deg,#5B6AF0,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <span style={{ color: 'white', fontSize: 12, fontWeight: 700 }}>F</span>
+              <div style={{ width: 28, height: 28, borderRadius: 6, background: 'linear-gradient(135deg,#5B6AF0,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <span style={{ color: 'white', fontSize: 14, fontWeight: 700 }}>F</span>
               </div>
-              <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: 14, fontWeight: 600, letterSpacing: '-0.3px', whiteSpace: 'nowrap' }}>Flow</span>
+              <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px', whiteSpace: 'nowrap' }}>Flow</span>
             </>
         }
       </div>
@@ -118,12 +118,12 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
               title={collapsed ? `${item.label} (${item.shortcut})` : undefined}
               style={{
                 width: '100%', display: 'flex', alignItems: 'center',
-                gap: 10, padding: collapsed ? '8px 0' : '7px 16px',
+                gap: 12, padding: collapsed ? '10px 0' : '10px 18px',
                 justifyContent: collapsed ? 'center' : 'flex-start',
                 background: isActive ? 'rgba(255,255,255,0.07)' : 'transparent',
                 borderLeft: isActive ? '2px solid #5B6AF0' : '2px solid transparent',
                 color: isActive ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.42)',
-                fontSize: 13, fontWeight: isActive ? 500 : 400,
+                fontSize: 15, fontWeight: isActive ? 600 : 500,
                 cursor: 'pointer', border: 'none', outline: 'none',
                 transition: 'all 0.12s ease',
                 whiteSpace: 'nowrap',
@@ -156,7 +156,7 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
               width: '100%', display: 'flex', alignItems: 'center', gap: 10,
               padding: collapsed ? '8px 0' : '7px 16px',
               justifyContent: collapsed ? 'center' : 'flex-start',
-              color: 'rgba(255,255,255,0.35)', fontSize: 13,
+              color: 'rgba(255,255,255,0.35)', fontSize: 15,
               background: 'transparent', border: 'none', cursor: 'pointer',
               transition: 'color 0.12s ease',
             }}
@@ -185,7 +185,7 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
               width: '100%', display: 'flex', alignItems: 'center', gap: 10,
               padding: collapsed ? '8px 0' : '7px 16px',
               justifyContent: collapsed ? 'center' : 'flex-start',
-              color: 'rgba(255,255,255,0.35)', fontSize: 13,
+              color: 'rgba(255,255,255,0.35)', fontSize: 15,
               background: 'transparent', border: 'none', cursor: 'pointer',
               transition: 'color 0.12s ease',
             }}
@@ -208,17 +208,17 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
               width: '100%', display: 'flex', alignItems: 'center', gap: 10,
               padding: collapsed ? '8px 0' : '7px 16px',
               justifyContent: collapsed ? 'center' : 'flex-start',
-              color: 'rgba(255,255,255,0.45)', fontSize: 13,
+              color: 'rgba(255,255,255,0.45)', fontSize: 15,
               background: 'transparent', border: 'none', cursor: 'pointer',
               transition: 'color 0.12s ease',
             }}
             onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.75)'}
             onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.45)'}
           >
-            <span style={{ fontSize: 14, flexShrink: 0 }}>✦</span>
+            <span style={{ width: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>✦</span>
             {!collapsed && (
               <>
-                <span style={{ flex: 1 }}>AI Assistant</span>
+                <span style={{ flex: 1, textAlign: 'left' }}>AI Assistant</span>
                 <kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>8</kbd>
               </>
             )}
@@ -233,7 +233,7 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
             width: '100%', display: 'flex', alignItems: 'center', gap: 10,
             padding: collapsed ? '8px 0' : '7px 16px',
             justifyContent: collapsed ? 'center' : 'flex-start',
-            color: 'rgba(255,255,255,0.35)', fontSize: 13,
+            color: 'rgba(255,255,255,0.35)', fontSize: 15,
             background: 'transparent', border: 'none', cursor: 'pointer',
             transition: 'color 0.12s ease',
           }}
@@ -254,7 +254,7 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
             width: '100%', display: 'flex', alignItems: 'center', gap: 10,
             padding: collapsed ? '8px 0' : '7px 16px',
             justifyContent: collapsed ? 'center' : 'flex-start',
-            color: 'rgba(255,255,255,0.25)', fontSize: 13,
+            color: 'rgba(255,255,255,0.25)', fontSize: 15,
             background: 'transparent', border: 'none', cursor: 'pointer',
             transition: 'color 0.12s ease',
           }}
