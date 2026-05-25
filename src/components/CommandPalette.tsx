@@ -89,7 +89,7 @@ export function CommandPalette({ onNavigate, onOpenGuide, onOpenSettings, onLoad
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[15vh]"
+    <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[8vh]"
       style={{ background: 'rgba(2,6,23,0.7)', backdropFilter: 'blur(12px)' }}
       onClick={() => setOpen(false)}>
       <div className="w-full max-w-lg mx-4 rounded-2xl overflow-hidden shadow-2xl"

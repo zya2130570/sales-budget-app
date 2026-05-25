@@ -48,9 +48,10 @@ type Props = {
   theme?: 'dark' | 'light'
   onToggleTheme?: () => void
   onSync?: () => void
+  onOpenAIChat?: () => void
 }
 
-export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, collapsed, onToggle, theme = 'dark', onToggleTheme, onSync }: Props) {
+export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, collapsed, onToggle, theme = 'dark', onToggleTheme, onSync, onOpenAIChat }: Props) {
 
   // Keyboard shortcuts: 1-7 navigate, 0 toggles Settings, . toggles Profile, ? opens shortcuts, [ toggles sidebar, t toggles theme
   useEffect(() => {
@@ -191,6 +192,27 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
               <rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M4 6h.01M6.5 6h.01M9 6h.01M11.5 6h.01M4 8.5h.01M6.5 8.5h.01M9 8.5h.01M5 11h6"/>
             </svg>
             {!collapsed && <><span style={{ flex: 1, textAlign: 'left' }}>Keyboard shortcuts</span><kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>?</kbd></>}
+          </button>
+        )}
+
+        {/* V33 — AI Chat */}
+        {onOpenAIChat && (
+          <button
+            onClick={onOpenAIChat}
+            title={collapsed ? 'AI Assistant' : undefined}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+              padding: collapsed ? '8px 0' : '7px 16px',
+              justifyContent: collapsed ? 'center' : 'flex-start',
+              color: 'rgba(255,255,255,0.45)', fontSize: 13,
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              transition: 'color 0.12s ease',
+            }}
+            onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.75)'}
+            onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.45)'}
+          >
+            <span style={{ fontSize: 14, flexShrink: 0 }}>✦</span>
+            {!collapsed && <span>AI Assistant</span>}
           </button>
         )}
 

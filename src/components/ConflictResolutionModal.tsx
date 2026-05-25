@@ -61,7 +61,7 @@ function ConflictCard({ conflict, resolution, onPick }: ConflictCardProps) {
           <p className="text-slate-500 text-[10px]">{formatTs(conflict.localUpdatedAt)}</p>
           {conflict.fields.map(f => (
             <div key={f.label}>
-              <span className="text-slate-500">{f.label}: </span>
+              <span className="text-slate-500">{f.label}{f.label === "Amount" ? " (weekly)" : ""}: </span>
               <span className="text-slate-200">{f.localValue}</span>
             </div>
           ))}
@@ -127,6 +127,13 @@ export function ConflictResolutionModal({ conflicts, onResolve, onDismiss }: Pro
       onResolve(autoResolutions)
     }
   }, [realConflicts.length, autoResolutions, onResolve])
+
+  // V33 — Escape closes the modal
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onDismiss() }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onDismiss])
 
   const allResolved = realConflicts.every(c => choices[c.localId] !== undefined)
   const resolvedCount = Object.keys(choices).length

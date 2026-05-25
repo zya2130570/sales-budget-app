@@ -107,7 +107,8 @@ type SyncProps = {
   onOpenSettings: () => void
 }
 
-export function CloudStatusButton(props: SyncProps) {
+export function CloudStatusButton(props: SyncProps & { theme?: 'dark' | 'light' }) {
+  const isLight = props.theme === 'light'
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<'sync' | 'compare'>('sync')
   const [showResults, setShowResults] = useState(false)
@@ -145,7 +146,7 @@ export function CloudStatusButton(props: SyncProps) {
       {/* ── Compact header button ── */}
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-700/60 hover:bg-slate-700 border border-slate-600/50 transition-colors"
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border transition-colors ${ isLight ? 'bg-white hover:bg-slate-50 border-slate-300' : 'bg-slate-700/60 hover:bg-slate-700 border-slate-600/50'}`}
         title="Cloud status"
       >
         <span className={`w-2 h-2 rounded-full flex-shrink-0 ${dotColor(props.status)}`} />
