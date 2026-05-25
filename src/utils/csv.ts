@@ -1,3 +1,119 @@
+
+// ── V35 Bank Templates ─────────────────────────────────────────────────────
+export type BankTemplate = {
+  id: string
+  name: string
+  emoji: string
+  instructions: string[]
+  sampleHeaders?: string  // what the CSV header row looks like
+  normalizeHeaders?: (h: string) => string  // map non-standard headers
+}
+
+export const BANK_TEMPLATES: BankTemplate[] = [
+  {
+    id: 'apple-card',
+    name: 'Apple Card',
+    emoji: '🍎',
+    instructions: [
+      'Open the Wallet app on your iPhone',
+      'Tap Apple Card → tap the "⋯" menu (top right)',
+      'Tap "Export Transactions"',
+      'Select your date range → tap "Export"',
+    ],
+    sampleHeaders: 'Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD)',
+  },
+  {
+    id: 'chase-csv',
+    name: 'Chase',
+    emoji: '🏦',
+    instructions: [
+      'Log in to chase.com',
+      'Go to your account → click "Download" or "Export"',
+      'Choose date range → select "CSV" format',
+      'Save the file and upload it here',
+    ],
+    sampleHeaders: 'Details,Posting Date,Description,Amount,Type,Balance,Check or Slip #',
+    normalizeHeaders: (h: string) => {
+      const map: Record<string, string> = { 'posting date': 'date', 'description': 'merchant' }
+      return map[h.toLowerCase()] ?? h
+    },
+  },
+  {
+    id: 'bofa',
+    name: 'Bank of America',
+    emoji: '🏦',
+    instructions: [
+      'Log in to bankofamerica.com',
+      'Go to your account → click "Download" (top right)',
+      'Select date range → choose "Comma Separated Values (CSV)"',
+      'Download and upload the file here',
+    ],
+    sampleHeaders: 'Posted Date,Reference Number,Payee,Address,Amount',
+    normalizeHeaders: (h: string) => {
+      const map: Record<string, string> = { 'posted date': 'date', 'payee': 'merchant' }
+      return map[h.toLowerCase()] ?? h
+    },
+  },
+  {
+    id: 'wellsfargo',
+    name: 'Wells Fargo',
+    emoji: '🏦',
+    instructions: [
+      'Log in to wellsfargo.com',
+      'Go to Account Activity → click "Download Account Activity"',
+      'Select date range → choose "Comma Delimited"',
+      'Download and upload the file here',
+    ],
+    sampleHeaders: '(No header row — columns: Date, Amount, blank, blank, Description)',
+  },
+  {
+    id: 'capitalone',
+    name: 'Capital One',
+    emoji: '💳',
+    instructions: [
+      'Log in to capitalone.com',
+      'Go to Account Details → click "Export"',
+      'Select date range → choose "CSV"',
+      'Download and upload the file here',
+    ],
+    sampleHeaders: 'Transaction Date,Posted Date,Card No.,Description,Category,Debit,Credit',
+    normalizeHeaders: (h: string) => {
+      const map: Record<string, string> = { 'transaction date': 'date', 'description': 'merchant', 'debit': 'amount' }
+      return map[h.toLowerCase()] ?? h
+    },
+  },
+  {
+    id: 'citi',
+    name: 'Citi',
+    emoji: '💳',
+    instructions: [
+      'Log in to citi.com',
+      'Go to your card → click "Download Transactions"',
+      'Select date range → choose "CSV"',
+      'Download and upload the file here',
+    ],
+    sampleHeaders: 'Status,Date,Description,Debit,Credit',
+    normalizeHeaders: (h: string) => {
+      const map: Record<string, string> = { 'description': 'merchant', 'debit': 'amount' }
+      return map[h.toLowerCase()] ?? h
+    },
+  },
+  {
+    id: 'generic-csv',
+    name: 'Generic / Other',
+    emoji: '📄',
+    instructions: [
+      'Export a CSV from your bank or credit card',
+      'Make sure it has columns for: Date, Description/Merchant, and Amount',
+      'Upload the file — Flow will auto-detect columns',
+    ],
+  },
+]
+
+export function getBankTemplate(id: string): BankTemplate | undefined {
+  return BANK_TEMPLATES.find(t => t.id === id)
+}
+
 // ── V9.0 CSV Parser ───────────────────────────────────────────────────────────
 // Pure, side-effect-free CSV parsing utilities.
 // Handles quoted fields, escaped quotes, CRLF, LF, and trailing newlines.

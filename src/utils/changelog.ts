@@ -8,6 +8,23 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V35',
+    date: '5/25/2026 at 2:00 AM',
+    what: [
+      'Bank selector in import — the plain preset dropdown is replaced with a visual bank picker (Apple Card, Chase, BofA, Wells Fargo, Capital One, Citi, Generic). Selecting a bank shows step-by-step export instructions and sample header format.',
+      'Bank templates — 7 bank templates with export guides added to csv.ts. ImportPreset type expanded to include chase-csv, bofa, wellsfargo, capitalone, citi.',
+      'Quick-add common merchant rules — when you have no rules yet, the rules section shows one-click buttons to add rules for Amazon, DoorDash, Uber Eats, Netflix, Spotify, Walmart, Target, etc. Only shows rules that match your existing categories.',
+      'Suggest rules from history button — in the Transaction Rules section, a new button scans your uncategorized transactions and tells you how many unique merchants need rules.',
+    ],
+    test: [
+      'Transactions tab → Import → bank selector grid should appear at top with 7 bank options',
+      'Click Chase → export instructions appear (chase.com → Download → CSV)',
+      'Transaction Rules section → if no rules: quick-add buttons appear for common merchants',
+      'Add a Groceries or Shopping category → the Walmart/Amazon buttons appear → click one → rule is added instantly',
+      'Click the ⚡ button → toast shows count of uncategorized merchant names',
+    ],
+  },
+  {
     version: 'V34',
     date: '5/25/2026 at 12:00 AM',
     what: [
