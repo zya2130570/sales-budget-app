@@ -8,6 +8,25 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V34',
+    date: '5/25/2026 at 12:00 AM',
+    what: [
+      'iPad/responsive layout fix — max-width increased from 1024px to 1280px. No more dead space on iPad or large monitors. Content fills available width correctly.',
+      'Ctrl+S (or Cmd+S) now opens the cloud sync panel instead of silently syncing. You see the full panel, can test connection, toggle auto-sync, download backup.',
+      'V key opens/closes the version badge & changelog popover from anywhere.',
+      'Cloud panel now closes with Escape key.',
+      'VersionBadge is now externally controlled — can be opened via keyboard or any trigger.',
+      'Keyboard shortcuts panel updated — shows all shortcuts including 8 (AI), V (version), Ctrl+S (cloud), full descriptions.',
+    ],
+    test: [
+      'On iPad or wide monitor — Budget/Scenarios/Dashboard should fill the full width without blank space on the right',
+      'Press Ctrl+S (or Cmd+S on Mac) from anywhere → cloud panel opens',
+      'Press V anywhere (not in a text field) → version badge popover opens/closes',
+      'Cloud panel open → press Escape → closes',
+      'Press ? → keyboard shortcuts panel → all shortcuts listed including V, 8, Ctrl+S',
+    ],
+  },
+  {
     version: 'V33.1',
     date: '5/24/2026 at 11:00 PM',
     what: [
