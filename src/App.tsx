@@ -341,9 +341,6 @@ const SAMPLE_BUDGET_CATS: Array<{ name: string; type: CategoryType; monthly: num
 
 const periods: Period[] = ['weekly', 'bi-weekly', 'monthly', 'yearly']
 
-// Reserved for upcoming AI PDF parsing fallback flow
-void parsePdfText
-
 export default function App() {
   const appAuth = useAuth()
   const autoCloudRestoreAttemptedRef = useRef(false)
@@ -753,6 +750,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [onboardingGuideOpen, setOnboardingGuideOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [merchantSuggestList, setMerchantSuggestList] = useState<string[]>([]) // V37 — suggest panel
   const [aiChatOpen, setAiChatOpen] = useState(false)  // V33 — persistent AI chat
   const [cloudOpen, setCloudOpen] = useState(false)    // V34 — Ctrl+S opens cloud panel
   const [versionOpen, setVersionOpen] = useState(false) // V34 — V opens version badge
@@ -4641,17 +4639,50 @@ txnMerchantRef.current?.focus()
                 <p className="text-xs text-slate-400">Rules auto-categorize transactions based on merchant names or notes. Applied on import and when you manually categorize.</p>
                 <button
                   onClick={() => {
-                    // V35 — Suggest rules from all uncategorized transactions
+                    // V37 — Show actual merchant list, not just a toast
                     const uncategorized = transactions.filter(t => !t.categoryId)
-                    if (uncategorized.length === 0) { showToast('No uncategorized transactions to suggest rules from'); return }
-                    const merchants = [...new Set(uncategorized.map(t => t.merchant).filter(Boolean))]
-                    showToast(`Found ${merchants.length} unique merchants without rules — use the form below to add rules for them`)
+                    if (uncategorized.length === 0) { showToast('No uncategorized transactions found'); return }
+                    const existing = new Set(rules.flatMap(r => r.matchText?.toLowerCase().split(',').map((s: string) => s.trim()) ?? []))
+                    const merchants = [...new Set(
+                      uncategorized.map(t => t.merchant).filter(Boolean)
+                        .filter(m => !existing.has(m.toLowerCase()))
+                    )].sort() as string[]
+                    if (merchants.length === 0) { showToast('All uncategorized merchants already have rules'); return }
+                    setMerchantSuggestList(merchants)
                   }}
                   className="text-[11px] px-2.5 py-1.5 rounded-lg border border-violet-700/40 bg-violet-900/20 text-violet-300 hover:bg-violet-800/30 transition-colors flex-shrink-0 whitespace-nowrap"
                 >
                   ⚡ Suggest from history
                 </button>
               </div>
+
+              {/* V37 — Merchant suggestion panel */}
+              {merchantSuggestList.length > 0 && (
+                <div className="mb-4 rounded-xl border border-violet-700/40 bg-violet-900/15 p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-[11px] font-semibold text-violet-300 uppercase tracking-wide">
+                      {merchantSuggestList.length} merchants need rules — click to pre-fill the form
+                    </p>
+                    <button onClick={() => setMerchantSuggestList([])} className="text-[10px] text-slate-500 hover:text-slate-300">✕ Dismiss</button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {merchantSuggestList.map(m => (
+                      <button
+                        key={m}
+                        onClick={() => {
+                          setRuleForm((v: any) => ({ ...v, name: m, matchText: m }))
+                          setMerchantSuggestList(prev => prev.filter(x => x !== m))
+                          ruleNameRef.current?.focus()
+                        }}
+                        className="text-[11px] px-2.5 py-1.5 rounded-lg border border-violet-600/40 bg-violet-800/20 hover:bg-violet-700/30 text-violet-200 hover:text-white transition-all"
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-slate-600 mt-2">Click a merchant to pre-fill the rule form. Choose a budget category, then click Add Rule.</p>
+                </div>
+              )}
 
               {/* V35 — Common merchant quick-rules */}
               {rules.length === 0 && (
