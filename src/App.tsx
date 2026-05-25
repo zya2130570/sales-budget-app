@@ -754,7 +754,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [merchantSuggestList, setMerchantSuggestList] = useState<string[]>([]) // V37 — suggest panel
   const [aiChatOpen, setAiChatOpen] = useState(false)  // V33 — persistent AI chat
-  const [cloudOpenSignal, setCloudOpenSignal] = useState(0)    // V38 — Ctrl+S toggles cloud panel (counter-based)
+  const [cloudOpenSignal, setCloudOpenSignal] = useState(0)    // V34 — Ctrl+S opens cloud panel
   const [versionOpen, setVersionOpen] = useState(false) // V34 — V opens version badge
   // V33 — category breakdowns stored locally (not synced)
   const [breakdowns, setBreakdowns] = useState<Record<string, BreakdownItem[]>>(() => {
@@ -2576,7 +2576,7 @@ txnMerchantRef.current?.focus()
 
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
 
-  const sidebarW = sidebarCollapsed ? 56 : 220
+  const sidebarW = sidebarCollapsed ? 64 : 260
 
   return (
     <div data-theme={theme} style={{ background: '#0B0B0F', minHeight: '100vh', color: '#f1f5f9' }}>
@@ -2620,7 +2620,7 @@ txnMerchantRef.current?.focus()
             <CloudStatusButton
               theme={theme}
               externalOpenSignal={cloudOpenSignal}
-              onExternalClose={() => {/* signal-based, no reset needed */}}
+              onExternalClose={() => {}}
               status={cloudPersistence.status}
               canSync={cloudPersistence.canSync}
               connectionTested={cloudPersistence.connectionTested}
@@ -3779,57 +3779,34 @@ txnMerchantRef.current?.focus()
                               )}
                             </div>
                           ) : (
-                            <div className="flex flex-col gap-0.5">
-                              <div className="flex items-center gap-1">
-                                <input
-                                  ref={el => { actualInputRefs.current[c.id] = el }}
-                                  type="number" inputMode="decimal" min={0} step={25}
-                                  className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
-                                  placeholder="—"
-                                  value={rawActual ?? ''}
-                                  onFocus={e => { if (e.target.value !== '') e.target.select() }}
-                                  onChange={e => {
-                                    const cleaned = e.target.value.replace(/[^0-9.]/g, '')
-                                    setActuals(prev => ({ ...prev, [c.id]: cleaned === '' || Number(cleaned) === 0 ? '' : cleaned }))
-                                  }}
-                                  onBlur={() => { pushActualsHistory({ ...actuals }) }}
-                                  onKeyDown={e => {
-                                    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-                                      e.preventDefault()
-                                      const cur = Number(rawActual) || 0
-                                      const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
-                                      setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
-                                    }
-                                  }}
-                                />
-                                {hasActual && (
-                                  <button
-                                    className="rounded px-1.5 py-0.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-700 hover:bg-slate-600 transition-colors"
-                                    title="Clear actual"
-                                    onClick={() => { pushActualsHistory({ ...actuals }); setActuals(prev => ({ ...prev, [c.id]: '' })) }}
-                                  >×</button>
-                                )}
-                              </div>
-                              {/* V39 — transaction prompt nudge */}
-                              {hasManual && (
+                            <div className="flex items-center gap-1">
+                              <input
+                                ref={el => { actualInputRefs.current[c.id] = el }}
+                                type="number" inputMode="decimal" min={0} step={25}
+                                className="w-24 p-1 rounded bg-slate-700 border border-slate-600 text-slate-100 text-sm focus:border-blue-500 focus:outline-none"
+                                placeholder="—"
+                                value={rawActual ?? ''}
+                                onFocus={e => { if (e.target.value !== '') e.target.select() }}
+                                onChange={e => {
+                                  const cleaned = e.target.value.replace(/[^0-9.]/g, '')
+                                  setActuals(prev => ({ ...prev, [c.id]: cleaned === '' || Number(cleaned) === 0 ? '' : cleaned }))
+                                }}
+                                onBlur={() => { pushActualsHistory({ ...actuals }) }}
+                                onKeyDown={e => {
+                                  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                                    e.preventDefault()
+                                    const cur = Number(rawActual) || 0
+                                    const next = e.key === 'ArrowUp' ? cur + 25 : Math.max(0, cur - 25)
+                                    setActuals(prev => ({ ...prev, [c.id]: next === 0 ? '' : String(next) }))
+                                  }
+                                }}
+                              />
+                              {hasActual && (
                                 <button
-                                  className="text-left text-[10px] text-blue-400/70 hover:text-blue-300 transition-colors leading-tight"
-                                  title="Pre-fill a transaction with this amount and navigate to Transactions"
-                                  onClick={() => {
-                                    setTxnForm(prev => ({
-                                      ...prev,
-                                      categoryId: c.id,
-                                      amount: rawActual ?? '',
-                                      type: 'expense',
-                                      date: new Date().toISOString().slice(0, 10),
-                                      merchant: '',
-                                      notes: '',
-                                    }))
-                                    setTab('Transactions')
-                                  }}
-                                >
-                                  + add as transaction →
-                                </button>
+                                  className="rounded px-1.5 py-0.5 text-xs text-slate-400 hover:text-slate-200 bg-slate-700 hover:bg-slate-600 transition-colors"
+                                  title="Clear actual"
+                                  onClick={() => { pushActualsHistory({ ...actuals }); setActuals(prev => ({ ...prev, [c.id]: '' })) }}
+                                >×</button>
                               )}
                             </div>
                           )}
