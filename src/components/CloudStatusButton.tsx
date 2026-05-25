@@ -7,7 +7,7 @@
  *
  * Merge Safe Data is a top-level button, not buried inside Compare.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { runSchemaRepair } from '../utils/schemaRepair'
 import { useCloudSync } from '../hooks/useCloudSync'
 import type { CloudPersistenceStatus } from '../hooks/useCloudPersistence'
@@ -107,9 +107,29 @@ type SyncProps = {
   onOpenSettings: () => void
 }
 
-export function CloudStatusButton(props: SyncProps & { theme?: 'dark' | 'light' }) {
+export function CloudStatusButton(props: SyncProps & { theme?: 'dark' | 'light'; externalOpen?: boolean; onExternalClose?: () => void }) {
   const isLight = props.theme === 'light'
   const [open, setOpen] = useState(false)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  // V34 — open from external trigger (Ctrl+S)
+  useEffect(() => {
+    if (props.externalOpen) setOpen(true)
+  }, [props.externalOpen])
+
+  // V34 — when open closes, notify parent
+  useEffect(() => {
+    if (!open) props.onExternalClose?.()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
+
+  // V34 — Escape closes the cloud panel
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [open])
   const [tab, setTab] = useState<'sync' | 'compare'>('sync')
   const [showResults, setShowResults] = useState(false)
   const [confirmRestore, setConfirmRestore] = useState(false)
@@ -159,6 +179,7 @@ export function CloudStatusButton(props: SyncProps & { theme?: 'dark' | 'light' 
       {open && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70" onClick={() => setOpen(false)}>
           <div
+            ref={panelRef}
             className="w-full sm:max-w-xl max-h-[92vh] flex flex-col rounded-t-2xl sm:rounded-2xl border border-slate-700 bg-slate-800 shadow-2xl"
             onClick={e => e.stopPropagation()}
           >

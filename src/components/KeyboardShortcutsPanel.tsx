@@ -5,14 +5,17 @@ type Props = {
 }
 
 const SHORTCUTS = [
-  { keys: '1-7', action: 'Jump between main sections' },
+  { keys: '1–7', action: 'Jump between main sections (Dashboard → Savings Goals)' },
+  { keys: '8', action: 'Open / close AI Assistant chat drawer' },
   { keys: '0', action: 'Open or close Settings' },
   { keys: '.', action: 'Open or close Profile' },
-  { keys: 'T', action: 'Switch light/dark mode' },
+  { keys: 'V', action: 'Open version badge & changelog' },
+  { keys: 'T', action: 'Switch light / dark mode' },
   { keys: '?', action: 'Show this shortcuts panel' },
   { keys: '[', action: 'Collapse or expand sidebar' },
-  { keys: 'Ctrl/⌘ + K', action: 'Open command palette' },
-  { keys: 'Esc', action: 'Close any open panel or modal' },
+  { keys: 'Ctrl/⌘ + K', action: 'Open command palette (search all actions)' },
+  { keys: 'Ctrl/⌘ + S', action: 'Open cloud sync panel' },
+  { keys: 'Esc', action: 'Close any open modal, panel, or popover' },
   { keys: '↑ / ↓', action: 'Move through command palette options' },
   { keys: 'Enter', action: 'Select focused command / send AI message' },
 ]

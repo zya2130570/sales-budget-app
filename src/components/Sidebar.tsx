@@ -49,21 +49,24 @@ type Props = {
   onToggleTheme?: () => void
   onSync?: () => void
   onOpenAIChat?: () => void
+  onOpenCloud?: () => void
+  onOpenVersion?: () => void
 }
 
-export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, collapsed, onToggle, theme = 'dark', onToggleTheme, onSync, onOpenAIChat }: Props) {
+export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, collapsed, onToggle, theme = 'dark', onToggleTheme, onSync, onOpenAIChat, onOpenCloud, onOpenVersion }: Props) {
 
   // Keyboard shortcuts: 1-7 navigate, 0 toggles Settings, . toggles Profile, ? opens shortcuts, [ toggles sidebar, t toggles theme
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Cmd/Ctrl+S — sync to cloud (works from anywhere, including input fields)
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); onSync?.(); return }
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); onOpenCloud?.(); return }
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.ctrlKey || e.metaKey || e.altKey) return
       if (e.key === '[') { onToggle(); return }
       if (e.key === '0') { e.preventDefault(); onOpenSettings(); return }
       if (e.key === '8') { e.preventDefault(); onOpenAIChat?.(); return }
+      if (e.key === 'v' || e.key === 'V') { e.preventDefault(); onOpenVersion?.(); return }
       if (e.key === '.') { e.preventDefault(); onOpenProfile?.(); return }
       if ((e.key === '?' || (e.shiftKey && e.key === '/')) && onOpenKeyboardShortcuts) { e.preventDefault(); onOpenKeyboardShortcuts(); return }
       if (e.key.toLowerCase() === 't' && onToggleTheme) { e.preventDefault(); onToggleTheme(); return }
@@ -72,7 +75,7 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, onToggle, onToggleTheme, onSync])
+  }, [onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, onToggle, onToggleTheme, onSync, onOpenAIChat, onOpenCloud, onOpenVersion])
 
   const W = collapsed ? 56 : 220
 

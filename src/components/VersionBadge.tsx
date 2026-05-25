@@ -6,8 +6,14 @@
 import { useState, useRef, useEffect } from 'react'
 import { CHANGELOG, type VersionEntry } from '../utils/changelog'
 
-export function VersionBadge({ version, className = '' }: { version: string; className?: string }) {
-  const [open, setOpen] = useState(false)
+export function VersionBadge({ version, className = '', open: externalOpen, onOpenChange }: { version: string; className?: string; open?: boolean; onOpenChange?: (v: boolean) => void }) {
+  const [internalOpen, setInternalOpen] = useState(false)
+  const open = externalOpen !== undefined ? externalOpen : internalOpen
+  const setOpen = (v: boolean | ((prev: boolean) => boolean)) => {
+    const next = typeof v === 'function' ? v(open) : v
+    setInternalOpen(next)
+    onOpenChange?.(next)
+  }
   const [selected, setSelected] = useState<VersionEntry>(CHANGELOG[0])
   const [pos, setPos] = useState({ top: 0, left: 0 })
   const btnRef = useRef<HTMLButtonElement>(null)
