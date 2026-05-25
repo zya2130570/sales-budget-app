@@ -127,7 +127,6 @@ import { CommandPalette } from './components/CommandPalette'
 import { Sidebar } from './components/Sidebar'
 import { CloudStatusButton } from './components/CloudStatusButton'
 import { BankSelector } from './components/BankSelector'
-import { BANK_TEMPLATES } from './utils/csv'
 import { AIChatDrawer } from './components/AIChatDrawer'
 import { BreakdownEditor } from './components/BreakdownEditor'
 import type { BreakdownItem } from './types'
@@ -4611,7 +4610,7 @@ txnMerchantRef.current?.focus()
                 <button
                   onClick={() => {
                     // V35 — Suggest rules from all uncategorized transactions
-                    const uncategorized = transactions.filter(t => !t.category || t.category === 'Uncategorized')
+                    const uncategorized = transactions.filter(t => !t.categoryId)
                     if (uncategorized.length === 0) { showToast('No uncategorized transactions to suggest rules from'); return }
                     const merchants = [...new Set(uncategorized.map(t => t.merchant).filter(Boolean))]
                     showToast(`Found ${merchants.length} unique merchants without rules — use the form below to add rules for them`)
