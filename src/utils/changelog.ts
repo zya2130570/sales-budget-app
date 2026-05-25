@@ -8,6 +8,20 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V37',
+    date: '5/25/2026 at 6:00 AM',
+    what: [
+      'Suggest from history — now shows the actual merchants instead of a vague toast. A panel appears with pill buttons for each uncategorized merchant. Click any pill to pre-fill the rule form (name + match text). Dismiss when done.',
+      'Merchants already covered by existing rules are filtered out of the suggestions.',
+    ],
+    test: [
+      'Transactions tab → Transaction Rules → click ⚡ Suggest from history',
+      'A purple panel appears with merchant name pills (e.g. "Starbucks", "Shell", "Amazon")',
+      'Click any pill → rule form fills with that merchant name',
+      'Choose a budget category → Add Rule → merchant disappears from the suggestion panel',
+    ],
+  },
+  {
     version: 'V36',
     date: '5/25/2026 at 4:00 AM',
     what: [
