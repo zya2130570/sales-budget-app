@@ -754,7 +754,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [merchantSuggestList, setMerchantSuggestList] = useState<string[]>([]) // V37 — suggest panel
   const [aiChatOpen, setAiChatOpen] = useState(false)  // V33 — persistent AI chat
-  const [cloudOpenSignal, setCloudOpenSignal] = useState(0)    // V34 — Ctrl+S opens cloud panel
+  const [cloudOpenSignal, setCloudOpenSignal] = useState(0)    // V39 — Ctrl+S toggles cloud panel (signal counter)
   const [versionOpen, setVersionOpen] = useState(false) // V34 — V opens version badge
   // V33 — category breakdowns stored locally (not synced)
   const [breakdowns, setBreakdowns] = useState<Record<string, BreakdownItem[]>>(() => {
@@ -2576,7 +2576,7 @@ txnMerchantRef.current?.focus()
 
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
 
-  const sidebarW = sidebarCollapsed ? 64 : 260
+  const sidebarW = sidebarCollapsed ? 56 : 220
 
   return (
     <div data-theme={theme} style={{ background: '#0B0B0F', minHeight: '100vh', color: '#f1f5f9' }}>
@@ -2620,7 +2620,7 @@ txnMerchantRef.current?.focus()
             <CloudStatusButton
               theme={theme}
               externalOpenSignal={cloudOpenSignal}
-              onExternalClose={() => {}}
+              onExternalClose={() => {/* no-op: signal-based toggle */}}
               status={cloudPersistence.status}
               canSync={cloudPersistence.canSync}
               connectionTested={cloudPersistence.connectionTested}
