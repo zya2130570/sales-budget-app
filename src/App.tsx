@@ -126,6 +126,8 @@ import { OnboardingGuide } from './components/OnboardingGuide'
 import { CommandPalette } from './components/CommandPalette'
 import { Sidebar } from './components/Sidebar'
 import { CloudStatusButton } from './components/CloudStatusButton'
+import { BankSelector } from './components/BankSelector'
+import { BANK_TEMPLATES } from './utils/csv'
 import { AIChatDrawer } from './components/AIChatDrawer'
 import { BreakdownEditor } from './components/BreakdownEditor'
 import type { BreakdownItem } from './types'
@@ -4604,7 +4606,61 @@ txnMerchantRef.current?.focus()
             }
             transactionRulesSlot={
             <Card title="Transaction Rules" noHover>
-              <p className="text-xs text-slate-400 mb-3">Rules help auto-categorize transactions based on merchant names or notes. New transactions get a category applied automatically if a rule matches.</p>
+              <div className="flex items-start justify-between gap-4 mb-3">
+                <p className="text-xs text-slate-400">Rules auto-categorize transactions based on merchant names or notes. Applied on import and when you manually categorize.</p>
+                <button
+                  onClick={() => {
+                    // V35 — Suggest rules from all uncategorized transactions
+                    const uncategorized = transactions.filter(t => !t.category || t.category === 'Uncategorized')
+                    if (uncategorized.length === 0) { showToast('No uncategorized transactions to suggest rules from'); return }
+                    const merchants = [...new Set(uncategorized.map(t => t.merchant).filter(Boolean))]
+                    showToast(`Found ${merchants.length} unique merchants without rules — use the form below to add rules for them`)
+                  }}
+                  className="text-[11px] px-2.5 py-1.5 rounded-lg border border-violet-700/40 bg-violet-900/20 text-violet-300 hover:bg-violet-800/30 transition-colors flex-shrink-0 whitespace-nowrap"
+                >
+                  ⚡ Suggest from history
+                </button>
+              </div>
+
+              {/* V35 — Common merchant quick-rules */}
+              {rules.length === 0 && (
+                <div className="mb-4 rounded-xl border border-slate-700/40 bg-slate-800/30 p-3">
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">Quick-add common rules</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { name: 'Amazon', match: 'amazon', cat: 'Shopping' },
+                      { name: 'DoorDash', match: 'doordash', cat: 'Takeout' },
+                      { name: 'Uber Eats', match: 'uber eats', cat: 'Takeout' },
+                      { name: 'Netflix', match: 'netflix', cat: 'Subscriptions' },
+                      { name: 'Spotify', match: 'spotify', cat: 'Subscriptions' },
+                      { name: 'Walmart', match: 'walmart', cat: 'Groceries' },
+                      { name: 'Target', match: 'target', cat: 'Shopping' },
+                      { name: 'Whole Foods', match: 'whole foods', cat: 'Groceries' },
+                      { name: 'Starbucks', match: 'starbucks', cat: 'Dining Out' },
+                      { name: 'Apple', match: 'apple.com/bill', cat: 'Subscriptions' },
+                      { name: 'Shell / Gas', match: 'shell,chevron,bp,exxon', cat: 'Gas' },
+                      { name: 'CVS / Walgreens', match: 'cvs,walgreens', cat: 'Health' },
+                    ].filter(q => !rules.some(r => r.matchText?.toLowerCase().includes(q.match))).map(q => {
+                      const matchingCat = categories.find(c => c.name.toLowerCase().includes(q.cat.toLowerCase()))
+                      if (!matchingCat) return null
+                      return (
+                        <button
+                          key={q.name}
+                          onClick={() => {
+                            const newRule = { id: `rule-quick-${Date.now()}-${q.name}`, name: q.name, matchText: q.match, matchField: 'merchant' as const, categoryId: matchingCat.id, createdAt: new Date().toISOString() }
+                            setRules(prev => [...prev, newRule])
+                            showToast(`Rule added: ${q.name} → ${matchingCat.name}`)
+                          }}
+                          className="text-[11px] px-2.5 py-1.5 rounded-lg border border-slate-600/40 bg-slate-700/40 hover:bg-slate-600/50 text-slate-300 hover:text-slate-100 transition-all"
+                        >
+                          + {q.name} → {matchingCat.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="text-[10px] text-slate-600 mt-2">Only shows rules you don{"'"}t have yet, matched to your existing budget categories.</p>
+                </div>
+              )}
               <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-3 items-start">
                 <div>
                   <label className="block text-xs text-slate-400 mb-1">Rule Name</label>
@@ -5722,20 +5778,11 @@ function CsvImportModal({
             </div>
           </div>
 
-          {/* V9.10 — Import preset selector */}
-          <div>
-            <label className="block text-xs text-slate-400 mb-1">Import Preset</label>
-            <select
-              value={preset}
-              onChange={e => onPresetChange(e.target.value as ImportPreset)}
-              className="w-full px-2 py-1.5 text-sm rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
-            >
-              <option value="auto">Auto Detect</option>
-              <option value="apple-card">Apple Card CSV</option>
-              <option value="generic-csv">Generic CSV</option>
-              <option value="chase-pdf-experimental">Chase Statement PDF (Experimental)</option>
-            </select>
-          </div>
+          {/* V35 — Bank selector with export instructions */}
+          <BankSelector
+            selected={preset ?? 'generic-csv'}
+            onSelect={p => onPresetChange(p)}
+          />
 
           {effectiveAccount && (
             <div className="rounded-lg border border-slate-700/60 bg-slate-800/40 px-3 py-2 text-xs text-slate-400 flex items-center gap-2">
