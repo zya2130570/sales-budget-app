@@ -3,6 +3,7 @@
  * Linear-style fixed left sidebar. Collapsible. Keyboard shortcuts.
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { loadBindings, MODIFIER_REQUIRED } from './KeyboardShortcutsPanel'
 
 type Tab = 'Dashboard' | 'Income' | 'Budget' | 'Accounts' | 'Transactions' | 'Scenarios' | 'Targets'
 
@@ -66,23 +67,34 @@ type Props = {
 
 export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, collapsed, onToggle, theme = 'dark', onToggleTheme, onSync, onOpenAIChat, onOpenCloud, onOpenVersion, onWidthChange }: Props) {
 
-  // Keyboard shortcuts: 1-7 navigate, 0 toggles Settings, . toggles Profile, ? opens shortcuts, [ toggles sidebar, t toggles theme
+  // V42 — keyboard shortcuts read from saved bindings (rebindable via KeyboardShortcutsPanel)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      // Cmd/Ctrl+S — sync to cloud (works from anywhere, including input fields)
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') { e.preventDefault(); onOpenCloud?.(); return }
+      const b = loadBindings()
+      const k = e.key.toLowerCase()
+
+      // Modifier shortcuts (Ctrl/Cmd+key) — work even in input fields
+      if ((e.metaKey || e.ctrlKey) && !e.altKey) {
+        if (k === b.cloud.toLowerCase()) { e.preventDefault(); onOpenCloud?.(); return }
+      }
+
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.ctrlKey || e.metaKey || e.altKey) return
-      if (e.key === '[') { onToggle(); return }
-      if (e.key === '0') { e.preventDefault(); onOpenSettings(); return }
-      if (e.key === '8') { e.preventDefault(); onOpenAIChat?.(); return }
-      if (e.key === 'v' || e.key === 'V') { e.preventDefault(); onOpenVersion?.(); return }
-      if (e.key === '.') { e.preventDefault(); onOpenProfile?.(); return }
-      if ((e.key === '?' || e.key === '/') && onOpenKeyboardShortcuts) { e.preventDefault(); onOpenKeyboardShortcuts(); return }
-      if (e.key.toLowerCase() === 't' && onToggleTheme) { e.preventDefault(); onToggleTheme(); return }
-      const idx = parseInt(e.key) - 1
-      if (idx >= 0 && idx < NAV.length) onNavigate(NAV[idx].id)
+
+      // Single-key shortcuts
+      if (k === b.sidebar.toLowerCase()) { onToggle(); return }
+      if (k === b.settings.toLowerCase()) { e.preventDefault(); onOpenSettings(); return }
+      if (k === b.ai.toLowerCase()) { e.preventDefault(); onOpenAIChat?.(); return }
+      if (k === b.version.toLowerCase()) { e.preventDefault(); onOpenVersion?.(); return }
+      if (k === b.profile.toLowerCase()) { e.preventDefault(); onOpenProfile?.(); return }
+      if ((k === b.help.toLowerCase() || e.key === '/') && onOpenKeyboardShortcuts) { e.preventDefault(); onOpenKeyboardShortcuts(); return }
+      if (k === b.theme.toLowerCase() && onToggleTheme) { e.preventDefault(); onToggleTheme(); return }
+
+      // Nav shortcuts 1-7
+      const navIds: Array<keyof typeof b> = ['nav1','nav2','nav3','nav4','nav5','nav6','nav7']
+      const navIdx = navIds.findIndex(id => !MODIFIER_REQUIRED.has(id as never) && k === b[id].toLowerCase())
+      if (navIdx >= 0 && navIdx < NAV.length) onNavigate(NAV[navIdx].id)
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
