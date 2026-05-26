@@ -8,6 +8,26 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V41',
+    date: '5/26/2026 at 3:00 PM',
+    what: [
+      'Sidebar is now user-resizable: drag the right edge to set a custom width between 180px and 400px. Width persists to localStorage across sessions. The [ shortcut still collapses/expands as before.',
+      'Main content area always fills the exact remaining width (calc(100vw - sidebarWidth)). Shrinking the window now reduces sidebar space first, then content.',
+      'Keyboard shortcuts panel: custom rows now show an Undo/Redo control. Delete a row by accident and click Undo to get it back.',
+      'Added a clear callout in the shortcuts panel footer: custom rows are a personal reference cheat sheet only. Adding a row does not wire up any app behavior.',
+    ],
+    test: [
+      'Hover over the right edge of the sidebar — cursor changes to col-resize.',
+      'Drag the sidebar edge to ~320px — sidebar widens, content shrinks to fill remaining space.',
+      'Reload the page — sidebar remembers the custom width.',
+      'Press [ — sidebar collapses to icon-only. Press [ again — restores to custom width.',
+      'Resize browser window to half-screen — content fills its space correctly, no overflow or gap.',
+      'Press ? to open shortcuts panel. Delete a custom row. Click Undo — row returns.',
+      'Click Redo — row is deleted again.',
+      'Read the footer note: it explains custom rows are reference-only with no app behavior.',
+    ],
+  },
+  {
     version: 'V40',
     date: '5/26/2026 at 2:00 PM',
     what: [
