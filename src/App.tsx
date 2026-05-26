@@ -756,6 +756,24 @@ export default function App() {
     try { return Math.min(400, Math.max(180, parseInt(localStorage.getItem('flow_sidebar_width') ?? '260'))) }
     catch { return 260 }
   })
+
+  // V42 — auto-resize sidebar proportionally when window resizes (user drag overrides, but window resize re-applies)
+  const userDraggedRef = useRef(false)
+  useEffect(() => {
+    function handleResize() {
+      if (userDraggedRef.current) return // respect manual override
+      const vw = window.innerWidth
+      // Collapsed sidebar always 64px; expanded targets ~22% of viewport clamped 180–320px
+      if (!sidebarCollapsed) {
+        const auto = Math.round(Math.min(320, Math.max(180, vw * 0.22)))
+        setSidebarW(auto)
+      }
+    }
+    handleResize() // run once on mount
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidebarCollapsed])
   const [merchantSuggestList, setMerchantSuggestList] = useState<string[]>([]) // V37 — suggest panel
   const [aiChatOpen, setAiChatOpen] = useState(false)  // V33 — persistent AI chat
   const [cloudOpenSignal, setCloudOpenSignal] = useState(0)    // V39 — Ctrl+S toggles cloud panel (signal counter)
@@ -2583,7 +2601,7 @@ txnMerchantRef.current?.focus()
   const effectiveSidebarW = sidebarCollapsed ? 64 : sidebarW
 
   return (
-    <div data-theme={theme} style={{ background: '#0B0B0F', minHeight: '100vh', color: '#f1f5f9' }}>
+    <div data-theme={theme} style={{ background: 'var(--bg-app)', minHeight: '100vh', color: 'var(--text-primary)' }}>
 
       {/* V29 — Fixed left sidebar (position:fixed, no layout impact on divs) */}
       <Sidebar
@@ -2600,7 +2618,7 @@ txnMerchantRef.current?.focus()
         onOpenAIChat={() => setAiChatOpen(true)}
         onOpenCloud={() => setCloudOpenSignal(v => v + 1)}
         onOpenVersion={() => setVersionOpen(v => !v)}
-        onWidthChange={(w) => setSidebarW(w)}
+        onWidthChange={(w) => { userDraggedRef.current = true; setSidebarW(w) }}
       />
 
       {/* Single inner container with dynamic left margin */}
