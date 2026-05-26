@@ -752,6 +752,10 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [onboardingGuideOpen, setOnboardingGuideOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarW, setSidebarW] = useState<number>(() => {
+    try { return Math.min(400, Math.max(180, parseInt(localStorage.getItem('flow_sidebar_width') ?? '260'))) }
+    catch { return 260 }
+  })
   const [merchantSuggestList, setMerchantSuggestList] = useState<string[]>([]) // V37 — suggest panel
   const [aiChatOpen, setAiChatOpen] = useState(false)  // V33 — persistent AI chat
   const [cloudOpenSignal, setCloudOpenSignal] = useState(0)    // V39 — Ctrl+S toggles cloud panel (signal counter)
@@ -2576,7 +2580,7 @@ txnMerchantRef.current?.focus()
 
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
 
-  const sidebarW = sidebarCollapsed ? 64 : 260
+  const effectiveSidebarW = sidebarCollapsed ? 64 : sidebarW
 
   return (
     <div data-theme={theme} style={{ background: '#0B0B0F', minHeight: '100vh', color: '#f1f5f9' }}>
@@ -2596,10 +2600,11 @@ txnMerchantRef.current?.focus()
         onOpenAIChat={() => setAiChatOpen(true)}
         onOpenCloud={() => setCloudOpenSignal(v => v + 1)}
         onOpenVersion={() => setVersionOpen(v => !v)}
+        onWidthChange={(w) => setSidebarW(w)}
       />
 
       {/* Single inner container with dynamic left margin */}
-      <div className="min-h-screen" style={{ marginLeft: sidebarW, transition: 'margin-left 0.2s cubic-bezier(0.4,0,0.2,1)' }}>
+      <div className="min-h-screen" style={{ marginLeft: effectiveSidebarW, width: `calc(100vw - ${effectiveSidebarW}px)`, minWidth: 0, transition: 'margin-left 0.2s cubic-bezier(0.4,0,0.2,1), width 0.2s cubic-bezier(0.4,0,0.2,1)' }}>
 
         {/* Compact sticky header — logo + utility only, no tabs */}
         <header style={{ position: 'sticky', top: 0, zIndex: 30, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', height: 48, borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'rgba(11,11,15,0.95)', backdropFilter: 'blur(12px)' }}>
