@@ -2576,7 +2576,7 @@ txnMerchantRef.current?.focus()
 
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
 
-  const sidebarW = sidebarCollapsed ? 56 : 220
+  const sidebarW = sidebarCollapsed ? 64 : 260
 
   return (
     <div data-theme={theme} style={{ background: '#0B0B0F', minHeight: '100vh', color: '#f1f5f9' }}>
