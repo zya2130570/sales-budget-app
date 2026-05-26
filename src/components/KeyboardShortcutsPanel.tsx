@@ -50,7 +50,7 @@ const LABELS: Record<ShortcutId, string> = {
 }
 
 // These shortcuts require Ctrl/Cmd held down
-const MODIFIER_REQUIRED: Set<ShortcutId> = new Set(['cloud'])
+export const MODIFIER_REQUIRED: Set<ShortcutId> = new Set(['cloud'])
 
 // These are always blocked from rebinding (Esc, Enter, arrows — system keys)
 const BLOCKED_KEYS = new Set(['Escape', 'Enter', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Backspace', 'Delete', 'Meta', 'Control', 'Alt', 'Shift', 'CapsLock', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'])
