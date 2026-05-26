@@ -8,6 +8,19 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V39.1',
+    date: '5/25/2026 at 1:15 PM',
+    what: [
+      'Cloud panel positioning restored: bottom-sheet on mobile, centered modal on desktop — same look as before V39.',
+      'Portal rendering kept: click anywhere outside the panel to close it. The backdropFilter header clipping bug remains fixed.',
+    ],
+    test: [
+      'Click Cloud button — panel appears centered on desktop, slides up from bottom on mobile.',
+      'Click anywhere outside the panel — panel closes.',
+      'Press Ctrl+S — panel toggles open/closed.',
+    ],
+  },
+  {
     version: 'V37',
     date: '5/25/2026 at 6:00 AM',
     what: [
