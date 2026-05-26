@@ -8,6 +8,23 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V40',
+    date: '5/26/2026 at 2:00 PM',
+    what: [
+      'Layout fix: main content area now dynamically fills the remaining width. Fixed a mismatch where App.tsx used 56/220px for sidebar width but Sidebar.tsx actually rendered at 64/260px, causing content to be cut off on the left side at any window size.',
+      'Keyboard shortcuts panel is now fully editable. Click any shortcut row to edit its key label or description. Built-in shortcuts show an edit pencil icon; custom rows show a delete button too.',
+      'Add custom shortcut reference rows (key + description) that persist to localStorage across sessions.',
+    ],
+    test: [
+      'Resize the window to a narrow width — content fills all available space, no gap on left edge next to sidebar.',
+      'Collapse the sidebar with [ — content expands smoothly to fill the extra space.',
+      'Press ? — shortcuts panel opens. Click any row — it enters edit mode with key and description fields.',
+      'Edit a description, press Enter or click Save — row updates immediately.',
+      'Click + Add custom shortcut reference — fill in key and description, press Enter or Add — row appears in list.',
+      'Delete a custom row with the x button — row disappears and stays gone after closing/reopening.',
+    ],
+  },
+  {
     version: 'V39.1',
     date: '5/25/2026 at 1:15 PM',
     what: [
