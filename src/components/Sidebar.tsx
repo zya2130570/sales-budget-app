@@ -2,7 +2,7 @@
  * Sidebar.tsx — V29
  * Linear-style fixed left sidebar. Collapsible. Keyboard shortcuts.
  */
-import { useEffect } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 
 type Tab = 'Dashboard' | 'Income' | 'Budget' | 'Accounts' | 'Transactions' | 'Scenarios' | 'Targets'
 
@@ -37,6 +37,16 @@ const NAV: { id: Tab; label: string; shortcut: string; icon: React.ReactNode }[]
   },
 ]
 
+const SIDEBAR_WIDTH_KEY = 'flow_sidebar_width'
+const DEFAULT_WIDTH = 260
+const MIN_WIDTH = 180
+const MAX_WIDTH = 400
+
+function loadSidebarWidth(): number {
+  try { return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, parseInt(localStorage.getItem(SIDEBAR_WIDTH_KEY) ?? String(DEFAULT_WIDTH)))) }
+  catch { return DEFAULT_WIDTH }
+}
+
 type Props = {
   currentTab: Tab
   onNavigate: (tab: Tab) => void
@@ -51,9 +61,10 @@ type Props = {
   onOpenAIChat?: () => void
   onOpenCloud?: () => void
   onOpenVersion?: () => void
+  onWidthChange?: (w: number) => void
 }
 
-export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, collapsed, onToggle, theme = 'dark', onToggleTheme, onSync, onOpenAIChat, onOpenCloud, onOpenVersion }: Props) {
+export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, collapsed, onToggle, theme = 'dark', onToggleTheme, onSync, onOpenAIChat, onOpenCloud, onOpenVersion, onWidthChange }: Props) {
 
   // Keyboard shortcuts: 1-7 navigate, 0 toggles Settings, . toggles Profile, ? opens shortcuts, [ toggles sidebar, t toggles theme
   useEffect(() => {
@@ -77,7 +88,36 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
     return () => window.removeEventListener('keydown', handler)
   }, [onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, onToggle, onToggleTheme, onSync, onOpenAIChat, onOpenCloud, onOpenVersion])
 
-  const W = collapsed ? 64 : 260
+  const [customWidth, setCustomWidth] = useState<number>(loadSidebarWidth)
+  const dragging = useRef(false)
+  const dragStartX = useRef(0)
+  const dragStartW = useRef(0)
+
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    if (collapsed) return
+    e.preventDefault()
+    dragging.current = true
+    dragStartX.current = e.clientX
+    dragStartW.current = customWidth
+
+    const onMove = (ev: MouseEvent) => {
+      if (!dragging.current) return
+      const delta = ev.clientX - dragStartX.current
+      const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, dragStartW.current + delta))
+      setCustomWidth(next)
+      onWidthChange?.(next)
+      localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(next)))
+    }
+    const onUp = () => {
+      dragging.current = false
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [collapsed, customWidth, onWidthChange])
+
+  const W = collapsed ? 64 : customWidth
 
   return (
     <aside
@@ -85,7 +125,7 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
         position: 'fixed', top: 0, left: 0, bottom: 0, width: W, zIndex: 40,
         background: '#0D0D11',
         borderRight: '1px solid rgba(255,255,255,0.05)',
-        transition: 'width 0.2s cubic-bezier(0.4,0,0.2,1)',
+        transition: dragging.current ? 'none' : 'width 0.2s cubic-bezier(0.4,0,0.2,1)',
         display: 'flex', flexDirection: 'column',
         overflow: 'hidden',
       }}
@@ -270,6 +310,18 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
           {!collapsed && <span style={{ fontSize: 12, letterSpacing: '0.02em' }}>Collapse <kbd style={{ fontSize: 10, padding: '0 4px', borderRadius: 3, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', fontFamily: 'monospace' }}>[</kbd></span>}
         </button>
       </div>
+      {/* V41 — drag handle on right edge */}
+      {!collapsed && (
+        <div
+          onMouseDown={onMouseDown}
+          style={{
+            position: 'absolute', top: 0, right: 0, bottom: 0, width: 5,
+            cursor: 'col-resize', zIndex: 10,
+            background: 'transparent',
+          }}
+          title="Drag to resize sidebar"
+        />
+      )}
     </aside>
   )
 }
