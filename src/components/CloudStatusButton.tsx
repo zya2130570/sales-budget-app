@@ -171,10 +171,10 @@ export function CloudStatusButton(props: SyncProps & { theme?: 'dark' | 'light';
 
       {/* ── Full modal — rendered via portal to escape header stacking context (V39) ── */}
       {open && createPortal(
-        <div className="fixed inset-0 z-[200] flex items-start justify-end pt-12 pr-4 bg-black/60" onClick={() => setOpen(false)}>
+        <div className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/70" onClick={() => setOpen(false)}>
           <div
             ref={panelRef}
-            className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-2xl border border-slate-700 bg-slate-800 shadow-2xl"
+            className="w-full sm:max-w-xl max-h-[92vh] flex flex-col rounded-t-2xl sm:rounded-2xl border border-slate-700 bg-slate-800 shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
             {/* Header */}
