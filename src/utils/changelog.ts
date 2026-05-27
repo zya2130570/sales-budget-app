@@ -8,6 +8,23 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V42',
+    date: '5/25/2026 at 10:00 PM',
+    what: [
+      'Cloud panel click-outside fixed everywhere — added a capture-phase mousedown listener on document. Clicking on sidebar items, budget rows, any content area, or any button now closes the panel. No longer limited to the header area.',
+      'Reconcile FAQ — "? reconcile help" button in the Your Accounts card header opens a step-by-step explainer: what reconcile means, how to set a baseline, what Unexplained Activity is, and how to get to zero. Escape or Got it closes it.',
+      'Savings Goal transaction type — new "Savings Goal Contribution" option in the Log Transaction type dropdown. When selected, shows a goal selector. Saving a linked transaction auto-logs the amount as a contribution to that goal — progress bar updates immediately.',
+    ],
+    test: [
+      'Press Ctrl+S to open cloud panel, then click on Budget in sidebar — panel should close',
+      'Press Ctrl+S, then click on a category row — panel should close',
+      'Press Ctrl+S, then click anywhere on the page — panel should close',
+      'Accounts tab → Your Accounts card → click "? reconcile help" → 5-step explainer opens',
+      'Transactions → Log Transaction → Type dropdown → choose "Savings Goal Contribution" → goal selector appears',
+      'Select a goal, enter amount, Add Transaction → toast confirms contribution was logged → check Savings Goals tab for updated progress',
+    ],
+  },
+  {
     version: 'V41',
     date: '5/26/2026 at 3:00 PM',
     what: [
