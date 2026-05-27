@@ -65,7 +65,7 @@ export type Account = {
 }
 
 /** Transaction model persisted in v42-transactions. */
-export type TransactionType = 'expense' | 'income' | 'transfer' | 'credit card payment'
+export type TransactionType = 'expense' | 'income' | 'transfer' | 'credit card payment' | 'savings-goal'
 export type TransactionSource = 'manual' | 'csv' | 'pdf' | 'generated'
 export type TransactionReviewStatus = 'needs-review' | 'reviewed' | 'ignored'
 export type Transaction = {
