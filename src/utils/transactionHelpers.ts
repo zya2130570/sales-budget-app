@@ -33,6 +33,7 @@ export const TXN_TYPE_LABELS: Record<TransactionType, string> = {
   income:                'Income',
   transfer:              'Transfer',
   'credit card payment': 'Credit Card Payment',
+  'savings-goal':        'Savings Goal',
 }
 
 export const TXN_FILTER_OPTIONS = [
