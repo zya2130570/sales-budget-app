@@ -128,6 +128,7 @@ import { Sidebar } from './components/Sidebar'
 import { CloudStatusButton } from './components/CloudStatusButton'
 import { BankSelector } from './components/BankSelector'
 import { AIChatDrawer } from './components/AIChatDrawer'
+import { ReconcileFAQ } from './components/ReconcileFAQ'
 import { BreakdownEditor } from './components/BreakdownEditor'
 import type { BreakdownItem } from './types'
 import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
@@ -292,7 +293,7 @@ const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   'other':       'Other',
 }
 // TXN_TYPES local constant (not exported, only used by Log Transaction form in App)
-const TXN_TYPES: TransactionType[] = ['expense', 'income', 'transfer', 'credit card payment']
+const TXN_TYPES: TransactionType[] = ['expense', 'income', 'transfer', 'credit card payment', 'savings-goal']
 const targetPresets = ['Bike', 'Emergency Fund', 'Long-term Savings', 'Tuition', 'Custom']
 // tabTips removed — navigation moved to Sidebar component (V29)
 
@@ -638,6 +639,7 @@ export default function App() {
     categoryId: '',
     notes: '',
     toAccountId: '',
+    linkedGoalId: '' as string,
   })
   const [txnHistory, setTxnHistory]           = useState<Transaction[][]>([])
   const [txnRedo, setTxnRedo]                 = useState<Transaction[][]>([])
@@ -776,6 +778,7 @@ export default function App() {
   }, [sidebarCollapsed])
   const [merchantSuggestList, setMerchantSuggestList] = useState<string[]>([]) // V37 — suggest panel
   const [aiChatOpen, setAiChatOpen] = useState(false)  // V33 — persistent AI chat
+  const [reconcileFAQOpen, setReconcileFAQOpen] = useState(false)  // V42
   const [cloudOpenSignal, setCloudOpenSignal] = useState(0)    // V39 — Ctrl+S toggles cloud panel (signal counter)
   const [versionOpen, setVersionOpen] = useState(false) // V34 — V opens version badge
   // V33 — category breakdowns stored locally (not synced)
@@ -1717,7 +1720,7 @@ export default function App() {
     })
   }
  const clearTxnForm = () => {
-    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '', toAccountId: '' })
+    setTxnForm({ date: new Date().toISOString().slice(0, 10), accountId: '', merchant: '', amount: '', type: 'expense', categoryId: '', notes: '', toAccountId: '', linkedGoalId: '' })
     setTxnHint('')
     setTxnDupWarning(false)
   }
@@ -1775,6 +1778,23 @@ export default function App() {
   amount,
   rules,
 })))
+
+// V42 — if type is savings-goal with a linked goal, auto-log a contribution
+if (txnForm.type === 'savings-goal' && txnForm.linkedGoalId) {
+  const goalId = txnForm.linkedGoalId
+  setTargetsWithHistory(prev => prev.map(t => t.id === goalId ? {
+    ...t,
+    currentSaved: t.currentSaved + amount,
+    contributions: [...(t.contributions ?? []), {
+      id: crypto.randomUUID(),
+      amount,
+      date: txnForm.date,
+      note: merchant || 'Logged via transaction',
+      createdAt: new Date().toISOString(),
+    }],
+  } : t))
+  showToast(`$${amount.toFixed(2)} also logged as a contribution to your savings goal`)
+}
 
 // Set blur guard BEFORE moving focus so Amount's onBlur skips format-back
 txnSubmittingRef.current = true
@@ -2668,6 +2688,7 @@ txnMerchantRef.current?.focus()
 
       {/* V33 — Persistent AI chat drawer */}
       <AIChatDrawer open={aiChatOpen} onClose={() => setAiChatOpen(false)} />
+      {reconcileFAQOpen && <ReconcileFAQ onClose={() => setReconcileFAQOpen(false)} />}
 
       {/* V33 — Breakdown editor modal */}
       {breakdownEditId && (() => {
@@ -4101,7 +4122,7 @@ txnMerchantRef.current?.focus()
             </Card>
 
             {accounts.length > 0 ? (
-              <Card title="Your Accounts">
+              <Card title="Your Accounts" headerAction={<button onClick={() => setReconcileFAQOpen(true)} className="text-[10px] px-2 py-0.5 rounded-full border border-slate-600 text-slate-500 hover:text-slate-200 hover:border-slate-400 transition-colors">? reconcile help</button>}>
                 {/* V9.3 — Summary cards */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                   <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
@@ -4557,6 +4578,22 @@ txnMerchantRef.current?.focus()
                     {TXN_TYPES.map(t => <option key={t} value={t}>{TXN_TYPE_LABELS[t]}</option>)}
                   </select>
                   <p className="text-[10px] text-slate-500 mt-0.5">Use Credit Card Payment when checking pays down a credit card.</p>
+                {txnForm.type === 'savings-goal' && targets.filter(t => !t.completed).length > 0 && (
+                  <div className="mt-2">
+                    <label className="text-xs text-slate-400 block mb-1">Link to savings goal <span className="text-slate-600">(optional)</span></label>
+                    <select
+                      value={txnForm.linkedGoalId}
+                      onChange={e => setTxnForm(v => ({ ...v, linkedGoalId: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-600 bg-slate-800 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                    >
+                      <option value="">— none —</option>
+                      {targets.filter(t => !t.completed).map(t => (
+                        <option key={t.id} value={t.id}>{t.name} (${(t.goalAmount - t.currentSaved).toFixed(0)} remaining)</option>
+                      ))}
+                    </select>
+                    {txnForm.linkedGoalId && <p className="text-[10px] text-emerald-400 mt-1">✓ Amount will also log as a contribution toward this goal</p>}
+                  </div>
+                )}
                 </div>
                 {/* V9.2 — Transfer To account (only for transfer + credit card payment) */}
                 {isMoneyMovement(txnForm.type) && (
