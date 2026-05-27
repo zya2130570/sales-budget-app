@@ -133,6 +133,19 @@ export function CloudStatusButton(props: SyncProps & { theme?: 'dark' | 'light';
     document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
   }, [open])
+
+  // V42 — mousedown anywhere outside the panel closes it (works regardless of z-index)
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    // Use capture phase so we get it before any button click handlers can act
+    document.addEventListener('mousedown', handler, true)
+    return () => document.removeEventListener('mousedown', handler, true)
+  }, [open])
   const [tab, setTab] = useState<'sync' | 'compare'>('sync')
   const [showResults, setShowResults] = useState(false)
   const [confirmRestore, setConfirmRestore] = useState(false)
