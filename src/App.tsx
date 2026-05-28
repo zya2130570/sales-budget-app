@@ -753,11 +753,22 @@ export default function App() {
   // V16 — Settings panel
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [onboardingGuideOpen, setOnboardingGuideOpen] = useState(false)
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    // V43 — default collapsed on all devices; remember user's last choice
+    try {
+      const stored = localStorage.getItem('flow_sidebar_collapsed')
+      return stored === null ? true : stored === 'true'
+    } catch { return true }
+  })
   const [sidebarW, setSidebarW] = useState<number>(() => {
     try { return Math.min(400, Math.max(180, parseInt(localStorage.getItem('flow_sidebar_width') ?? '260'))) }
     catch { return 260 }
   })
+
+  // V43 — persist collapsed state to localStorage
+  useEffect(() => {
+    localStorage.setItem('flow_sidebar_collapsed', String(sidebarCollapsed))
+  }, [sidebarCollapsed])
 
   // V42 — auto-resize sidebar proportionally when window resizes (user drag overrides, but window resize re-applies)
   const userDraggedRef = useRef(false)
@@ -779,6 +790,7 @@ export default function App() {
   const [merchantSuggestList, setMerchantSuggestList] = useState<string[]>([]) // V37 — suggest panel
   const [aiChatOpen, setAiChatOpen] = useState(false)  // V33 — persistent AI chat
   const [reconcileFAQOpen, setReconcileFAQOpen] = useState(false)  // V42
+  const [migrationOpen, setMigrationOpen] = useState(false)         // V43 — local→cloud migration
   const [cloudOpenSignal, setCloudOpenSignal] = useState(0)    // V39 — Ctrl+S toggles cloud panel (signal counter)
   const [versionOpen, setVersionOpen] = useState(false) // V34 — V opens version badge
   // V33 — category breakdowns stored locally (not synced)
@@ -1973,7 +1985,17 @@ txnMerchantRef.current?.focus()
       : type === 'transfer'          ? TRANSFER_MERCHANTS[Math.floor(Math.random() * TRANSFER_MERCHANTS.length)]
       : type === 'credit card payment' ? 'Credit Card Payment'
       : EXPENSE_MERCHANTS[Math.floor(Math.random() * EXPENSE_MERCHANTS.length)]
-    const amount = (Math.floor(Math.random() * 19) + 1) * 5
+    // V43 — realistic amounts by type
+    const amtRoll = Math.random()
+    const amount = type === 'income'
+      ? Math.round((1400 + Math.random() * 1200) * 100) / 100          // $1400–$2600 paychecks
+      : type === 'transfer' || type === 'credit card payment'
+      ? Math.round((100 + Math.random() * 500) * 100) / 100            // $100–$600 transfers
+      : amtRoll < 0.4
+      ? Math.round((5 + Math.random() * 45) * 100) / 100               // $5–$50 small (coffee, fast food)
+      : amtRoll < 0.85
+      ? Math.round((50 + Math.random() * 150) * 100) / 100             // $50–$200 medium (groceries, gas)
+      : Math.round((200 + Math.random() * 600) * 100) / 100            // $200–$800 large (rent, insurance)
     const catPool = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
     const categoryId = catPool.length ? catPool[Math.floor(Math.random() * catPool.length)].id : undefined
     const accountId = accounts[0]?.id ?? ''
@@ -2051,7 +2073,16 @@ txnMerchantRef.current?.focus()
         : type === 'transfer'           ? TRANSFER_MERCHANTS[Math.floor(Math.random() * TRANSFER_MERCHANTS.length)]
         : type === 'credit card payment'? 'Credit Card Payment'
         : EXPENSE_MERCHANTS[Math.floor(Math.random() * EXPENSE_MERCHANTS.length)]
-      const amount   = (Math.floor(Math.random() * 19) + 1) * 5
+      const amtRoll2 = Math.random()
+      const amount = type === 'income'
+        ? Math.round((1400 + Math.random() * 1200) * 100) / 100
+        : type === 'transfer' || type === 'credit card payment'
+        ? Math.round((100 + Math.random() * 500) * 100) / 100
+        : amtRoll2 < 0.4
+        ? Math.round((5 + Math.random() * 45) * 100) / 100
+        : amtRoll2 < 0.85
+        ? Math.round((50 + Math.random() * 150) * 100) / 100
+        : Math.round((200 + Math.random() * 600) * 100) / 100
       const catPool  = type === 'expense' ? categories.filter(c => c.type !== 'savings' && c.type !== 'investing') : categories
       const categoryId = Math.random() < 0.7 && catPool.length ? catPool[Math.floor(Math.random() * catPool.length)].id : undefined
       const accountId  = accounts[0]?.id ?? ''
@@ -2690,6 +2721,52 @@ txnMerchantRef.current?.focus()
       <AIChatDrawer open={aiChatOpen} onClose={() => setAiChatOpen(false)} />
       {reconcileFAQOpen && <ReconcileFAQ onClose={() => setReconcileFAQOpen(false)} />}
 
+      {/* V43 — Local→cloud migration wizard */}
+      {migrationOpen && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" onClick={() => setMigrationOpen(false)}>
+          <div className="w-full max-w-md rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-700/60">
+              <div>
+                <h2 className="text-sm font-bold text-slate-100">Save local data to cloud</h2>
+                <p className="text-[11px] text-slate-500 mt-0.5">This device → Supabase</p>
+              </div>
+              <button onClick={() => setMigrationOpen(false)} className="text-slate-500 hover:text-slate-200 text-lg leading-none">✕</button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="rounded-xl bg-slate-800/60 border border-slate-700/40 p-4 space-y-1.5 text-sm text-slate-300">
+                <p className="font-medium text-slate-200 mb-2">What will be saved:</p>
+                <p>• {categories.length} budget {categories.length === 1 ? 'category' : 'categories'}</p>
+                <p>• {accounts.length} {accounts.length === 1 ? 'account' : 'accounts'}</p>
+                <p>• {transactions.length} {transactions.length === 1 ? 'transaction' : 'transactions'}</p>
+                <p>• {targets.length} savings {targets.length === 1 ? 'goal' : 'goals'}</p>
+                {grossSalary > 0 && <p>• Income: ${grossSalary.toLocaleString()}/yr</p>}
+              </div>
+              <div className="rounded-xl border border-amber-700/30 bg-amber-950/15 p-3">
+                <p className="text-xs text-amber-200/90">
+                  ⚠ This will overwrite any existing cloud data for your account. If your cloud has newer data, use the Compare & Merge tab in the Cloud panel instead.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setMigrationOpen(false)}
+                  className="flex-1 py-2 rounded-xl border border-slate-700 text-sm text-slate-400 hover:text-slate-200 transition-colors">
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    cloudPersistence.syncNow()
+                    setMigrationOpen(false)
+                    showToast('Syncing all local data to cloud…')
+                  }}
+                  className="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm text-white font-medium transition-colors"
+                >
+                  Save to cloud
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* V33 — Breakdown editor modal */}
       {breakdownEditId && (() => {
         const cat = categories.find(c => c.id === breakdownEditId)
@@ -2773,9 +2850,27 @@ txnMerchantRef.current?.focus()
             {/* V16 — Onboarding card when empty */}
             {isAppEmpty && (
               <>
+              {appAuth.user && cloudPersistence.pendingCount > 0 && (
+                <div className="rounded-xl border border-blue-700/30 bg-blue-950/15 px-4 py-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold text-blue-300">You have unsaved local data</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">{cloudPersistence.pendingCount} item{cloudPersistence.pendingCount !== 1 ? 's' : ''} not yet synced to cloud</p>
+                  </div>
+                  <button onClick={() => setMigrationOpen(true)}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white transition-colors flex-shrink-0">
+                    Save to cloud
+                  </button>
+                </div>
+              )}
               <OnboardingCard
+                hasSalary={grossSalary > 0}
+                hasCategories={categories.length > 0}
+                hasAccounts={accounts.length > 0}
+                hasTransactions={transactions.length > 0}
+                hasGoals={targets.length > 0}
+                onNavigate={(t) => setTab(t as Tab)}
                 onLoadDemo={handleLoadDemo}
-                onOpenSettings={() => setSettingsOpen(true)}
+                onDismiss={() => {}}
               />
               <div className="flex justify-center">
                 <button
@@ -5047,6 +5142,18 @@ txnMerchantRef.current?.focus()
         {/* ── SCENARIOS ── */}
         {tab === 'Scenarios' && (
           <section className="space-y-4 transition-all duration-300">
+            {/* V43 — Scenarios explanation */}
+            <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 px-4 py-3 flex items-start gap-3">
+              <span className="text-base flex-shrink-0 mt-0.5">⚡</span>
+              <div>
+                <p className="text-sm font-semibold text-slate-200">What are scenarios?</p>
+                <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+                  Scenarios let you compare what your finances look like at different income levels — Slow, Medium, Fast, and Custom.
+                  Enter monthly gross income amounts for each, then scroll down to see how each affects your take-home pay,
+                  remaining after budget, and savings goal pace. Useful for commission-based income or planning for a raise.
+                </p>
+              </div>
+            </div>
             {/* ── Scenario inputs ── */}
             <Card title="Scenario Inputs">
               <div className="flex gap-2 mb-3">{periods.map(p => <Pill key={p} active={period === p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div>
