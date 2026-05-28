@@ -4,7 +4,7 @@
  * Visit /api/health in browser to see which env vars are present
  * Safe: shows presence/length only, never the actual key values
  */
-export default function handler(req: any, res: any) {
+export default function handler(_req: any, res: any) {
   res.status(200).json({
     gemini: {
       present: !!process.env.GEMINI_API_KEY,
