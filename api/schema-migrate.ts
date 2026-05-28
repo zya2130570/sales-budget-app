@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /**
  * api/schema-migrate.ts — V20
  *

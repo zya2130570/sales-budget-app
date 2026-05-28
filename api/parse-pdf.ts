@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /**
  * api/parse-pdf.ts — V36
  *

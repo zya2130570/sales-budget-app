@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /**
  * api/health.ts — diagnostic endpoint
  * Visit /api/health in browser to see which env vars are present
