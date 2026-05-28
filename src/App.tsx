@@ -3,7 +3,6 @@ import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, Bu
 
 import { currency, labelPeriod } from './utils/formatting'
 import {
-  BASE_SALARY,
   HOURS_PER_WEEK,
   BUMP_THRESHOLDS,
   convertFromMonthly,
