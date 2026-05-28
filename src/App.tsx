@@ -111,6 +111,8 @@ import {
 import { hasDuplicateTransaction } from './utils/duplicateDetection'
 import { GoalPlanningSummary } from './components/GoalPlanningSummary'
 import { GoalCard } from './components/GoalCard'
+import { YearOverYearPanel } from './components/YearOverYearPanel'
+import { ScenarioWizard } from './components/ScenarioWizard'
 import { useScenarios } from './hooks/useScenarios'
 import { useForecast } from './hooks/useForecast'
 import { useImportPipeline } from './hooks/useImportPipeline'
@@ -427,6 +429,11 @@ export default function App() {
   const [dashboardQuickTargetId, setDashboardQuickTargetId] = useState('')
   const [dashboardQuickAmount, setDashboardQuickAmount] = useState('')
   const [baseBumpsAchieved, setBaseBumpsAchieved] = useState(0)
+  // V44 #8 — editable base salary override (persisted to localStorage)
+  const [manualBaseSalary, setManualBaseSalary] = useState<number>(() => {
+    const v = localStorage.getItem('flow-manual-base-salary')
+    return v ? Number(v) : 40000
+  })
   const [budgetTitle, setBudgetTitle] = useState('')
   const [changeSummary, setChangeSummary] = useState<string[]>([])
   const [editId, setEditId] = useState<string | null>(null)
@@ -1003,7 +1010,7 @@ export default function App() {
   }
 
   const gp = Math.max(0, Number(gpInput) || 0)
-  const adjustedSalary = BASE_SALARY + (baseBumpsAchieved * 5000)
+  const adjustedSalary = manualBaseSalary + (baseBumpsAchieved * 5000)
   const eligibleBumps = BUMP_THRESHOLDS.filter(t => gp >= t).length
   const nextUnreachedThreshold = BUMP_THRESHOLDS[eligibleBumps]
   const inc = useMemo(() => income(gp, adjustedSalary), [gp, adjustedSalary])
@@ -2934,6 +2941,12 @@ txnMerchantRef.current?.focus()
               onAction={(tab) => setTab(tab as Tab)}
             />
 
+            {/* V44 #7 — Year-over-year spending history */}
+            <YearOverYearPanel
+              allActualsByPeriod={allActualsByPeriod}
+              categories={categories}
+            />
+
             {/* ── V14 AI Financial Assistant ── */}
             <AIAssistantPanel
               messages={aiAssistant.messages}
@@ -3240,7 +3253,26 @@ txnMerchantRef.current?.focus()
               </div>
               <p className="text-xs text-slate-400 mt-1">{currency(gp)}</p>
               <div className="mt-3 space-y-0.5">
-                <Row l="Current base salary" v={currency(adjustedSalary)} />
+                {/* V44 #8 — editable base salary */}
+                <div className="flex items-center justify-between py-0.5">
+                  <span className="text-xs text-slate-400">Current base salary</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-500 text-xs">$</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1000}
+                      value={manualBaseSalary}
+                      onChange={e => {
+                        const v = Math.max(0, Number(e.target.value) || 0)
+                        setManualBaseSalary(v)
+                        localStorage.setItem('flow-manual-base-salary', String(v))
+                      }}
+                      className="w-28 text-right px-2 py-0.5 text-xs rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200"
+                      title="Edit your base salary — tax breakdown updates live"
+                    />
+                  </div>
+                </div>
                 <Row l="Eligible base bumps (from GP)" v={`${eligibleBumps}`} />
                 <Row l="Applied base bumps" v={`${baseBumpsAchieved}`} />
                 <Row
@@ -5142,7 +5174,14 @@ txnMerchantRef.current?.focus()
         {/* ── SCENARIOS ── */}
         {tab === 'Scenarios' && (
           <section className="space-y-4 transition-all duration-300">
-            {/* V43 — Scenarios explanation */}
+            {/* V44 #10 — Scenario wizard (3-step guided) */}
+            <ScenarioWizard
+              monthlyBudget={monthlyBudget}
+              monthlyIncome={inc.totalMonthly}
+              scenario={scenario}
+              onSetScenario={(name, value) => setScenario(v => ({ ...v, [name]: value }))}
+            />
+            {/* V43 — Scenarios explanation (shown after wizard is dismissed) */}
             <div className="rounded-xl border border-slate-700/50 bg-slate-800/30 px-4 py-3 flex items-start gap-3">
               <span className="text-base flex-shrink-0 mt-0.5">⚡</span>
               <div>
@@ -5665,6 +5704,37 @@ txnMerchantRef.current?.focus()
 
             {/* V9.12 — Goal Planning Summary */}
             {targets.length > 0 && <GoalPlanningSummary summary={goalPlanSummary} />}
+
+            {/* V44 #9 — Deadline feasibility warnings */}
+            {activeTargets.length > 0 && (() => {
+              const weeklyAvailable = monthlyLeft / 4
+              const infeasible = activeTargets.filter(t => {
+                if (!t.deadline) return false
+                const req = requiredForTarget(t)
+                return req.weekly > weeklyAvailable * 1.05
+              })
+              if (infeasible.length === 0) return null
+              return (
+                <div className="rounded-xl border border-amber-700/40 bg-amber-950/10 px-4 py-3 space-y-1.5">
+                  <p className="text-xs font-semibold text-amber-400">⚠ Deadline feasibility — {infeasible.length} goal{infeasible.length > 1 ? 's' : ''} need more than your current surplus</p>
+                  <p className="text-[11px] text-slate-400">
+                    Your monthly surplus after budget is {currency(monthlyLeft)} (~{currency(weeklyAvailable)}/wk available for goals).
+                    These goals require more than that to hit their deadlines:
+                  </p>
+                  {infeasible.map(t => {
+                    const req = requiredForTarget(t)
+                    const shortfall = req.weekly - weeklyAvailable
+                    return (
+                      <div key={t.id} className="flex items-center justify-between gap-4 text-xs">
+                        <span className="text-slate-300 font-medium">{t.name}</span>
+                        <span className="text-amber-300 shrink-0">needs {currency(req.weekly)}/wk · {currency(shortfall)}/wk short · {req.days}d left</span>
+                      </div>
+                    )
+                  })}
+                  <p className="text-[10px] text-slate-600 pt-0.5">Fix: extend the deadline, reduce the goal amount, or increase income to create more surplus.</p>
+                </div>
+              )
+            })()}
 
             {/* Active Targets */}
             <section className="space-y-3">
