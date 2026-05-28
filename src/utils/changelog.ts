@@ -8,6 +8,25 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V43',
+    date: '5/27/2026 at 12:00 AM',
+    what: [
+      'Sidebar now defaults to collapsed on all devices. First visit always starts collapsed. Subsequent visits remember your last choice (expanded or collapsed) via localStorage.',
+      'Progressive onboarding checklist — replaces the static OnboardingCard. Shows 5 real steps: Income, Budget, Accounts, Transactions, Savings Goals. Each step checks your actual data and marks itself done. Progress bar shows completion. Click any incomplete step to go there.',
+      'Local to cloud migration — when you are signed in with unsynced local data, a prompt appears on Dashboard with a "Save to cloud" button and a summary of what will be pushed.',
+      'Scenarios explanation — a plain-language card at the top of the Scenarios tab explains what scenarios are and when to use them.',
+      'Realistic sample data — transaction generator now produces realistic amounts by type: income is $1400-$2600, transfers $100-$600, small expenses $5-$50, medium $50-$200, large $200-$800. No more all amounts being multiples of $5.',
+    ],
+    test: [
+      'Refresh the page — sidebar should start collapsed (icon-only mode)',
+      'Expand sidebar, refresh — sidebar stays expanded (choice is remembered)',
+      'Dashboard with no data — checklist shows 5 unchecked steps. Add income — Income step checks off.',
+      'Dashboard, signed in, with unsynced data — blue "Save to cloud" prompt appears at top',
+      'Scenarios tab — explanation card appears at top with plain description',
+      'Transactions tab → Generate Sample or Generate 10 Samples — income amounts should be $1400-$2600, not $5-$95',
+    ],
+  },
+  {
     version: 'V42',
     date: '5/25/2026 at 10:00 PM',
     what: [
