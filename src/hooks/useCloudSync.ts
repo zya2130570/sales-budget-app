@@ -129,7 +129,6 @@ export function useCloudSync() {
 
       // Fetch cloud IDs in parallel (only non-deleted rows)
       const fetchTable = async (table: string) => {
-        if (!supabase) return []
         const { data, error } = await supabase
           .from(table)
           .select('local_id')
