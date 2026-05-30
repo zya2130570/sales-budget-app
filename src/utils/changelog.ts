@@ -8,6 +8,23 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V48',
+    date: '5/30/2026 at 12:00 AM',
+    what: [
+      'Reverted number font to Inter — Geist Mono looked too "code-editor" for finance UI. Numbers still get tabular figures so columns line up, just in Inter now.',
+      'Fixed horizontal overflow on tables — Accounts table action column (Edit / Reconcile / Delete) is now sticky to the right edge so it stays visible when columns scroll. Scrollbar now actually shows on table containers (previously hidden globally).',
+      'Fixed responsive grids — Dashboard action cards, budget summary, take-home metrics, etc. all moved their 4-column layout from md (768px) to lg (1024px). On half-screen sidebar-open widths, they now drop to 2 columns instead of cramming 4 narrow cards together.',
+      'Fixed Save Budget row clipping at narrow widths — now stacks vertically when there is not enough room.',
+      'Spending History — improved legacy bucket labeling. Now shows "All imported (legacy)" with an amber explanation banner: data imported before per-period tracking is in one bucket; new imports go to the correct period automatically.',
+    ],
+    test: [
+      'Hard refresh to reload fonts.',
+      'Open the sidebar (expanded mode). On a typical half-screen window, Dashboard action cards should be 2x2, not 4x1.',
+      'Accounts tab: the Edit / Reconcile / Delete buttons should stay visible on the right edge even when the table is wider than the viewport.',
+      'Spending History: the legacy data note explains why everything is in one bucket.',
+    ],
+  },
+  {
     version: 'V47',
     date: '5/30/2026 at 12:00 AM',
     what: [
