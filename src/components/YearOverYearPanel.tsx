@@ -7,21 +7,25 @@ type Props = {
   categories: Category[]
 }
 
-// Parse a period key like "monthly:2025-01-01:2025-01-31" → "Jan 2025"
+// Parse a period key → human readable label
+// Formats seen: "monthly:2025-01-01:2025-01-31", "bi-weekly:2025-01-01:2025-01-14",
+//               "unknown-period:unknown-start", "default", "legacy"
 function periodKeyToLabel(key: string): string {
+  if (key === 'default' || key === 'legacy') return 'Earlier data'
   const parts = key.split(':')
-  if (parts.length < 2 || !parts[1] || parts[1] === 'unknown-start') return key
+  if (parts.length < 2) return 'Earlier data'
   const dateStr = parts[1]
+  if (!dateStr || dateStr === 'unknown-start' || dateStr.startsWith('unknown')) return 'Earlier data'
   const d = new Date(dateStr + 'T12:00:00')
-  if (isNaN(d.getTime())) return key
+  if (isNaN(d.getTime())) return 'Earlier data'
   return d.toLocaleString('default', { month: 'short', year: 'numeric' })
 }
 
-// Extract a sortable date string from period key
 function periodKeyToSortKey(key: string): string {
+  if (key === 'default' || key === 'legacy') return '0000-00'
   const parts = key.split(':')
-  if (parts.length >= 2 && parts[1] && parts[1] !== 'unknown-start') return parts[1]
-  return key
+  if (parts.length >= 2 && parts[1] && !parts[1].startsWith('unknown')) return parts[1]
+  return '0000-00'
 }
 
 export function YearOverYearPanel({ allActualsByPeriod, categories }: Props) {
@@ -31,14 +35,17 @@ export function YearOverYearPanel({ allActualsByPeriod, categories }: Props) {
 
   const periodKeys = useMemo(() =>
     Object.keys(allActualsByPeriod)
-      .filter(k => k !== 'legacy' && Object.keys(allActualsByPeriod[k]).length > 0)
+      .filter(k => {
+        const vals = Object.values(allActualsByPeriod[k] ?? {})
+        const total = vals.reduce((s, v) => s + (parseFloat(v) || 0), 0)
+        return total > 0  // only show periods with actual spending
+      })
       .sort((a, b) => periodKeyToSortKey(b).localeCompare(periodKeyToSortKey(a))),
     [allActualsByPeriod]
   )
 
   const visibleKeys = showAll ? periodKeys : periodKeys.slice(0, 12)
 
-  // Calculate total spending per period
   const totalsPerPeriod = useMemo(() =>
     periodKeys.reduce<Record<string, number>>((acc, key) => {
       acc[key] = Object.values(allActualsByPeriod[key] ?? {}).reduce((s, v) => s + (parseFloat(v) || 0), 0)
@@ -47,7 +54,6 @@ export function YearOverYearPanel({ allActualsByPeriod, categories }: Props) {
     [periodKeys, allActualsByPeriod]
   )
 
-  // Get top categories by total spending
   const topCats = useMemo(() => {
     const totals = categories.map(c => ({
       c,
@@ -62,7 +68,6 @@ export function YearOverYearPanel({ allActualsByPeriod, categories }: Props) {
 
   return (
     <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 overflow-hidden">
-      {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-slate-800/50 transition-colors"
         onClick={() => setIsCollapsed(v => !v)}
@@ -100,10 +105,7 @@ export function YearOverYearPanel({ allActualsByPeriod, categories }: Props) {
                   <div key={key} className="flex items-center gap-3">
                     <div className="w-20 text-right text-xs text-slate-400 shrink-0">{label}</div>
                     <div className="flex-1 bg-slate-800 rounded-full h-2 overflow-hidden">
-                      <div
-                        className="h-2 rounded-full bg-blue-500/70 transition-all duration-500"
-                        style={{ width: `${barPct}%` }}
-                      />
+                      <div className="h-2 rounded-full bg-blue-500/70 transition-all duration-500" style={{ width: `${barPct}%` }}/>
                     </div>
                     <div className="w-24 text-right text-xs font-medium text-slate-300 shrink-0">{currency(total)}</div>
                   </div>
@@ -115,9 +117,7 @@ export function YearOverYearPanel({ allActualsByPeriod, categories }: Props) {
                 </button>
               )}
               {showAll && periodKeys.length > 12 && (
-                <button onClick={() => setShowAll(false)} className="text-xs text-slate-500 hover:text-slate-400 mt-1">
-                  Show less
-                </button>
+                <button onClick={() => setShowAll(false)} className="text-xs text-slate-500 hover:text-slate-400 mt-1">Show less</button>
               )}
             </div>
           )}
@@ -150,15 +150,13 @@ export function YearOverYearPanel({ allActualsByPeriod, categories }: Props) {
                   <tr className="border-t border-slate-700/60">
                     <td className="py-1.5 text-slate-400 font-medium pr-3">Total</td>
                     {visibleKeys.slice(0, 6).map(k => (
-                      <td key={k} className="py-1.5 text-right px-2 font-medium text-slate-200">
-                        {currency(totalsPerPeriod[k] ?? 0)}
-                      </td>
+                      <td key={k} className="py-1.5 text-right px-2 font-medium text-slate-200">{currency(totalsPerPeriod[k] ?? 0)}</td>
                     ))}
                   </tr>
                 </tbody>
               </table>
               {visibleKeys.length > 6 && (
-                <p className="text-[10px] text-slate-600 mt-2">Showing 6 most recent periods · switch to Totals view to see all {periodKeys.length}</p>
+                <p className="text-[10px] text-slate-600 mt-2">Showing 6 most recent · switch to Totals view for all {periodKeys.length}</p>
               )}
             </div>
           )}
