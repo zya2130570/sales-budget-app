@@ -139,7 +139,7 @@ function BottomBtn({
   shortcutLabel?: string; collapsed: boolean; accent?: boolean
 }) {
   const [hover, setHover] = useState(false)
-  const base = accent ? 'rgba(91,106,240,0.8)' : 'rgba(255,255,255,0.35)'
+  const base = accent ? 'rgba(94,106,210,0.8)' : 'rgba(255,255,255,0.35)'
   const hovered = accent ? 'rgba(124,140,255,1)' : 'rgba(255,255,255,0.65)'
   return (
     <button
@@ -243,12 +243,12 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
       <div style={{ padding: collapsed ? '16px 0' : '16px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
         {collapsed
           ? <div style={{ width: W, display: 'flex', justifyContent: 'center' }}>
-              <div style={{ width: 28, height: 28, borderRadius: 7, background: 'linear-gradient(135deg,#5B6AF0,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <div style={{ width: 28, height: 28, borderRadius: 7, background: 'linear-gradient(135deg,#5E6AD2,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <span style={{ color: 'white', fontSize: 14, fontWeight: 800 }}>F</span>
               </div>
             </div>
           : <>
-              <div style={{ width: 28, height: 28, borderRadius: 7, background: 'linear-gradient(135deg,#5B6AF0,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <div style={{ width: 28, height: 28, borderRadius: 7, background: 'linear-gradient(135deg,#5E6AD2,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <span style={{ color: 'white', fontSize: 14, fontWeight: 800 }}>F</span>
               </div>
               <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16, fontWeight: 700, letterSpacing: '-0.3px', whiteSpace: 'nowrap' }}>Flow</span>
@@ -273,9 +273,9 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
                 gap: 11, padding: collapsed ? '9px 0' : '9px 16px',
                 justifyContent: collapsed ? 'center' : 'flex-start',
                 background: isActive
-                  ? 'rgba(91,106,240,0.12)'
+                  ? 'rgba(94,106,210,0.12)'
                   : hover ? 'rgba(255,255,255,0.03)' : 'transparent',
-                borderLeft: isActive ? '2px solid #5B6AF0' : '2px solid transparent',
+                borderLeft: isActive ? '2px solid #5E6AD2' : '2px solid transparent',
                 color: isActive
                   ? '#818CF8'
                   : hover ? 'rgba(255,255,255,0.65)' : 'rgba(255,255,255,0.38)',
