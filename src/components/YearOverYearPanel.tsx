@@ -8,16 +8,17 @@ type Props = {
 }
 
 // Parse a period key → human readable label
-// Formats seen: "monthly:2025-01-01:2025-01-31", "bi-weekly:2025-01-01:2025-01-14",
-//               "unknown-period:unknown-start", "default", "legacy"
+// Formats: "monthly:2025-01-01:2025-01-31", "bi-weekly:2025-01-01:2025-01-14",
+//          "unknown-period:unknown-start", "default", "legacy"
 function periodKeyToLabel(key: string): string {
-  if (key === 'default' || key === 'legacy') return 'Earlier data'
+  if (key === 'legacy') return 'All imported (legacy)'
+  if (key === 'default') return 'All-time totals'
   const parts = key.split(':')
-  if (parts.length < 2) return 'Earlier data'
+  if (parts.length < 2) return key
   const dateStr = parts[1]
-  if (!dateStr || dateStr === 'unknown-start' || dateStr.startsWith('unknown')) return 'Earlier data'
+  if (!dateStr || dateStr === 'unknown-start' || dateStr.startsWith('unknown')) return 'Pre-period data'
   const d = new Date(dateStr + 'T12:00:00')
-  if (isNaN(d.getTime())) return 'Earlier data'
+  if (isNaN(d.getTime())) return key
   return d.toLocaleString('default', { month: 'short', year: 'numeric' })
 }
 
@@ -26,6 +27,11 @@ function periodKeyToSortKey(key: string): string {
   const parts = key.split(':')
   if (parts.length >= 2 && parts[1] && !parts[1].startsWith('unknown')) return parts[1]
   return '0000-00'
+}
+
+// Detect if a key is the "all data dumped in one bucket" case (pre-period-aware imports)
+function isLegacyBucket(key: string): boolean {
+  return key === 'legacy' || key === 'default'
 }
 
 export function YearOverYearPanel({ allActualsByPeriod, categories }: Props) {
@@ -63,6 +69,8 @@ export function YearOverYearPanel({ allActualsByPeriod, categories }: Props) {
   }, [categories, periodKeys, allActualsByPeriod])
 
   const maxTotal = Math.max(...Object.values(totalsPerPeriod), 1)
+  const hasLegacy = periodKeys.some(isLegacyBucket)
+  const onlyLegacy = periodKeys.length > 0 && periodKeys.every(isLegacyBucket)
 
   if (periodKeys.length === 0) return null
 
@@ -95,6 +103,11 @@ export function YearOverYearPanel({ allActualsByPeriod, categories }: Props) {
 
       {!isCollapsed && (
         <div className="px-4 pb-4">
+          {hasLegacy && (
+            <div className="mb-3 rounded-lg border border-amber-700/30 bg-amber-950/10 px-3 py-2 text-[11px] text-amber-300/90 leading-relaxed">
+              <strong>Note:</strong> {onlyLegacy ? 'All your spending data is currently in one bucket' : 'Some of your data is in a legacy bucket'} because it was imported before per-period tracking was set up. New transactions from now on will be filed by period (week/month) automatically. To split your existing data by date, re-import the CSVs while on a specific period.
+            </div>
+          )}
           {viewMode === 'totals' && (
             <div className="space-y-2">
               {visibleKeys.map(key => {
