@@ -6,7 +6,6 @@ type SettingsPanelProps = {
   onClose: () => void
   onLoadDemo: () => void
   onClearAllData: () => void
-  onDownloadBackup: () => void
   onImportFromFile: (json: string) => void
   lastSyncedAt?: string | null
   version?: string
@@ -18,7 +17,6 @@ export function SettingsPanel({
   onClose,
   onLoadDemo,
   onClearAllData,
-  onDownloadBackup,
   onImportFromFile,
   lastSyncedAt,
   version = 'V22',
