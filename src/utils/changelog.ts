@@ -8,6 +8,26 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V47',
+    date: '5/30/2026 at 12:00 AM',
+    what: [
+      'Design system overhaul — Linear/Arc/Raycast direction.',
+      'Real fonts loaded: Inter for UI, Geist Mono for all currency values. Numbers now use tabular figures so columns of dollars align properly.',
+      'Refined accent color to Linear\'s exact indigo (#5E6AD2) — replaces the old #5B6AF0. Applied consistently to active sidebar tab, primary buttons, focus rings.',
+      'Card / Metric / Row / Button / Pill primitives rewritten to use design tokens. Card titles now use tracking-tight 15px semibold. Metric hero numbers are 24px Geist Mono. No more nested-card-in-card visual noise.',
+      'Multi-level dark surfaces: page bg #08080B, cards #131318, hovered cards #16161D. Borders reduced from 4+ weights to 3 (subtle / default / strong). Less visual chrome, more depth.',
+      'Top header: 52px tall (was 48), upgraded backdrop blur to 20px + 180% saturate for the Arc-style glass effect.',
+      'Refined transitions: 180ms cubic-bezier(0.2, 0, 0, 1) — Apple\'s standard ease. Less abrupt, more refined.',
+      'Status/tone colors desaturated slightly: green #4ADE80, amber #FACC15, red #F87171. Less candy-colored.',
+    ],
+    test: [
+      'Hard refresh the page once so the fonts load. Numbers should appear in Geist Mono (slightly mechanical, evenly spaced digits).',
+      'Open the Income tab — the four take-home metric cards should look noticeably more refined, with smaller eyebrow labels and bigger mono numbers.',
+      'Hover any card — border should subtly brighten without the old jumpy translate effect.',
+      'Click a sidebar tab — the active icon and indicator should be Linear-indigo, not the old slightly-brighter blue.',
+    ],
+  },
+  {
     version: 'V46',
     date: '5/30/2026 at 12:00 AM',
     what: [
