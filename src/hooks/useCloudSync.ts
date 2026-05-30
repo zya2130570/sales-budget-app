@@ -14,6 +14,8 @@ import {
   loadSavedBudgets, loadSavedScenarios, loadSavedTargetSets,
   saveAccounts, saveCategories, saveTargets, saveTransactionRules,
   saveSavedBudgets, saveSavedScenarios, saveSavedTargetSets,
+  loadTransactions,
+  addPendingDelete,
 } from '../utils/storage'
 
 export type CloudSyncChoice = 'local' | 'cloud' | 'merge-safe' | null
@@ -89,10 +91,102 @@ export function useCloudSync() {
     }
   }, [auth.isConfigured, auth.user])
 
-  const chooseLocal = useCallback(() => {
+  /**
+   * V49 — Use Local: actually overwrite cloud with local.
+   *
+   * Strategy:
+   * 1. Fetch all non-deleted local_ids for each entity from cloud.
+   * 2. For each entity, find IDs that exist in cloud but not locally — these are orphans.
+   * 3. Queue them as pendingDeletes. Next auto-sync will soft-delete them in cloud.
+   * 4. The auto-sync push then upserts current local data, completing the overwrite.
+   *
+   * This does NOT call sync directly — the user's auto-sync (or manual sync) handles it.
+   * That keeps a single push-path so failures show in one place.
+   */
+  const chooseLocal = useCallback(async () => {
+    if (!auth.user || !supabase) {
+      setSelectedChoice('local')
+      setStatus('Sign in to push local to cloud.')
+      return
+    }
+    setRestoring(true)
     setSelectedChoice('local')
-    setStatus('Local data is already active — no changes needed.')
-  }, [])
+    setStatus('Identifying cloud records to remove…')
+    setError(null)
+
+    try {
+      const userId = auth.user.id
+
+      // Build local ID sets per entity
+      const localTxnIds       = new Set((loadTransactions()       ?? []).map(t => t.id))
+      const localAccountIds   = new Set((loadAccounts()           ?? []).map(a => a.id))
+      const localCategoryIds  = new Set((loadCategories()         ?? []).map(c => c.id))
+      const localTargetIds    = new Set((loadTargets()            ?? []).map(t => t.id))
+      const localRuleIds      = new Set((loadTransactionRules()   ?? []).map(r => r.id))
+      const localBudgetIds    = new Set((loadSavedBudgets()       ?? []).map(b => `${userId}-budget-${encodeURIComponent(b.name)}`))
+      const localScenarioIds  = new Set((loadSavedScenarios()     ?? []).map(s => `${userId}-scenario-${encodeURIComponent(s.name)}`))
+      const localGoalSetIds   = new Set((loadSavedTargetSets()    ?? []).map(s => `${userId}-goalset-${encodeURIComponent(s.name)}`))
+
+      // Fetch cloud IDs in parallel (only non-deleted rows)
+      const fetchTable = async (table: string) => {
+        const { data, error } = await supabase
+          .from(table)
+          .select('local_id')
+          .eq('user_id', userId)
+          .is('deleted_at', null)
+        if (error) throw new Error(`Failed to fetch ${table}: ${error.message}`)
+        return (data as Array<{ local_id: string }>).map(r => r.local_id)
+      }
+
+      const [
+        cloudTxns, cloudAccounts, cloudCategories, cloudTargets, cloudRules,
+        cloudBudgets, cloudScenarios, cloudGoalSets,
+      ] = await Promise.all([
+        fetchTable('transactions'),
+        fetchTable('accounts'),
+        fetchTable('categories'),
+        fetchTable('savings_goals'),
+        fetchTable('transaction_rules'),
+        fetchTable('saved_budgets'),
+        fetchTable('scenarios'),
+        fetchTable('savings_goal_sets'),
+      ])
+
+      // Diff and queue deletes
+      const queueDeletes = (table: string, cloudIds: string[], localIds: Set<string>): number => {
+        let queued = 0
+        for (const id of cloudIds) {
+          if (!localIds.has(id)) {
+            addPendingDelete(table, id)
+            queued++
+          }
+        }
+        return queued
+      }
+
+      const queued =
+        queueDeletes('transactions',       cloudTxns,       localTxnIds) +
+        queueDeletes('accounts',           cloudAccounts,   localAccountIds) +
+        queueDeletes('categories',         cloudCategories, localCategoryIds) +
+        queueDeletes('savings_goals',      cloudTargets,    localTargetIds) +
+        queueDeletes('transaction_rules',  cloudRules,      localRuleIds) +
+        queueDeletes('saved_budgets',      cloudBudgets,    localBudgetIds) +
+        queueDeletes('scenarios',          cloudScenarios,  localScenarioIds) +
+        queueDeletes('savings_goal_sets',  cloudGoalSets,   localGoalSetIds)
+
+      if (queued === 0) {
+        setStatus('Local already matches cloud — no cloud records to remove. Next sync will push any local-only changes.')
+      } else {
+        setStatus(`Queued ${queued} cloud record${queued > 1 ? 's' : ''} for removal. Trigger Sync now (or auto-sync) to complete.`)
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Use Local failed.'
+      setError(msg)
+      setStatus('Use Local failed — cloud was not changed.')
+    } finally {
+      setRestoring(false)
+    }
+  }, [auth.user])
 
   const chooseCloud = useCallback(async () => {
     if (!auth.user || !supabase) return
