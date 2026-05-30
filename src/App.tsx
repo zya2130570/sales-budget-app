@@ -2703,8 +2703,18 @@ txnMerchantRef.current?.focus()
       {/* Single inner container with dynamic left margin */}
       <div className="min-h-screen" style={{ marginLeft: effectiveSidebarW, width: `calc(100vw - ${effectiveSidebarW}px)`, minWidth: 0, transition: 'margin-left 0.2s cubic-bezier(0.4,0,0.2,1), width 0.2s cubic-bezier(0.4,0,0.2,1)' }}>
 
-        {/* Compact sticky header — logo + utility only, no tabs */}
-        <header style={{ position: 'sticky', top: 0, zIndex: 30, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', height: 48, borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'rgba(11,11,15,0.95)', backdropFilter: 'blur(12px)' }}>
+        {/* Compact sticky header — V47 refined */}
+        <header
+          style={{
+            position: 'sticky', top: 0, zIndex: 30,
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0 24px', height: 52,
+            borderBottom: '1px solid var(--border-subtle)',
+            background: 'rgba(8,8,11,0.72)',
+            backdropFilter: 'blur(20px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+          }}
+        >
           <div className="flex items-center gap-2">
             <VersionBadge version={CURRENT_VERSION} open={versionOpen} onOpenChange={setVersionOpen} />
           </div>
@@ -3365,7 +3375,7 @@ txnMerchantRef.current?.focus()
                   <div className="grid md:grid-cols-2 gap-3 mb-3">
                     <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
                       <div className="text-xs text-slate-400 mb-1">Estimated Annual Gross</div>
-                      <div className="text-lg font-bold text-slate-200">{currency(bd.grossAnnual)}</div>
+                      <div className="text-lg font-bold font-num text-slate-200">{currency(bd.grossAnnual)}</div>
                     </div>
                     <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
                       <div className="text-xs text-slate-400 mb-1">Est. Effective Take-Home Rate</div>
@@ -3373,7 +3383,7 @@ txnMerchantRef.current?.focus()
                     </div>
                     <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
                       <div className="text-xs text-slate-400 mb-1">Est. Annual Take-Home</div>
-                      <div className="text-lg font-bold text-slate-200">{currency(bd.takeHomeAnnual)}</div>
+                      <div className="text-lg font-bold font-num text-slate-200">{currency(bd.takeHomeAnnual)}</div>
                     </div>
                     <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
                       <div className="text-xs text-slate-400 mb-1">Est. Effective Withholding Rate</div>
@@ -4348,11 +4358,11 @@ txnMerchantRef.current?.focus()
                   </div>
                   <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
                     <div className="text-xs text-slate-400 mb-0.5">Investments</div>
-                    <div className="text-lg font-bold text-blue-300">{currency(netWorthSummary.totalInvestments)}</div>
+                    <div className="text-lg font-bold font-num text-blue-300">{currency(netWorthSummary.totalInvestments)}</div>
                   </div>
                   <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
                     <div className="text-xs text-slate-400 mb-0.5">Total Debt</div>
-                    <div className="text-lg font-bold text-red-400">{currency(netWorthSummary.totalDebt)}</div>
+                    <div className="text-lg font-bold font-num text-red-400">{currency(netWorthSummary.totalDebt)}</div>
                   </div>
                   <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
                     <div className="text-xs text-slate-400 mb-0.5">Net Worth</div>

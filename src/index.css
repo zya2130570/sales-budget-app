@@ -3,37 +3,74 @@
 @tailwind utilities;
 
 :root {
-  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-feature-settings: 'cv11' 1, 'ss03' 1, 'ss04' 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 
-  /* Dark mode defaults (always active unless overridden) */
-  --bg-app: #0B0B0F;
-  --bg-surface: #13131A;
-  --bg-card: #1A1A24;
-  --bg-input: #1e1e2e;
-  --bg-hover: rgba(255,255,255,0.06);
+  /* ── V47 Design Tokens (Linear/Arc/Raycast direction) ─────────────────── */
+
+  /* Typography */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  /* Surfaces — multi-level dark depth */
+  --bg-app: #08080B;
+  --bg-surface: #0F0F13;
+  --bg-card: #131318;
+  --bg-card-hover: #16161D;
+  --bg-input: #0C0C10;
+  --bg-hover: rgba(255,255,255,0.04);
+
+  /* Borders — three weights only */
   --border: rgba(255,255,255,0.07);
+  --border-subtle: rgba(255,255,255,0.05);
   --border-strong: rgba(255,255,255,0.12);
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --text-faint: #475569;
-  --sidebar-bg: #0D0D11;
+
+  /* Text */
+  --text-primary: #ECECEF;
+  --text-secondary: #A8A8B3;
+  --text-muted: #6E6E7B;
+  --text-faint: #4A4A55;
+
+  /* Accent — Linear's exact indigo */
+  --accent: #5E6AD2;
+  --accent-hover: #6E7AE0;
+  --accent-active: #4F5BC0;
+  --accent-bg: rgba(94,106,210,0.10);
+  --accent-bg-strong: rgba(94,106,210,0.18);
+  --accent-border: rgba(94,106,210,0.30);
+  --accent-text: #818CF8;
+
+  /* Status colors — refined, less saturated */
+  --green: #4ADE80;
+  --green-bg: rgba(74,222,128,0.10);
+  --amber: #FACC15;
+  --amber-bg: rgba(250,204,21,0.10);
+  --red: #F87171;
+  --red-bg: rgba(248,113,113,0.10);
+
+  /* Sidebar */
+  --sidebar-bg: #0A0A0D;
 }
 
 /* Light mode overrides — triggered by data-theme="light" on root div */
 [data-theme="light"] {
-  --bg-app: #f4f6f9;
-  --bg-surface: #ffffff;
-  --bg-card: #ffffff;
-  --bg-input: #f8fafc;
-  --bg-hover: rgba(0,0,0,0.04);
-  --border: rgba(0,0,0,0.10);
-  --border-strong: rgba(0,0,0,0.18);
-  --text-primary: #0f172a;
-  --text-secondary: #334155;
-  --text-muted: #64748b;
-  --text-faint: #94a3b8;
-  --sidebar-bg: #1e293b;
+  --bg-app: #F7F7F8;
+  --bg-surface: #FFFFFF;
+  --bg-card: #FFFFFF;
+  --bg-card-hover: #FAFAFB;
+  --bg-input: #F4F4F5;
+  --bg-hover: rgba(0,0,0,0.03);
+  --border: rgba(0,0,0,0.07);
+  --border-subtle: rgba(0,0,0,0.05);
+  --border-strong: rgba(0,0,0,0.14);
+  --text-primary: #18181B;
+  --text-secondary: #52525B;
+  --text-muted: #71717A;
+  --text-faint: #A1A1AA;
+  --sidebar-bg: #18181B;
 }
 
 body {
@@ -88,3 +125,48 @@ body {
 [data-theme="light"] ::-webkit-scrollbar-track { background: #f1f5f9; }
 [data-theme="light"] ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
 [data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* ── V47 Utility classes ─────────────────────────────────────────────────── */
+
+/* Tabular numbers — every digit takes equal width, so columns of numbers align */
+.tnum {
+  font-feature-settings: 'tnum' 1, 'cv11' 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mono font for currency/percentages — uses Geist Mono with tabular figures */
+.font-num {
+  font-family: var(--font-mono);
+  font-feature-settings: 'tnum' 1, 'ss01' 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+/* Display sizes for hero numbers (Income tab, Dashboard metrics) */
+.text-display-lg { font-size: 32px; line-height: 1.1; letter-spacing: -0.02em; font-weight: 600; }
+.text-display-md { font-size: 24px; line-height: 1.15; letter-spacing: -0.015em; font-weight: 600; }
+.text-display-sm { font-size: 18px; line-height: 1.2; letter-spacing: -0.01em; font-weight: 600; }
+
+/* Eyebrow labels — small uppercase before hero numbers */
+.text-eyebrow {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* Refined transitions — Apple's standard ease */
+.transition-premium {
+  transition-property: color, background-color, border-color, opacity, transform;
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* Subtle elevation for cards */
+.elevation-1 {
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 0 0 0.5px rgba(255,255,255,0.03);
+}
+.elevation-2 {
+  box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 0 0 0.5px rgba(255,255,255,0.04), 0 2px 8px rgba(0,0,0,0.20);
+}
