@@ -8,6 +8,24 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V49',
+    date: '5/30/2026 at 12:00 AM',
+    what: [
+      'Use Local actually works now — previously this button just changed a status text and did nothing else. It now fetches all cloud IDs, finds records that exist in cloud but not locally, and queues them for soft-deletion on the next sync. Added a confirmation step since this is destructive (cloud will lose those records).',
+      'Use Local auto-triggers sync after confirming — no need to click Sync separately.',
+      'Fixed cloud orphan factories — multiple delete and clear actions were updating local state without queuing cloud deletes. Fixed every place this could happen: Saved Budget delete, Saved Scenario delete, Savings Goal Set delete, Delete Import Batch (also queues each transaction in the batch), Clear All Accounts, Clear All Transactions, Clear All Rules, Clear All Savings Goals, Reset Budget, and the global Clear All My Data in settings.',
+      'CSV import duplicate detection is smarter — merchant strings now normalize before comparison: trailing transaction IDs ("AMAZON.COM #1234567"), asterisk suffixes ("AMZN MKTPLC*XYZ123"), and 4+ digit trailing numbers all get stripped so the same merchant matches across formats.',
+      'Added "Update <budget>" quick-save — when you Apply a saved budget, a green Update button appears that overwrites that specific budget with whatever your categories currently look like.',
+    ],
+    test: [
+      'Open Cloud panel → Compare & Merge → Use Local. Confirm the destructive action. Sync auto-fires. After it completes, cloud and local record counts should match.',
+      'Apply any saved budget, modify categories. The green "Update <budget>" button should appear.',
+      'Delete a saved budget. Refresh. It should stay deleted (previously it would come back from cloud).',
+      'Delete an import batch — its transactions should be removed from cloud too on next sync (previously orphaned).',
+      'Import the same CSV twice — duplicates should now be detected even when merchant strings differ slightly (trailing IDs).',
+    ],
+  },
+  {
     version: 'V48',
     date: '5/30/2026 at 12:00 AM',
     what: [

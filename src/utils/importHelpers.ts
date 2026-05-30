@@ -91,6 +91,23 @@ export function inferType(raw: string, merchant: string): TransactionType {
 // ── Duplicate detection ───────────────────────────────────────────────────────
 // Checks against existing transactions AND against sibling rows in the same import batch.
 
+// V49 — Normalize merchant for duplicate detection.
+// Strips trailing transaction IDs and asterisk-suffixes that banks add inconsistently.
+// "AMAZON.COM" and "AMAZON.COM #1234567" become the same fingerprint.
+// "AMZN MKTPLC*XYZ123" and "AMZN MKTPLC*XYZ456" become the same fingerprint.
+// Conservative — only strips obvious transaction noise at the END of the string.
+export function normalizeMerchantForDedup(m: string): string {
+  return m
+    .toLowerCase()
+    .trim()
+    .replace(/\s+\*?[a-z]*\d{2,}[a-z0-9]*$/i, '')   // trailing alpha+digits token (e.g. "*XYZ123")
+    .replace(/\s+#\d+$/i, '')                        // trailing #12345
+    .replace(/\s+\d{4,}$/i, '')                      // trailing 4+ digit token
+    .replace(/[*#]+/g, ' ')                          // internal * and # → space
+    .replace(/\s+/g, ' ')                            // collapse whitespace
+    .trim()
+}
+
 export function isDuplicate(
   date: string,
   merchant: string,
@@ -98,13 +115,13 @@ export function isDuplicate(
   existing: Transaction[],
   siblings: Array<{ date: string; merchant: string; amount: number }>,
 ): boolean {
-  const mLower = merchant.toLowerCase()
+  const mFingerprint = normalizeMerchantForDedup(merchant)
   const inExisting = existing.some(
-    x => x.date === date && x.amount === amount && x.merchant.toLowerCase() === mLower
+    x => x.date === date && x.amount === amount && normalizeMerchantForDedup(x.merchant) === mFingerprint
   )
   if (inExisting) return true
   const inSiblings = siblings.some(
-    s => s.date === date && s.amount === amount && s.merchant.toLowerCase() === mLower
+    s => s.date === date && s.amount === amount && normalizeMerchantForDedup(s.merchant) === mFingerprint
   )
   return inSiblings
 }
