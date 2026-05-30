@@ -134,12 +134,13 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Mono font for currency/percentages — uses Geist Mono with tabular figures */
+/* Mono-feeling numbers, but actually Inter with tabular figures.
+   User preference (V48): full Inter, not Geist Mono — looks cleaner for finance UI. */
 .font-num {
-  font-family: var(--font-mono);
-  font-feature-settings: 'tnum' 1, 'ss01' 1;
+  font-family: var(--font-sans);
+  font-feature-settings: 'tnum' 1, 'cv11' 1;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.005em;
 }
 
 /* Display sizes for hero numbers (Income tab, Dashboard metrics) */
@@ -169,4 +170,32 @@ body {
 }
 .elevation-2 {
   box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 0 0 0.5px rgba(255,255,255,0.04), 0 2px 8px rgba(0,0,0,0.20);
+}
+
+/* V48 — Re-enable horizontal scrollbars on table containers.
+   The global rule in index.html hides all scrollbars; that's fine vertically,
+   but for tables that overflow horizontally the user has no idea they can scroll. */
+.h-scroll-visible::-webkit-scrollbar {
+  display: block !important;
+  height: 8px;
+}
+.h-scroll-visible::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 4px;
+}
+.h-scroll-visible::-webkit-scrollbar-track {
+  background: transparent;
+}
+.h-scroll-visible {
+  scrollbar-width: thin !important;
+  -ms-overflow-style: auto !important;
+}
+
+/* V48 — Sticky right-edge column for action buttons in tables.
+   Action buttons (Edit/Reconcile/Delete) stay visible even when horizontal scrolling. */
+.sticky-actions {
+  position: sticky;
+  right: 0;
+  background: var(--bg-card);
+  box-shadow: -8px 0 12px -8px rgba(0,0,0,0.4);
 }

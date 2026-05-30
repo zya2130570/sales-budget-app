@@ -2934,7 +2934,7 @@ txnMerchantRef.current?.focus()
             <DashboardStatusBanner status={dashboardStatus} theme={theme} />
 
             {/* ── Action Cards ── */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
               <ActionCard
                 title="Review Budget"
                 description={
@@ -3069,7 +3069,7 @@ txnMerchantRef.current?.focus()
               </div>
 
               {/* Summary cards */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
                 <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
                   <div className="text-xs text-slate-400 mb-0.5">Starting Cash</div>
                   <div className={`text-lg font-bold ${cashFlowForecast.startingCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>{currency(cashFlowForecast.startingCash)}</div>
@@ -3169,7 +3169,7 @@ txnMerchantRef.current?.focus()
               )}
 
               {/* Summary */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
                 {[
                   { label: 'Total Income', val: `+${currency(monthlyReview.income)}`, color: 'text-green-400' },
                   { label: 'Total Spending', val: `−${currency(monthlyReview.expenses)}`, color: 'text-red-400' },
@@ -3273,7 +3273,7 @@ txnMerchantRef.current?.focus()
 
         {tab === 'Dashboard' && targets.length > 0 && period === 'bi-weekly' && (
           <Card title="Log Savings From This Paycheck">
-            <div className="grid md:grid-cols-4 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
               <input type="date" className="p-2 rounded bg-slate-800 border border-slate-600" value={dashboardQuickDate} onChange={(e) => setDashboardQuickDate(e.target.value)} />
               <select className="p-2 rounded bg-slate-800 border border-slate-600" value={dashboardQuickTargetId} onChange={(e) => setDashboardQuickTargetId(e.target.value)}>
                 <option value="">Select target</option>
@@ -3492,7 +3492,7 @@ txnMerchantRef.current?.focus()
           <section className="space-y-4 transition-all duration-300">
             <Card title="Budget Summary">
               <div className="flex gap-2 flex-wrap mb-4">{periods.map(p => <Pill key={p} active={period === p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div>
-              <div className="grid md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 <Metric title="Available income" value={currency(selectedPeriodTotalNet)} />
                 <Metric title="Total planned" value={currency(plannedPeriodTotal)} />
                 <Metric title="Remaining" value={currency(selectedPeriodRemaining)} tone={remainingTone} glow={selectedPeriodRemaining < 0} />
@@ -3529,7 +3529,7 @@ txnMerchantRef.current?.focus()
                     </div>
                   </div>
                 </div>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
                     {[
                       { label: 'Total Planned', val: currency(budgetHealth.totalPlanned), color: 'text-slate-200' },
                       { label: 'Total Actual', val: hasAnyActual ? currency(budgetHealth.totalActual) : '—', color: 'text-slate-200' },
@@ -3651,7 +3651,7 @@ txnMerchantRef.current?.focus()
               </div>
             </Card>
             <div ref={budgetCategoryTableRef} className="scroll-mt-4"><Card title="Budget Categories">
-              <div className="grid md:grid-cols-4 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                 <div ref={autocompleteWrapRef} className="relative">
                   <input
                     ref={budgetNameRef}
@@ -3738,9 +3738,9 @@ txnMerchantRef.current?.focus()
                 <button onClick={generateSampleCategory} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample budget category">Generate Sample</button>
               </div>
               {budgetFormHint && <p className="mt-2 text-sm text-amber-300">{budgetFormHint}</p>}
-              <div className="mt-3 grid md:grid-cols-3 gap-2">
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <input className="p-2 rounded-lg bg-slate-800 border border-slate-600" placeholder="Budget name" value={budgetTitle} onChange={e => setBudgetTitle(e.target.value)} />
-                <button className="rounded-lg bg-blue-600" onClick={() => { const n = budgetTitle.trim(); if (!n) return; const ex = savedBudgets.find(x => x.name.toLowerCase() === n.toLowerCase()); if (ex && !window.confirm('Overwrite existing budget?')) return; setSavedBudgets([{ name: n, categories, savedAt: new Date().toISOString() }, ...savedBudgets.filter(x => x.name.toLowerCase() !== n.toLowerCase())]); if (ex) setChangeSummary([`Monthly expenses change: ${currency(monthlyBudget - (ex.categories.reduce((s, c) => s + c.amount, 0)))}`]) }}>Save Budget</button>
+                <button className="rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm font-medium text-white transition-colors" onClick={() => { const n = budgetTitle.trim(); if (!n) return; const ex = savedBudgets.find(x => x.name.toLowerCase() === n.toLowerCase()); if (ex && !window.confirm('Overwrite existing budget?')) return; setSavedBudgets([{ name: n, categories, savedAt: new Date().toISOString() }, ...savedBudgets.filter(x => x.name.toLowerCase() !== n.toLowerCase())]); if (ex) setChangeSummary([`Monthly expenses change: ${currency(monthlyBudget - (ex.categories.reduce((s, c) => s + c.amount, 0)))}`]) }}>Save Budget</button>
                 <div className="text-xs text-slate-400 self-center">Saved locally</div>
               </div>
               {changeSummary.length > 0 && <div className="mt-2 text-sm rounded border border-slate-700 p-2">What Changed: {changeSummary.join(' • ')}</div>}
@@ -4159,7 +4159,7 @@ txnMerchantRef.current?.focus()
                                     <button onClick={() => setBreakdownEditId(c.id)} className="text-[10px] text-violet-400 hover:text-violet-300 px-1.5 py-0.5 rounded border border-violet-700/30 transition-colors">Edit</button>
                                   </div>
                                 </div>
-                                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                                <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
                                   {breakdowns[c.id].map(item => (
                                     <div key={item.id} className="rounded-lg border border-slate-700 bg-slate-800/70 p-2">
                                       <div className="text-[11px] text-slate-400">{item.label}</div>
@@ -4351,7 +4351,7 @@ txnMerchantRef.current?.focus()
             {accounts.length > 0 ? (
               <Card title="Your Accounts" headerAction={<button onClick={() => setReconcileFAQOpen(true)} className="text-[10px] px-2 py-0.5 rounded-full border border-slate-600 text-slate-500 hover:text-slate-200 hover:border-slate-400 transition-colors">? reconcile help</button>}>
                 {/* V9.3 — Summary cards */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
                   <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
                     <div className="text-xs text-slate-400 mb-0.5">Cash &amp; Bank</div>
                     <div className={`text-lg font-bold ${netWorthSummary.totalCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>{currency(netWorthSummary.totalCash)}</div>
@@ -4382,17 +4382,17 @@ txnMerchantRef.current?.focus()
                   <span className="text-slate-400 font-medium">Imported Activity</span> = net effect of logged transactions for review only.{' '}
                   <span className="text-slate-400 font-medium">Unexplained</span> only appears after you reconcile an account; partial imports are not treated as errors.
                 </p>
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto h-scroll-visible">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-slate-400 border-b border-slate-700">
                         <th className="pb-1.5 pr-4 font-medium">Name</th>
                         <th className="pb-1.5 pr-4 font-medium">Type</th>
-                        <th className="pb-1.5 pr-4 font-medium text-right">Current Balance</th>
-                        <th className="pb-1.5 pr-4 font-medium text-right">Imported Activity</th>
+                        <th className="pb-1.5 pr-4 font-medium text-right whitespace-nowrap">Current Balance</th>
+                        <th className="pb-1.5 pr-4 font-medium text-right whitespace-nowrap">Imported Activity</th>
                         <th className="pb-1.5 pr-4 font-medium">Unexplained</th>
                         <th className="pb-1.5 pr-4 font-medium">Institution</th>
-                        <th className="pb-1.5" />
+                        <th className="pb-1.5 sticky-actions" />
                       </tr>
                     </thead>
                     <tbody>
@@ -4518,7 +4518,7 @@ txnMerchantRef.current?.focus()
                               ) : (a.institution || '—')}
                             </td>
                             {/* Actions */}
-                            <td className="py-2 whitespace-nowrap space-x-2">
+                            <td className="py-2 whitespace-nowrap space-x-2 sticky-actions">
                               {isEdit ? (
                                 <>
                                   <button className="text-green-400 hover:text-green-300 text-xs" onMouseDown={e => { e.preventDefault(); saveInlineAccountEdit(a.id) }}>Save</button>
@@ -5296,7 +5296,7 @@ txnMerchantRef.current?.focus()
             {/* ── Scenario inputs ── */}
             <Card title="Scenario Inputs">
               <div className="flex gap-2 mb-3">{periods.map(p => <Pill key={p} active={period === p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div>
-              <div className="grid md:grid-cols-4 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
                 {(['Slow', 'Medium', 'Fast', 'Custom'] as ScenarioName[]).map(n => (
                   <div key={n}>
                     <label className="text-xs text-slate-400">{n}</label>
