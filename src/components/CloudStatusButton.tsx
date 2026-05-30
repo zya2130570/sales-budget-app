@@ -342,10 +342,10 @@ export function CloudStatusButton(props: SyncProps & { theme?: 'dark' | 'light';
                       <div className="col-span-3 rounded-xl border border-amber-700/50 bg-amber-950/20 p-3 space-y-2">
                         <p className="text-xs font-semibold text-amber-200">Overwrite cloud with local?</p>
                         <p className="text-xs text-amber-300/70">
-                          Local: <span className="font-num">{cs.summary.local.totalRecords}</span> records.
-                          Cloud: <span className="font-num">{cs.summary.cloud?.totalRecords ?? '?'}</span> records.
-                          {cs.summary.cloud && cs.summary.cloud.totalRecords > cs.summary.local.totalRecords && (
-                            <> <span className="text-amber-200 font-medium">~{cs.summary.cloud.totalRecords - cs.summary.local.totalRecords} cloud-only records will be soft-deleted.</span></>
+                          Local: <span className="font-num">{cs.localSummary.totalRecords}</span> records.
+                          Cloud: <span className="font-num">{cs.cloudSummary?.totalRecords ?? '?'}</span> records.
+                          {cs.cloudSummary && cs.cloudSummary.totalRecords > cs.localSummary.totalRecords && (
+                            <> <span className="text-amber-200 font-medium">~{cs.cloudSummary.totalRecords - cs.localSummary.totalRecords} cloud-only records will be soft-deleted.</span></>
                           )}
                         </p>
                         <div className="flex flex-wrap gap-2">
