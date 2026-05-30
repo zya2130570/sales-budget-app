@@ -220,7 +220,7 @@ export function CloudSyncPanel() {
                 </p>
                 <div className="flex flex-wrap gap-2">
                   <button
-                    onClick={chooseLocal}
+                    onClick={() => { void chooseLocal() }}
                     disabled={busy}
                     className={`rounded-xl border px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50 ${
                       selectedChoice === 'local'

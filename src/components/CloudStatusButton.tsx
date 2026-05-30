@@ -149,6 +149,7 @@ export function CloudStatusButton(props: SyncProps & { theme?: 'dark' | 'light';
   const [tab, setTab] = useState<'sync' | 'compare'>('sync')
   const [showResults, setShowResults] = useState(false)
   const [confirmRestore, setConfirmRestore] = useState(false)
+  const [confirmUseLocal, setConfirmUseLocal] = useState(false)
   const [repairingSchema, setRepairingSchema] = useState(false)
   const [schemaRepairMessage, setSchemaRepairMessage] = useState<string | null>(null)
 
@@ -332,10 +333,39 @@ export function CloudStatusButton(props: SyncProps & { theme?: 'dark' | 'light';
                   </div>
                   {/* Top-level merge actions — NOT buried */}
                   <div className="grid grid-cols-3 gap-2">
-                    <button onClick={cs.chooseLocal} disabled={!cs.summary.isSignedIn || busy}
-                      className={`rounded-xl border px-3 py-2.5 text-xs font-medium transition-colors disabled:opacity-50 text-center ${cs.selectedChoice === 'local' ? 'border-blue-500 bg-blue-600/20 text-blue-300' : 'border-slate-600 text-slate-300 hover:bg-slate-700'}`}>
-                      Use Local
-                    </button>
+                    {!confirmUseLocal ? (
+                      <button onClick={() => setConfirmUseLocal(true)} disabled={!cs.summary.isSignedIn || busy}
+                        className={`rounded-xl border px-3 py-2.5 text-xs font-medium transition-colors disabled:opacity-50 text-center ${cs.selectedChoice === 'local' ? 'border-blue-500 bg-blue-600/20 text-blue-300' : 'border-slate-600 text-slate-300 hover:bg-slate-700'}`}>
+                        {cs.restoring && cs.selectedChoice === 'local' ? 'Queueing…' : 'Use Local'}
+                      </button>
+                    ) : (
+                      <div className="col-span-3 rounded-xl border border-amber-700/50 bg-amber-950/20 p-3 space-y-2">
+                        <p className="text-xs font-semibold text-amber-200">Overwrite cloud with local?</p>
+                        <p className="text-xs text-amber-300/70">
+                          Local: <span className="font-num">{cs.summary.local.totalRecords}</span> records.
+                          Cloud: <span className="font-num">{cs.summary.cloud?.totalRecords ?? '?'}</span> records.
+                          {cs.summary.cloud && cs.summary.cloud.totalRecords > cs.summary.local.totalRecords && (
+                            <> <span className="text-amber-200 font-medium">~{cs.summary.cloud.totalRecords - cs.summary.local.totalRecords} cloud-only records will be soft-deleted.</span></>
+                          )}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={async () => {
+                              await cs.chooseLocal()
+                              setConfirmUseLocal(false)
+                              // V49 — auto-trigger sync so the pending deletes actually flush to cloud
+                              setTimeout(() => props.onSyncNow(), 200)
+                            }}
+                            disabled={busy}
+                            className="px-3 py-1.5 text-xs rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors disabled:opacity-50">
+                            Yes, use local
+                          </button>
+                          <button onClick={() => setConfirmUseLocal(false)} className="px-3 py-1.5 text-xs rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-700 transition-colors">
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <button onClick={() => { void cs.chooseMergeSafe() }} disabled={!cs.summary.isSignedIn || busy}
                       className={`rounded-xl border px-3 py-2.5 text-xs font-medium transition-colors disabled:opacity-50 text-center ${cs.selectedChoice === 'merge-safe' ? 'border-emerald-500 bg-emerald-600/20 text-emerald-300' : 'border-emerald-700/50 text-emerald-400 hover:bg-emerald-950/20'}`}>
                       {cs.restoring && cs.selectedChoice === 'merge-safe' ? 'Merging…' : 'Merge Safe'}
