@@ -441,6 +441,9 @@ export default function App() {
   // V45 — extra income sources (side income, rental, partner, etc.)
   const [extraIncomes, setExtraIncomes] = useState<ExtraIncome[]>(() => loadExtraIncomes())
   const extraIncomesMonthly = extraIncomes.reduce((s, e) => s + e.monthlyAmount, 0)
+
+  // V49 — remember which saved budget was last applied so user can quick-save changes back to it
+  const [loadedBudgetName, setLoadedBudgetName] = useState<string | null>(null)
   const [budgetTitle, setBudgetTitle] = useState('')
   const [changeSummary, setChangeSummary] = useState<string[]>([])
   const [editId, setEditId] = useState<string | null>(null)
@@ -861,6 +864,20 @@ export default function App() {
   }
 
   const handleClearAllData = () => {
+    // V49 — queue cloud deletes for everything before clearing locally, otherwise
+    // cloud keeps the records and a future merge brings them back.
+    if (appAuth.user) {
+      const userId = appAuth.user.id
+      accounts.forEach(a => addPendingDelete('accounts', a.id))
+      categories.forEach(c => addPendingDelete('categories', c.id))
+      transactions.forEach(t => addPendingDelete('transactions', t.id))
+      targets.forEach(t => addPendingDelete('savings_goals', t.id))
+      transactionRules.forEach(r => addPendingDelete('transaction_rules', r.id))
+      importBatches.forEach(b => addPendingDelete('import_batches', b.id))
+      savedBudgets.forEach(b => addPendingDelete('saved_budgets', `${userId}-budget-${encodeURIComponent(b.name)}`))
+      savedScenarios.forEach(s => addPendingDelete('scenarios', `${userId}-scenario-${encodeURIComponent(s.name)}`))
+      savedTargetSets.forEach(s => addPendingDelete('savings_goal_sets', `${userId}-goalset-${encodeURIComponent(s.name)}`))
+    }
     setAccountsWithHistory(() => [])
     setCategories([])
     setTxnWithHistory(() => [])
@@ -869,6 +886,7 @@ export default function App() {
     setSavedBudgets([])
     setSavedScenarios([])
     setSavedTargetSets([])
+    setImportBatches([])
   }
 
   const handleImportFromFile = (json: string) => {
@@ -2387,6 +2405,10 @@ txnMerchantRef.current?.focus()
     const batch = importBatches.find(b => b.id === batchId)
     const removed = transactions.filter(tx => tx.batchId === batchId)
     if (removed.length === 0 && !batch) return
+    // V49 — queue cloud deletes for each removed transaction and the batch itself,
+    // otherwise these become orphans in the cloud (they keep coming back on restore).
+    removed.forEach(tx => addPendingDelete('transactions', tx.id))
+    if (batch) addPendingDelete('import_batches', batch.id)
     setTxnWithHistory(prev => prev.filter(tx => tx.batchId !== batchId))
     setImportBatches(prev => prev.filter(b => b.id !== batchId))
     setBatchToDelete(null)
@@ -3734,15 +3756,40 @@ txnMerchantRef.current?.focus()
               <div className="mt-2 flex gap-2">
                 <button onClick={undoBudget} disabled={!budgetHistory.length} className={`rounded-lg px-3 py-1.5 ${budgetHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoBudget} disabled={!budgetRedo.length} className={`rounded-lg px-3 py-1.5 ${budgetRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
-                <button onClick={() => { if (!categories.length) return; pushBudgetHistory(); setCategories([]); showUndoableToast('Budget reset', undoBudget) }} className="rounded-lg px-3 py-1.5 bg-slate-700 hover:bg-slate-600">Reset Budget</button>
+                <button onClick={() => {
+                  if (!categories.length) return
+                  pushBudgetHistory()
+                  // V49 — queue cloud deletes for each category before clearing
+                  categories.forEach(c => addPendingDelete('categories', c.id))
+                  setCategories([])
+                  showUndoableToast('Budget reset', undoBudget)
+                }} className="rounded-lg px-3 py-1.5 bg-slate-700 hover:bg-slate-600">Reset Budget</button>
                 <button onClick={generateSampleCategory} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample budget category">Generate Sample</button>
               </div>
               {budgetFormHint && <p className="mt-2 text-sm text-amber-300">{budgetFormHint}</p>}
               <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
                 <input className="p-2 rounded-lg bg-slate-800 border border-slate-600" placeholder="Budget name" value={budgetTitle} onChange={e => setBudgetTitle(e.target.value)} />
-                <button className="rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm font-medium text-white transition-colors" onClick={() => { const n = budgetTitle.trim(); if (!n) return; const ex = savedBudgets.find(x => x.name.toLowerCase() === n.toLowerCase()); if (ex && !window.confirm('Overwrite existing budget?')) return; setSavedBudgets([{ name: n, categories, savedAt: new Date().toISOString() }, ...savedBudgets.filter(x => x.name.toLowerCase() !== n.toLowerCase())]); if (ex) setChangeSummary([`Monthly expenses change: ${currency(monthlyBudget - (ex.categories.reduce((s, c) => s + c.amount, 0)))}`]) }}>Save Budget</button>
+                <button className="rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm font-medium text-white transition-colors" onClick={() => { const n = budgetTitle.trim(); if (!n) return; const ex = savedBudgets.find(x => x.name.toLowerCase() === n.toLowerCase()); if (ex && !window.confirm('Overwrite existing budget?')) return; setSavedBudgets([{ name: n, categories, savedAt: new Date().toISOString() }, ...savedBudgets.filter(x => x.name.toLowerCase() !== n.toLowerCase())]); if (ex) setChangeSummary([`Monthly expenses change: ${currency(monthlyBudget - (ex.categories.reduce((s, c) => s + c.amount, 0)))}`]); setLoadedBudgetName(n) }}>Save Budget</button>
                 <div className="text-xs text-slate-400 self-center">Saved locally</div>
               </div>
+              {/* V49 — Quick-save: overwrite the budget that was just loaded */}
+              {loadedBudgetName && savedBudgets.some(b => b.name === loadedBudgetName) && (
+                <div className="mt-2">
+                  <button
+                    className="rounded-lg bg-emerald-700/70 hover:bg-emerald-600/70 text-emerald-100 border border-emerald-600/40 px-3 py-1.5 text-xs font-medium transition-colors"
+                    onClick={() => {
+                      const ex = savedBudgets.find(x => x.name === loadedBudgetName)
+                      if (!ex) return
+                      setSavedBudgets([{ name: loadedBudgetName, categories, savedAt: new Date().toISOString() }, ...savedBudgets.filter(x => x.name !== loadedBudgetName)])
+                      const prevTotal = ex.categories.reduce((s, c) => s + c.amount, 0)
+                      setChangeSummary([`Updated "${loadedBudgetName}" — monthly change: ${currency(monthlyBudget - prevTotal)}`])
+                      showToast(`Saved changes to "${loadedBudgetName}".`)
+                    }}
+                  >
+                    ↻ Update "{loadedBudgetName}" with current categories
+                  </button>
+                </div>
+              )}
               {changeSummary.length > 0 && <div className="mt-2 text-sm rounded border border-slate-700 p-2">What Changed: {changeSummary.join(' • ')}</div>}
               <div className="mt-2 space-y-2">
                 {savedBudgets.map((b, idx) => (
@@ -3784,6 +3831,7 @@ txnMerchantRef.current?.focus()
                               if (window.confirm(`Apply "${b.name}" as your budget? This replaces your current categories.`)) {
                                 pushBudgetHistory()
                                 setCategories(b.categories)
+                                setLoadedBudgetName(b.name)
                                 showToast(`Applied template "${b.name}".`)
                               }
                             }}
@@ -3793,7 +3841,11 @@ txnMerchantRef.current?.focus()
                             setRenameBudgetValue(b.name)
                             setTimeout(() => { renameBudgetInputRef.current?.focus(); renameBudgetInputRef.current?.select() }, 0)
                           }}>Rename</button>
-                          <button className="text-red-300 hover:text-red-200 text-xs" onClick={() => { setSavedBudgets(prev => prev.filter(x => x.name !== b.name)); showToast(`Deleted saved budget "${b.name}".`) }}>Delete</button>
+                          <button className="text-red-300 hover:text-red-200 text-xs" onClick={() => {
+                            setSavedBudgets(prev => prev.filter(x => x.name !== b.name))
+                            if (appAuth.user) addPendingDelete('saved_budgets', `${appAuth.user.id}-budget-${encodeURIComponent(b.name)}`)
+                            showToast(`Deleted saved budget "${b.name}".`)
+                          }}>Delete</button>
                         </div>
                       </>
                     )}
@@ -4341,7 +4393,12 @@ txnMerchantRef.current?.focus()
                 <button onClick={undoAccount} disabled={!accountHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoAccount} disabled={!accountRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 {accounts.length > 0 && (
-                  <button onClick={() => { if (!accounts.length) return; setAccountsWithHistory(() => []); showUndoableToast(`${accounts.length} account${accounts.length !== 1 ? 's' : ''} cleared`, undoAccount) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                  <button onClick={() => {
+                    if (!accounts.length) return
+                    accounts.forEach(a => addPendingDelete('accounts', a.id))
+                    setAccountsWithHistory(() => [])
+                    showUndoableToast(`${accounts.length} account${accounts.length !== 1 ? 's' : ''} cleared`, undoAccount)
+                  }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
                 <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
               </div>
@@ -4913,7 +4970,13 @@ txnMerchantRef.current?.focus()
                 <button onClick={undoTxn} disabled={!txnHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoTxn} disabled={!txnRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 {transactions.length > 0 && (
-                  <button onClick={() => { if (!transactions.length) return; setTxnWithHistory(() => []); showUndoableToast(`${transactions.length} transaction${transactions.length !== 1 ? 's' : ''} cleared`, undoTxn) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                  <button onClick={() => {
+                    if (!transactions.length) return
+                    // V49 — queue cloud deletes before clearing local
+                    transactions.forEach(t => addPendingDelete('transactions', t.id))
+                    setTxnWithHistory(() => [])
+                    showUndoableToast(`${transactions.length} transaction${transactions.length !== 1 ? 's' : ''} cleared`, undoTxn)
+                  }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
                 <button onClick={generateSampleTransaction} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a random sample transaction">Generate Sample</button>
                 <button onClick={generateTenSamples} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Add 10 varied samples — mixed categories, some uncategorized, some duplicate-like">Generate 10 Samples</button>
@@ -5081,7 +5144,12 @@ txnMerchantRef.current?.focus()
                 <button onClick={undoRule} disabled={!ruleHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoRule} disabled={!ruleRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 {rules.length > 0 && (
-                  <button onClick={() => { if (!rules.length) return; setRulesWithHistory(() => []); showUndoableToast(`${rules.length} rule${rules.length !== 1 ? 's' : ''} cleared`, undoRule) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                  <button onClick={() => {
+                    if (!rules.length) return
+                    rules.forEach(r => addPendingDelete('transaction_rules', r.id))
+                    setRulesWithHistory(() => [])
+                    showUndoableToast(`${rules.length} rule${rules.length !== 1 ? 's' : ''} cleared`, undoRule)
+                  }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
                 <button onClick={generateSampleRule} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample rule">Generate Sample</button>
               </div>
@@ -5380,7 +5448,11 @@ txnMerchantRef.current?.focus()
                             while (savedScenarios.find(x => x.name === dupeName)) { dupeName = `${dupeBase} ${i++}` }
                             setSavedScenarios(prev => [{ ...s, name: dupeName, savedAt: new Date().toISOString() }, ...prev])
                           }}>Duplicate</button>
-                          <button className="text-red-300 hover:text-red-200 text-xs" onClick={() => { setSavedScenarios(prev => prev.filter(x => x.name !== s.name)); setScenarioNotes(prev => { const n = { ...prev }; delete n[s.name]; return n }) }}>Delete</button>
+                          <button className="text-red-300 hover:text-red-200 text-xs" onClick={() => {
+                            setSavedScenarios(prev => prev.filter(x => x.name !== s.name))
+                            setScenarioNotes(prev => { const n = { ...prev }; delete n[s.name]; return n })
+                            if (appAuth.user) addPendingDelete('scenarios', `${appAuth.user.id}-scenario-${encodeURIComponent(s.name)}`)
+                          }}>Delete</button>
                         </div>
                       </div>
                       {/* Per-scenario notes */}
@@ -5700,7 +5772,12 @@ txnMerchantRef.current?.focus()
                 Redo
               </button>
               <button
-                onClick={() => { if (!targets.length) return; setTargetsWithHistory(() => []); showUndoableToast(`${targets.length} savings goal${targets.length !== 1 ? 's' : ''} cleared`, undoTarget) }}
+                onClick={() => {
+                  if (!targets.length) return
+                  targets.forEach(t => addPendingDelete('savings_goals', t.id))
+                  setTargetsWithHistory(() => [])
+                  showUndoableToast(`${targets.length} savings goal${targets.length !== 1 ? 's' : ''} cleared`, undoTarget)
+                }}
                 className="rounded-lg px-3 py-1.5 text-sm bg-red-900 hover:bg-red-800 text-red-200"
               >
                 Clear Savings Goals
@@ -5793,7 +5870,11 @@ txnMerchantRef.current?.focus()
                             }
                           }}>Load</button>
                           <button className="text-slate-400 hover:text-slate-300 text-sm" onClick={() => { setEditingSetIdx(idx); setRenameSetValue(s.name) }}>Rename</button>
-                          <button className="text-red-300 hover:text-red-200 text-sm" onClick={() => { pushSetHistory(savedTargetSets); setSavedTargetSets(prev => deleteGoalSet(prev, s.name)) }}>Delete</button>
+                          <button className="text-red-300 hover:text-red-200 text-sm" onClick={() => {
+                            pushSetHistory(savedTargetSets)
+                            setSavedTargetSets(prev => deleteGoalSet(prev, s.name))
+                            if (appAuth.user) addPendingDelete('savings_goal_sets', `${appAuth.user.id}-goalset-${encodeURIComponent(s.name)}`)
+                          }}>Delete</button>
                         </div>
                       </>
                     )}
