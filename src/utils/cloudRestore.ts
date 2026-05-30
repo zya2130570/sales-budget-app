@@ -342,6 +342,7 @@ export async function fetchCloudDataForRestore(
     mode: str((takeHomeFetch as Row).mode, 'simple') as TakeHomeSettings['mode'],
     simpleRate: num((takeHomeFetch as Row).simple_rate, 0.8243),
     manualMonthlyNet: num((takeHomeFetch as Row).manual_monthly_net, 0),
+    baseSalary: (takeHomeFetch as Row).base_salary ? num((takeHomeFetch as Row).base_salary, 40000) : undefined,
     updatedAt: (takeHomeFetch as Row).updated_at ? str((takeHomeFetch as Row).updated_at) : undefined,
   } : null
 

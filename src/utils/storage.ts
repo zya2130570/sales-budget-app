@@ -1,4 +1,4 @@
-import type { Tab, Period, Category, SavedBudget, SavedScenarioSet, Target, SavedTargetSet, Account, Transaction, TransactionRule, TakeHomeSettings, ImportBatch } from '../types'
+import type { Tab, Period, Category, SavedBudget, SavedScenarioSet, Target, SavedTargetSet, Account, Transaction, TransactionRule, TakeHomeSettings, ImportBatch, ExtraIncome, ExportRecord } from '../types'
 import { CURRENT_SCHEMA_VERSION } from '../types'
 import { STORAGE_KEYS } from './storageKeys'
 import { wsKey } from './workspace'
@@ -438,4 +438,43 @@ export function applyCloudRestoreToLocalStorage(data: {
   if (data.categoryMemory && Object.keys(data.categoryMemory).length > 0) {
     saveToStorage(STORAGE_KEYS.categoryMemory, data.categoryMemory)
   }
+}
+
+// ─── V45: Extra incomes ───────────────────────────────────────────────────────
+
+export function loadExtraIncomes(): ExtraIncome[] {
+  return storageGet<ExtraIncome[]>(STORAGE_KEYS.extraIncomes) ?? []
+}
+export function saveExtraIncomes(items: ExtraIncome[]): void {
+  saveToStorage(STORAGE_KEYS.extraIncomes, items)
+}
+
+// ─── V45: Export history ──────────────────────────────────────────────────────
+
+export function loadExportHistory(): ExportRecord[] {
+  return storageGet<ExportRecord[]>(STORAGE_KEYS.exportHistory) ?? []
+}
+export function saveExportHistory(history: ExportRecord[]): void {
+  saveToStorage(STORAGE_KEYS.exportHistory, history.slice(0, 50)) // keep last 50
+}
+
+export function recordExportAndDownload(): void {
+  const json = exportLocalBackup()
+  const blob = new Blob([json], { type: 'application/json' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  const dateStr = new Date().toISOString().slice(0, 10)
+  a.href     = url
+  a.download = `flow-backup-${dateStr}.json`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  // Record in history
+  const record: ExportRecord = {
+    id: crypto.randomUUID(),
+    exportedAt: new Date().toISOString(),
+    fileSizeKb: Math.round(blob.size / 1024),
+  }
+  saveExportHistory([record, ...loadExportHistory()])
 }

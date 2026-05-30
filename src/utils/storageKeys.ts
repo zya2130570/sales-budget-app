@@ -31,6 +31,11 @@ export const STORAGE_KEYS = {
   needsReviewState: 'flow_needs_review_state',
   undoRedoState: 'flow_undo_redo_state',
   pendingDeletes: 'flow_pending_deletes',
+
+  // V45
+  breakdowns: 'flow_breakdowns',
+  extraIncomes: 'flow_extra_incomes',
+  exportHistory: 'flow_export_history',
 } as const
 
 export type StorageKeyName = keyof typeof STORAGE_KEYS

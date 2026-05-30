@@ -651,6 +651,7 @@ export async function persistTakeHomeSettingsToCloud(
     mode: settings.mode,
     simple_rate: safeNum(settings.simpleRate, 0.8243),
     manual_monthly_net: safeNum(settings.manualMonthlyNet, 0),
+    base_salary: safeNum(settings.baseSalary ?? 40000, 40000),
     updated_at: settings.updatedAt ?? nowIso(),
     deleted_at: null,
   }]
