@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { runSchemaRepair } from '../utils/schemaRepair'
+import { ExportHistoryPanel } from './ExportHistoryPanel'
 
 type SettingsPanelProps = {
   onClose: () => void
@@ -86,16 +87,12 @@ export function SettingsPanel({
           <section className="rounded-xl border border-slate-700 bg-slate-800/70 p-4">
             <h3 className="font-semibold text-slate-100">Backup and restore</h3>
             <p className="mt-1 text-sm text-slate-400">
-              Export a local backup or import a backup JSON file.
+              Download a backup anytime. Each download is logged here with the date and file size.
             </p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                onClick={onDownloadBackup}
-                className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500"
-                type="button"
-              >
-                Download Backup
-              </button>
+            <div className="mt-3">
+              <ExportHistoryPanel />
+            </div>
+            <div className="mt-3">
               <button
                 onClick={() => fileInputRef.current?.click()}
                 className="rounded-lg bg-slate-700 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-slate-600"
