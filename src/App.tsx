@@ -2849,7 +2849,6 @@ txnMerchantRef.current?.focus()
           onClose={() => setSettingsOpen(false)}
           onLoadDemo={handleLoadDemo}
           onClearAllData={handleClearAllData}
-          onDownloadBackup={downloadBackupFile}
           onImportFromFile={handleImportFromFile}
           lastSyncedAt={cloudPersistence.lastSyncedAt}
           version={CURRENT_VERSION}
