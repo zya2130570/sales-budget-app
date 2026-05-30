@@ -143,8 +143,12 @@ export type MonthlyReview = {
 }
 
 export type TakeHomeMode = 'simple' | 'manual'
-export type TakeHomeSettings = { mode: TakeHomeMode; simpleRate: number; manualMonthlyNet: number; updatedAt?: string }
-export const DEFAULT_TAKE_HOME_SETTINGS: TakeHomeSettings = { mode: 'simple', simpleRate: 0.8243, manualMonthlyNet: 0 }
+export type TakeHomeSettings = { mode: TakeHomeMode; simpleRate: number; manualMonthlyNet: number; baseSalary?: number; updatedAt?: string }
+export const DEFAULT_TAKE_HOME_SETTINGS: TakeHomeSettings = { mode: "simple", simpleRate: 0.8243, manualMonthlyNet: 0 }
+
+// V45 — additional income sources (side income, rental, partner, etc.)
+export type ExtraIncome = { id: string; label: string; monthlyAmount: number }
+export type ExportRecord = { id: string; exportedAt: string; fileSizeKb: number }
 
 
 export type BudgetActualsByPeriod = Record<string, Record<string, string>>

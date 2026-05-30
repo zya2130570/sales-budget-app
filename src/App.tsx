@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule, ImportBatch, ImportPreset } from './types'
+import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule, ImportBatch, ImportPreset, ExtraIncome } from './types'
 
 import { currency, labelPeriod } from './utils/formatting'
 import {
@@ -40,6 +40,8 @@ import {
   saveImportBatches,
   saveToStorage,
   applyCloudRestoreToLocalStorage,
+  loadExtraIncomes,
+  saveExtraIncomes,
 } from './utils/storage'
 import {
   loadBudgetActuals,
@@ -428,11 +430,17 @@ export default function App() {
   const [dashboardQuickTargetId, setDashboardQuickTargetId] = useState('')
   const [dashboardQuickAmount, setDashboardQuickAmount] = useState('')
   const [baseBumpsAchieved, setBaseBumpsAchieved] = useState(0)
-  // V44 #8 — editable base salary override (persisted to localStorage)
+  // V44 #8 — editable base salary override, now synced to takeHomeSettings for cloud persistence
   const [manualBaseSalary, setManualBaseSalary] = useState<number>(() => {
+    const fromSettings = loadTakeHomeSettings()?.baseSalary
+    if (fromSettings) return fromSettings
     const v = localStorage.getItem('flow-manual-base-salary')
     return v ? Number(v) : 40000
   })
+
+  // V45 — extra income sources (side income, rental, partner, etc.)
+  const [extraIncomes, setExtraIncomes] = useState<ExtraIncome[]>(() => loadExtraIncomes())
+  const extraIncomesMonthly = extraIncomes.reduce((s, e) => s + e.monthlyAmount, 0)
   const [budgetTitle, setBudgetTitle] = useState('')
   const [changeSummary, setChangeSummary] = useState<string[]>([])
   const [editId, setEditId] = useState<string | null>(null)
@@ -799,15 +807,15 @@ export default function App() {
   const [migrationOpen, setMigrationOpen] = useState(false)         // V43 — local→cloud migration
   const [cloudOpenSignal, setCloudOpenSignal] = useState(0)    // V39 — Ctrl+S toggles cloud panel (signal counter)
   const [versionOpen, setVersionOpen] = useState(false) // V34 — V opens version badge
-  // V33 — category breakdowns stored locally (not synced)
+  // V33 — category breakdowns (V45: now uses STORAGE_KEYS for cloud-ready persistence)
   const [breakdowns, setBreakdowns] = useState<Record<string, BreakdownItem[]>>(() => {
-    try { return JSON.parse(localStorage.getItem('flow_breakdowns') ?? '{}') } catch { return {} }
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.breakdowns) ?? localStorage.getItem('flow_breakdowns') ?? '{}') } catch { return {} }
   })
   const [breakdownEditId, setBreakdownEditId] = useState<string | null>(null)
 
-  // V33.1: Persist breakdowns to localStorage when they change
+  // V33.1 / V45: Persist breakdowns to localStorage using centralised key
   useEffect(() => {
-    localStorage.setItem('flow_breakdowns', JSON.stringify(breakdowns))
+    localStorage.setItem(STORAGE_KEYS.breakdowns, JSON.stringify(breakdowns))
   }, [breakdowns])
 
   // V33.1: Seed Bills to Mom breakdown from preload data (.name not .label)
@@ -1136,9 +1144,9 @@ export default function App() {
   }), [categories])
 
   const monthlyBudget = byType.fixed + byType.variable + byType.savings + byType.investing
-  const monthlyLeft = inc.totalMonthly - monthlyBudget
-  const fixedRatio = inc.totalMonthly > 0 ? (byType.fixed / inc.totalMonthly) * 100 : 0
-  const savingsRate = inc.totalMonthly > 0 ? ((byType.savings + byType.investing) / inc.totalMonthly) * 100 : 0
+  const monthlyLeft = (inc.totalMonthly + extraIncomesMonthly) - monthlyBudget
+  const fixedRatio = (inc.totalMonthly + extraIncomesMonthly) > 0 ? (byType.fixed / (inc.totalMonthly + extraIncomesMonthly)) * 100 : 0
+  const savingsRate = (inc.totalMonthly + extraIncomesMonthly) > 0 ? ((byType.savings + byType.investing) / (inc.totalMonthly + extraIncomesMonthly)) * 100 : 0
   const dep = inc.commissionPct
   const depColor = dep <= 35 ? 'text-green-400' : dep <= 55 ? 'text-yellow-300' : 'text-red-400'
   const baseNetByPeriod = period === 'weekly' ? inc.baseWeekly : period === 'bi-weekly' ? inc.baseBiWeekly : period === 'yearly' ? inc.baseMonthly * 12 : inc.baseMonthly
@@ -1149,7 +1157,7 @@ export default function App() {
 
   const hasBudgetData = monthlyBudget > 0
   const selectedPeriodRemaining = convertFromMonthly(monthlyLeft, period)
-  const selectedPeriodTotalNet = convertFromMonthly(inc.totalMonthly, period)
+  const selectedPeriodTotalNet = convertFromMonthly(inc.totalMonthly + extraIncomesMonthly, period)
   const remainingTier = remainingTierFromPeriodValue(selectedPeriodRemaining, period)
   const remainingTone = remainingTier.tone
   const statusLabel = !hasBudgetData ? 'No Data' : selectedPeriodRemaining < 0 ? 'Over Budget' : remainingTier.label
@@ -1225,6 +1233,20 @@ export default function App() {
       .filter(k => k !== currentActualsPeriodKey && Object.keys(allActualsByPeriod[k]).length > 0)
       .sort((a, b) => b.localeCompare(a)) // newest first
   }, [allActualsByPeriod, currentActualsPeriodKey])
+
+  // V45 — Persist extraIncomes to localStorage whenever they change
+  useEffect(() => { saveExtraIncomes(extraIncomes) }, [extraIncomes])
+
+  // V45 — Month-over-month spending delta
+  const momDelta = useMemo(() => {
+    const prevKey = prevMonthKey(currentActualsPeriodKey)
+    const prevData = allActualsByPeriod[prevKey]
+    if (!prevData || Object.keys(prevData).length === 0) return null
+    const currentSpend = Object.values(actuals).reduce((s, v) => s + (parseFloat(v) || 0), 0)
+    const prevSpend = Object.values(prevData).reduce((s, v) => s + (parseFloat(v) || 0), 0)
+    if (prevSpend === 0) return null
+    return { current: currentSpend, prev: prevSpend, delta: currentSpend - prevSpend, pct: ((currentSpend - prevSpend) / prevSpend) * 100 }
+  }, [actuals, allActualsByPeriod, currentActualsPeriodKey])
 
   // V19 — Rollover: for rollover-enabled categories, add previous month's underspend to this month's plan
   const rolloverByCatId = useMemo(() => {
@@ -2940,6 +2962,27 @@ txnMerchantRef.current?.focus()
               onAction={(tab) => setTab(tab as Tab)}
             />
 
+            {/* V45 — Month-over-month spending delta */}
+            {momDelta && (
+              <div className={`rounded-xl border px-4 py-3 flex items-center justify-between gap-4
+                ${momDelta.delta > 0 ? 'border-amber-700/30 bg-amber-950/10' : 'border-green-700/30 bg-green-950/10'}`}>
+                <div>
+                  <p className="text-xs font-semibold text-slate-300">This month vs last month</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    Last month: {currency(momDelta.prev)} · This month so far: {currency(momDelta.current)}
+                  </p>
+                </div>
+                <div className={`text-right shrink-0 ${momDelta.delta > 0 ? 'text-amber-400' : 'text-green-400'}`}>
+                  <div className="text-base font-bold">
+                    {momDelta.delta > 0 ? '+' : ''}{currency(momDelta.delta)}
+                  </div>
+                  <div className="text-[10px] font-medium">
+                    {Math.abs(momDelta.pct).toFixed(1)}% {momDelta.delta > 0 ? 'more' : 'less'}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* V44 #7 — Year-over-year spending history */}
             <YearOverYearPanel
               allActualsByPeriod={allActualsByPeriod}
@@ -3266,6 +3309,8 @@ txnMerchantRef.current?.focus()
                         const v = Math.max(0, Number(e.target.value) || 0)
                         setManualBaseSalary(v)
                         localStorage.setItem('flow-manual-base-salary', String(v))
+                        const current = loadTakeHomeSettings()
+                        if (current) saveTakeHomeSettings({ ...current, baseSalary: v, updatedAt: new Date().toISOString() })
                       }}
                       className="w-28 text-right px-2 py-0.5 text-xs rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200"
                       title="Edit your base salary — tax breakdown updates live"
@@ -3381,6 +3426,53 @@ txnMerchantRef.current?.focus()
                 <Row l="Effective hourly net rate" v={currency(inc.totalWeekly / HOURS_PER_WEEK) + ' per hour'} />
                 <Row l="Commission as % of total" v={`${dep.toFixed(1)}%`} />
                 <Row l="Commission per hour" v={currency(inc.cWeekly / HOURS_PER_WEEK)} />
+              </Card>
+
+              {/* V45 — Extra income sources */}
+              <Card title="Additional Income Sources">
+                <p className="text-xs text-slate-400 mb-3">Side income, rental, partner income, freelance, etc. Added to your monthly total.</p>
+                {extraIncomes.length > 0 && (
+                  <div className="space-y-2 mb-3">
+                    {extraIncomes.map(ei => (
+                      <div key={ei.id} className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={ei.label}
+                          onChange={e => setExtraIncomes(prev => prev.map(x => x.id === ei.id ? { ...x, label: e.target.value } : x))}
+                          placeholder="Label"
+                          className="flex-1 px-2 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none"
+                        />
+                        <div className="relative">
+                          <span className="absolute left-2 top-1 text-slate-400 text-xs">$</span>
+                          <input
+                            type="number"
+                            min={0}
+                            step={100}
+                            value={ei.monthlyAmount}
+                            onChange={e => setExtraIncomes(prev => prev.map(x => x.id === ei.id ? { ...x, monthlyAmount: Math.max(0, Number(e.target.value) || 0) } : x))}
+                            className="w-28 pl-5 pr-2 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-right"
+                          />
+                        </div>
+                        <span className="text-[10px] text-slate-500">/mo</span>
+                        <button
+                          onClick={() => setExtraIncomes(prev => prev.filter(x => x.id !== ei.id))}
+                          className="text-slate-500 hover:text-red-400 text-sm leading-none px-1"
+                          title="Remove"
+                        >✕</button>
+                      </div>
+                    ))}
+                    <div className="flex justify-between pt-1 border-t border-slate-700/40 text-xs">
+                      <span className="text-slate-400">Total additional monthly</span>
+                      <span className="font-semibold text-green-400">{currency(extraIncomesMonthly)}</span>
+                    </div>
+                  </div>
+                )}
+                <button
+                  onClick={() => setExtraIncomes(prev => [...prev, { id: crypto.randomUUID(), label: '', monthlyAmount: 0 }])}
+                  className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+                >
+                  + Add income source
+                </button>
               </Card>
             </div>
           </section>
