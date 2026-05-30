@@ -8,6 +8,21 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V46',
+    date: '5/30/2026 at 12:00 AM',
+    what: [
+      'Sidebar icon overhaul — all 7 nav icons redrawn at 18px for clarity in collapsed mode. Budget is now a bar chart (not a house). Transactions shows two-way arrows. Settings is now a proper gear cog (was accidentally showing a sun/light icon). Active tab gets brand-blue icon color instead of just brighter white.',
+      'Spending History panel — fixed "unknown-period:unknown-start" showing raw key text. All legacy/default period keys now show "Earlier data". Empty periods ($0.00) are filtered out.',
+      'Version badge updated to V46.',
+    ],
+    test: [
+      'Collapse the sidebar — each icon should be immediately recognizable without hovering.',
+      'Settings button at the bottom should show a gear, not a sun.',
+      'Active tab icon should appear blue/indigo, not just bright white.',
+      'Dashboard Spending History should show readable month labels, no raw key strings.',
+    ],
+  },
+  {
     version: 'V43',
     date: '5/27/2026 at 12:00 AM',
     what: [
