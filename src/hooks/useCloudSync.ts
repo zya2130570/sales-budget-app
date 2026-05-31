@@ -128,8 +128,9 @@ export function useCloudSync() {
       const localGoalSetIds   = new Set((loadSavedTargetSets()    ?? []).map(s => `${userId}-goalset-${encodeURIComponent(s.name)}`))
 
       // Fetch cloud IDs in parallel (only non-deleted rows)
+      const db = supabase  // local non-null capture so TS keeps the guard inside the inner async fn
       const fetchTable = async (table: string) => {
-        const { data, error } = await supabase
+        const { data, error } = await db
           .from(table)
           .select('local_id')
           .eq('user_id', userId)
