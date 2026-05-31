@@ -872,7 +872,7 @@ export default function App() {
       categories.forEach(c => addPendingDelete('categories', c.id))
       transactions.forEach(t => addPendingDelete('transactions', t.id))
       targets.forEach(t => addPendingDelete('savings_goals', t.id))
-      transactionRules.forEach(r => addPendingDelete('transaction_rules', r.id))
+      rules.forEach(r => addPendingDelete('transaction_rules', r.id))
       importBatches.forEach(b => addPendingDelete('import_batches', b.id))
       savedBudgets.forEach(b => addPendingDelete('saved_budgets', `${userId}-budget-${encodeURIComponent(b.name)}`))
       savedScenarios.forEach(s => addPendingDelete('scenarios', `${userId}-scenario-${encodeURIComponent(s.name)}`))
