@@ -64,6 +64,7 @@ export type CloudPersistSummary = {
   conflicts: ConflictRecord[]
   results: CloudPersistResult[]
   lastSyncedAt?: string
+  deletesApplied?: number  // how many pending deletes were soft-deleted in cloud
 }
 
 export type CloudConnectionTestResult = {
@@ -992,6 +993,7 @@ export async function persistCoreDataToCloud(params: {
     conflicts: allConflicts,
     results,
     lastSyncedAt: nowIso(),
+    deletesApplied: syncedDeletes.length,
     syncedDeletes,
   }
 }
