@@ -20,7 +20,7 @@ import {
   type ConflictRecord,
   type ConflictResolutions,
 } from '../utils/cloudPersistence'
-import { clearSyncedDeletes } from '../utils/storage'
+import { clearSyncedDeletes, loadPendingDeletes } from '../utils/storage'
 
 export type CloudPersistenceStatus =
   | 'guest'       // not logged in / Supabase not configured
@@ -146,10 +146,20 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
     setError(null)
 
     try {
+      // V49 — re-read pending deletes from localStorage at sync time so that any
+      // queued during this React tick (e.g. by Use Local) are included.
+      // Previously the captured `data.pendingDeletes` was from render time and
+      // missed everything added between renders.
+      const freshPendingDeletes = loadPendingDeletes().map(d => ({
+        table: d.table,
+        localId: d.localId,
+        deletedAt: d.deletedAt,
+      }))
       const result = await persistCoreDataToCloud({
         supabase,
         userId: auth.user.id,
         ...data,
+        pendingDeletes: freshPendingDeletes,
         resolutions: conflictResolutions,
       })
 
