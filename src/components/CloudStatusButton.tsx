@@ -269,7 +269,7 @@ export function CloudStatusButton(props: SyncProps & { theme?: 'dark' | 'light';
                     <div className="border-t border-slate-700/60 pt-2">
                       <button onClick={() => setShowResults(v => !v)}
                         className="text-[11px] text-slate-500 hover:text-slate-300 transition-colors">
-                        {showResults ? '▲ Hide' : `▼ Details (${props.lastResult.synced} synced${props.lastResult.failed > 0 ? `, ${props.lastResult.failed} failed` : ''})`}
+                        {showResults ? '▲ Hide' : `▼ Details (${props.lastResult.synced} synced${props.lastResult.failed > 0 ? `, ${props.lastResult.failed} failed` : ''}${(props.lastResult.deletesApplied ?? 0) > 0 ? `, ${props.lastResult.deletesApplied} cloud records removed` : ''})`}
                       </button>
                       {showResults && (
                         <div className="space-y-1.5 mt-2">
@@ -357,8 +357,10 @@ export function CloudStatusButton(props: SyncProps & { theme?: 'dark' | 'light';
                             onClick={async () => {
                               await cs.chooseLocal()
                               setConfirmUseLocal(false)
-                              // V49 — auto-trigger sync so the pending deletes actually flush to cloud
-                              setTimeout(() => props.onSyncNow(), 200)
+                              setTab('sync')  // switch to sync tab so user sees the result
+                              // Small delay to let React flush state before syncing
+                              await new Promise(r => setTimeout(r, 50))
+                              await props.onSyncNow()
                             }}
                             disabled={busy}
                             className="px-3 py-1.5 text-xs rounded-lg bg-amber-600 hover:bg-amber-500 text-white transition-colors disabled:opacity-50">
