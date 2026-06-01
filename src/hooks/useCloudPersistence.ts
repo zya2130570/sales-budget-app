@@ -138,7 +138,12 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
 
   const runSyncNow = useCallback(async () => {
     if (!canSync || !auth.user || !supabase) { setStatus('guest'); return }
-    if (!connectionTested) { setError('Run the connection test before syncing.'); return }
+    // Allow sync if connection was previously tested OR if we're already in a synced/ready/pending state
+    // (previously-tested connection is still valid; requiring re-test after every "Use Local" is wrong)
+    if (!connectionTested && status !== 'synced' && status !== 'ready' && status !== 'pending') {
+      setError('Run the connection test before syncing.')
+      return
+    }
     if (syncInFlightRef.current) return
 
     syncInFlightRef.current = true
@@ -146,10 +151,8 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
     setError(null)
 
     try {
-      // V49 — re-read pending deletes from localStorage at sync time so that any
+      // Re-read pending deletes from localStorage at sync time so that any
       // queued during this React tick (e.g. by Use Local) are included.
-      // Previously the captured `data.pendingDeletes` was from render time and
-      // missed everything added between renders.
       const freshPendingDeletes = loadPendingDeletes().map(d => ({
         table: d.table,
         localId: d.localId,
@@ -195,6 +198,7 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
         setLastSyncedAt(syncedAt)
         writeLastSyncedAt(syncedAt)
         setStatus('synced')
+        setConnectionTested(true)  // mark as tested since we just successfully synced
         setError(null)
       }
     } catch (err) {
@@ -210,7 +214,7 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
     } finally {
       syncInFlightRef.current = false
     }
-  }, [auth.user, canSync, connectionTested, conflictResolutions, consecutiveSyncFailures, autoSyncEnabled, data])
+  }, [auth.user, canSync, connectionTested, status, conflictResolutions, consecutiveSyncFailures, autoSyncEnabled, data])
 
   // ─── Conflict resolution ───────────────────────────────────────────────────
 
