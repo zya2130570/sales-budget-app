@@ -1,78 +1,66 @@
 import { useState, useMemo } from 'react'
-import type { Category } from './types'
+import type { Category, Transaction } from '../types'
 import { currency } from '../utils/formatting'
 
 type Props = {
-  allActualsByPeriod: Record<string, Record<string, string>>
+  transactions: Transaction[]
   categories: Category[]
 }
 
-// Parse a period key → human readable label
-// Formats: "monthly:2025-01-01:2025-01-31", "bi-weekly:2025-01-01:2025-01-14",
-//          "unknown-period:unknown-start", "default", "legacy"
-function periodKeyToLabel(key: string): string {
-  if (key === 'legacy') return 'All imported (legacy)'
-  if (key === 'default') return 'All-time totals'
-  const parts = key.split(':')
-  if (parts.length < 2) return key
-  const dateStr = parts[1]
-  if (!dateStr || dateStr === 'unknown-start' || dateStr.startsWith('unknown')) return 'Pre-period data'
-  const d = new Date(dateStr + 'T12:00:00')
-  if (isNaN(d.getTime())) return key
+// V52 — Reads directly from transactions[].date instead of the stale actuals snapshot.
+// This fixes the "Pre-period data" bug — historical CSV imports get bucketed by their actual
+// transaction dates, so you see "Apr 2025", "May 2025", etc. correctly.
+function monthYearLabel(ym: string): string {
+  const [y, m] = ym.split('-').map(Number)
+  if (!y || !m) return ym
+  const d = new Date(y, m - 1, 1)
   return d.toLocaleString('default', { month: 'short', year: 'numeric' })
 }
 
-function periodKeyToSortKey(key: string): string {
-  if (key === 'default' || key === 'legacy') return '0000-00'
-  const parts = key.split(':')
-  if (parts.length >= 2 && parts[1] && !parts[1].startsWith('unknown')) return parts[1]
-  return '0000-00'
-}
-
-// Detect if a key is the "all data dumped in one bucket" case (pre-period-aware imports)
-function isLegacyBucket(key: string): boolean {
-  return key === 'legacy' || key === 'default'
-}
-
-export function YearOverYearPanel({ allActualsByPeriod, categories }: Props) {
+export function YearOverYearPanel({ transactions, categories }: Props) {
   const [viewMode, setViewMode] = useState<'totals' | 'by-category'>('totals')
   const [showAll, setShowAll] = useState(false)
   const [isCollapsed, setIsCollapsed] = useState(false)
 
-  const periodKeys = useMemo(() =>
-    Object.keys(allActualsByPeriod)
-      .filter(k => {
-        const vals = Object.values(allActualsByPeriod[k] ?? {})
-        const total = vals.reduce((s, v) => s + (parseFloat(v) || 0), 0)
-        return total > 0  // only show periods with actual spending
-      })
-      .sort((a, b) => periodKeyToSortKey(b).localeCompare(periodKeyToSortKey(a))),
-    [allActualsByPeriod]
+  // Only expense-type transactions count toward "spending"
+  const expenseTxns = useMemo(
+    () => transactions.filter(t => t.type === 'expense' || t.type === 'credit card payment'),
+    [transactions]
   )
 
-  const visibleKeys = showAll ? periodKeys : periodKeys.slice(0, 12)
+  // Group by YYYY-MM
+  const byMonth = useMemo(() => {
+    const map = new Map<string, { total: number; byCat: Record<string, number> }>()
+    for (const tx of expenseTxns) {
+      const ym = tx.date.slice(0, 7)
+      if (ym.length !== 7) continue
+      const entry = map.get(ym) ?? { total: 0, byCat: {} }
+      entry.total += Math.abs(tx.amount)
+      if (tx.categoryId) entry.byCat[tx.categoryId] = (entry.byCat[tx.categoryId] ?? 0) + Math.abs(tx.amount)
+      map.set(ym, entry)
+    }
+    return [...map.entries()].sort((a, b) => b[0].localeCompare(a[0]))
+  }, [expenseTxns])
 
-  const totalsPerPeriod = useMemo(() =>
-    periodKeys.reduce<Record<string, number>>((acc, key) => {
-      acc[key] = Object.values(allActualsByPeriod[key] ?? {}).reduce((s, v) => s + (parseFloat(v) || 0), 0)
-      return acc
-    }, {}),
-    [periodKeys, allActualsByPeriod]
-  )
+  const visibleMonths = showAll ? byMonth : byMonth.slice(0, 12)
+  const maxTotal = Math.max(...byMonth.map(([, e]) => e.total), 1)
 
+  // Top categories across all months for the by-category table
   const topCats = useMemo(() => {
-    const totals = categories.map(c => ({
-      c,
-      total: periodKeys.reduce((s, k) => s + (parseFloat(allActualsByPeriod[k]?.[c.id] ?? '0') || 0), 0),
-    }))
-    return totals.filter(x => x.total > 0).sort((a, b) => b.total - a.total).slice(0, 6)
-  }, [categories, periodKeys, allActualsByPeriod])
+    const totals: Record<string, number> = {}
+    for (const [, entry] of byMonth) {
+      for (const [catId, amt] of Object.entries(entry.byCat)) {
+        totals[catId] = (totals[catId] ?? 0) + amt
+      }
+    }
+    return categories
+      .map(c => ({ c, total: totals[c.id] ?? 0 }))
+      .filter(x => x.total > 0)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 6)
+  }, [byMonth, categories])
 
-  const maxTotal = Math.max(...Object.values(totalsPerPeriod), 1)
-  const hasLegacy = periodKeys.some(isLegacyBucket)
-  const onlyLegacy = periodKeys.length > 0 && periodKeys.every(isLegacyBucket)
-
-  if (periodKeys.length === 0) return null
+  if (byMonth.length === 0) return null
 
   return (
     <div className="rounded-2xl border border-slate-700/50 bg-slate-800/40 overflow-hidden">
@@ -82,7 +70,9 @@ export function YearOverYearPanel({ allActualsByPeriod, categories }: Props) {
       >
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-slate-200">Spending History</span>
-          <span className="text-[10px] bg-slate-700 text-slate-400 rounded px-1.5 py-0.5">{periodKeys.length} periods</span>
+          <span className="text-[10px] bg-slate-700 text-slate-400 rounded px-1.5 py-0.5">
+            {byMonth.length} {byMonth.length === 1 ? 'month' : 'months'}
+          </span>
         </div>
         <div className="flex items-center gap-3">
           {!isCollapsed && (
@@ -103,46 +93,39 @@ export function YearOverYearPanel({ allActualsByPeriod, categories }: Props) {
 
       {!isCollapsed && (
         <div className="px-4 pb-4">
-          {hasLegacy && (
-            <div className="mb-3 rounded-lg border border-amber-700/30 bg-amber-950/10 px-3 py-2 text-[11px] text-amber-300/90 leading-relaxed">
-              <strong>Note:</strong> {onlyLegacy ? 'All your spending data is currently in one bucket' : 'Some of your data is in a legacy bucket'} because it was imported before per-period tracking was set up. New transactions from now on will be filed by period (week/month) automatically. To split your existing data by date, re-import the CSVs while on a specific period.
-            </div>
-          )}
           {viewMode === 'totals' && (
             <div className="space-y-2">
-              {visibleKeys.map(key => {
-                const total = totalsPerPeriod[key] ?? 0
-                const barPct = maxTotal > 0 ? (total / maxTotal) * 100 : 0
-                const label = periodKeyToLabel(key)
+              {visibleMonths.map(([ym, entry]) => {
+                const barPct = (entry.total / maxTotal) * 100
                 return (
-                  <div key={key} className="flex items-center gap-3">
-                    <div className="w-20 text-right text-xs text-slate-400 shrink-0">{label}</div>
+                  <div key={ym} className="flex items-center gap-3">
+                    <div className="w-20 text-right text-xs text-slate-400 shrink-0">{monthYearLabel(ym)}</div>
                     <div className="flex-1 bg-slate-800 rounded-full h-2 overflow-hidden">
                       <div className="h-2 rounded-full bg-blue-500/70 transition-all duration-500" style={{ width: `${barPct}%` }}/>
                     </div>
-                    <div className="w-24 text-right text-xs font-medium text-slate-300 shrink-0">{currency(total)}</div>
+                    <div className="w-24 text-right text-xs font-medium text-slate-300 shrink-0 font-num">{currency(entry.total)}</div>
                   </div>
                 )
               })}
-              {!showAll && periodKeys.length > 12 && (
+              {!showAll && byMonth.length > 12 && (
                 <button onClick={() => setShowAll(true)} className="text-xs text-blue-400 hover:text-blue-300 mt-1">
-                  + Show {periodKeys.length - 12} more periods
+                  + Show {byMonth.length - 12} more months
                 </button>
               )}
-              {showAll && periodKeys.length > 12 && (
+              {showAll && byMonth.length > 12 && (
                 <button onClick={() => setShowAll(false)} className="text-xs text-slate-500 hover:text-slate-400 mt-1">Show less</button>
               )}
             </div>
           )}
 
           {viewMode === 'by-category' && (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto h-scroll-visible">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-slate-700/60">
                     <th className="text-left py-1.5 text-slate-400 font-medium pr-3">Category</th>
-                    {visibleKeys.slice(0, 6).map(k => (
-                      <th key={k} className="text-right py-1.5 text-slate-400 font-medium px-2 whitespace-nowrap">{periodKeyToLabel(k)}</th>
+                    {visibleMonths.slice(0, 6).map(([ym]) => (
+                      <th key={ym} className="text-right py-1.5 text-slate-400 font-medium px-2 whitespace-nowrap">{monthYearLabel(ym)}</th>
                     ))}
                   </tr>
                 </thead>
@@ -150,10 +133,10 @@ export function YearOverYearPanel({ allActualsByPeriod, categories }: Props) {
                   {topCats.map(({ c }) => (
                     <tr key={c.id} className="border-b border-slate-800/60 hover:bg-slate-800/20">
                       <td className="py-1.5 text-slate-300 pr-3 whitespace-nowrap max-w-[120px] overflow-hidden text-ellipsis">{c.name}</td>
-                      {visibleKeys.slice(0, 6).map(k => {
-                        const val = parseFloat(allActualsByPeriod[k]?.[c.id] ?? '0') || 0
+                      {visibleMonths.slice(0, 6).map(([ym, entry]) => {
+                        const val = entry.byCat[c.id] ?? 0
                         return (
-                          <td key={k} className={`py-1.5 text-right px-2 ${val > 0 ? 'text-slate-300' : 'text-slate-600'}`}>
+                          <td key={ym} className={`py-1.5 text-right px-2 font-num ${val > 0 ? 'text-slate-300' : 'text-slate-600'}`}>
                             {val > 0 ? currency(val) : '—'}
                           </td>
                         )
@@ -162,14 +145,14 @@ export function YearOverYearPanel({ allActualsByPeriod, categories }: Props) {
                   ))}
                   <tr className="border-t border-slate-700/60">
                     <td className="py-1.5 text-slate-400 font-medium pr-3">Total</td>
-                    {visibleKeys.slice(0, 6).map(k => (
-                      <td key={k} className="py-1.5 text-right px-2 font-medium text-slate-200">{currency(totalsPerPeriod[k] ?? 0)}</td>
+                    {visibleMonths.slice(0, 6).map(([ym, entry]) => (
+                      <td key={ym} className="py-1.5 text-right px-2 font-medium text-slate-200 font-num">{currency(entry.total)}</td>
                     ))}
                   </tr>
                 </tbody>
               </table>
-              {visibleKeys.length > 6 && (
-                <p className="text-[10px] text-slate-600 mt-2">Showing 6 most recent · switch to Totals view for all {periodKeys.length}</p>
+              {visibleMonths.length > 6 && (
+                <p className="text-[10px] text-slate-600 mt-2">Showing 6 most recent months · switch to Totals view for all {byMonth.length}</p>
               )}
             </div>
           )}

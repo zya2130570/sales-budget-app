@@ -57,6 +57,13 @@ export interface TransactionsTabProps {
   txnPillCounts: Record<string, number>
   filteredTxnNet: number
   totalTxnCount: number
+  // V52
+  txnSortKey: 'date' | 'amount' | 'merchant'
+  setTxnSortKey: React.Dispatch<React.SetStateAction<'date' | 'amount' | 'merchant'>>
+  txnSortDir: 'asc' | 'desc'
+  setTxnSortDir: React.Dispatch<React.SetStateAction<'asc' | 'desc'>>
+  filteredTopMerchants: Array<{ merchant: string; total: number }>
+  bulkRecategorizeFiltered: (categoryId: string) => void
   // Collapsible sections
   txnListOpen: boolean
   setTxnListOpen: React.Dispatch<React.SetStateAction<boolean>>
@@ -109,6 +116,8 @@ export function TransactionsTab({
   txnMonthFilter, setTxnMonthFilter, availableTxnMonths,
   txnCountsByAccount, txnCountsByCategory, txnMonthsWithCounts, txnPillCounts,
   filteredTxnNet, totalTxnCount,
+  txnSortKey, setTxnSortKey, txnSortDir, setTxnSortDir,
+  filteredTopMerchants, bulkRecategorizeFiltered,
   txnListOpen, setTxnListOpen,
   deleteFilteredConfirm, setDeleteFilteredConfirm,
   inlineTxnEditId, inlineTxnEditForm, setInlineTxnEditId, setInlineTxnEditForm,
@@ -299,19 +308,86 @@ export function TransactionsTab({
                 </div>
               )}
 
+              {/* V52 #5 — Top merchants chips (only shown when filters active and there is data) */}
+              {hasActiveFilters && filteredTopMerchants.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap mb-3">
+                  <span className="text-[10px] text-slate-500 uppercase tracking-wide font-medium mr-1">Top Spend:</span>
+                  {filteredTopMerchants.map(m => (
+                    <button
+                      key={m.merchant}
+                      onClick={() => setTxnSearch(m.merchant)}
+                      className="text-[11px] px-2 py-0.5 rounded-full bg-slate-700/60 hover:bg-slate-600 border border-slate-600/40 text-slate-300 transition-colors flex items-center gap-1.5"
+                      title={`Click to filter by "${m.merchant}"`}
+                    >
+                      <span className="max-w-[140px] truncate">{m.merchant}</span>
+                      <span className="text-amber-400 font-num font-medium">{currency(m.total)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* V52 #4 — Bulk recategorize when filters active */}
+              {hasActiveFilters && filteredTxns.length > 0 && (
+                <div className="flex items-center gap-2 mb-3 flex-wrap text-xs">
+                  <span className="text-slate-500">Bulk categorize all {filteredTxns.length} filtered:</span>
+                  <select
+                    defaultValue=""
+                    onChange={e => {
+                      const v = e.target.value
+                      if (!v) return
+                      const label = v === '__none__' ? 'Uncategorized' : (categories.find(c => c.id === v)?.name ?? 'category')
+                      if (!window.confirm(`Set category to "${label}" for all ${filteredTxns.length} filtered transactions?`)) {
+                        e.target.value = ''
+                        return
+                      }
+                      bulkRecategorizeFiltered(v === '__none__' ? '' : v)
+                      e.target.value = ''
+                    }}
+                    className="px-2 py-1 rounded bg-slate-800 border border-slate-600 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">Choose category…</option>
+                    <option value="__none__">— Clear category (uncategorized)</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
+              )}
+
               {/* Transaction table */}
               <div className="overflow-x-auto -mx-1 px-1">
                 <table className="w-full text-sm min-w-[640px]">
                   <thead>
                     <tr className="text-left text-slate-400 border-b border-slate-700">
-                      <th className="pb-1.5 pr-3 font-medium whitespace-nowrap">Date</th>
-                      <th className="pb-1.5 pr-3 font-medium">Account</th>
-                      <th className="pb-1.5 pr-3 font-medium">Merchant</th>
-                      <th className="pb-1.5 pr-3 font-medium">Type</th>
-                      <th className="pb-1.5 pr-3 font-medium">Category</th>
-                      <th className="pb-1.5 pr-3 font-medium text-right whitespace-nowrap">Amount</th>
-                      <th className="pb-1.5 pr-3 font-medium hidden sm:table-cell">Notes</th>
-                      <th className="pb-1.5 sticky right-0 bg-slate-800" />
+                      {/* V52 — sortable headers */}
+                      {(() => {
+                        const sortBtn = (key: 'date' | 'amount' | 'merchant', label: string, extraCls = '') => {
+                          const isActive = txnSortKey === key
+                          const arrow = isActive ? (txnSortDir === 'asc' ? '↑' : '↓') : ''
+                          return (
+                            <button
+                              onClick={() => {
+                                if (isActive) setTxnSortDir(d => d === 'asc' ? 'desc' : 'asc')
+                                else { setTxnSortKey(key); setTxnSortDir(key === 'merchant' ? 'asc' : 'desc') }
+                              }}
+                              className={`text-left font-medium whitespace-nowrap flex items-center gap-1 hover:text-slate-200 transition-colors ${isActive ? 'text-slate-200' : 'text-slate-400'} ${extraCls}`}
+                              type="button"
+                            >
+                              {label}{arrow && <span className="text-[10px] text-blue-400">{arrow}</span>}
+                            </button>
+                          )
+                        }
+                        return (
+                          <>
+                            <th className="pb-1.5 pr-3">{sortBtn('date', 'Date')}</th>
+                            <th className="pb-1.5 pr-3 font-medium">Account</th>
+                            <th className="pb-1.5 pr-3">{sortBtn('merchant', 'Merchant')}</th>
+                            <th className="pb-1.5 pr-3 font-medium">Type</th>
+                            <th className="pb-1.5 pr-3 font-medium">Category</th>
+                            <th className="pb-1.5 pr-3 text-right">{sortBtn('amount', 'Amount', 'justify-end w-full')}</th>
+                            <th className="pb-1.5 pr-3 font-medium hidden sm:table-cell">Notes</th>
+                            <th className="pb-1.5 sticky right-0 bg-slate-800" />
+                          </>
+                        )
+                      })()}
                     </tr>
                   </thead>
                   <tbody>
