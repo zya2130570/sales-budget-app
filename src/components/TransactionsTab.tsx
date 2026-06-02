@@ -47,6 +47,9 @@ export interface TransactionsTabProps {
   setTxnAccountFilter: React.Dispatch<React.SetStateAction<string>>
   txnCategoryFilter: string
   setTxnCategoryFilter: React.Dispatch<React.SetStateAction<string>>
+  txnMonthFilter: string
+  setTxnMonthFilter: React.Dispatch<React.SetStateAction<string>>
+  availableTxnMonths: string[]
   // Collapsible sections
   txnListOpen: boolean
   setTxnListOpen: React.Dispatch<React.SetStateAction<boolean>>
@@ -96,6 +99,7 @@ export function TransactionsTab({
   dismissedDupIds, confirmedDupIds, highlightedTxnId,
   txnFilter, setTxnFilter, txnSearch, setTxnSearch,
   txnAccountFilter, setTxnAccountFilter, txnCategoryFilter, setTxnCategoryFilter,
+  txnMonthFilter, setTxnMonthFilter, availableTxnMonths,
   txnListOpen, setTxnListOpen,
   deleteFilteredConfirm, setDeleteFilteredConfirm,
   inlineTxnEditId, inlineTxnEditForm, setInlineTxnEditId, setInlineTxnEditForm,
@@ -181,11 +185,43 @@ export function TransactionsTab({
                   <option value="__none__">Uncategorized</option>
                   {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
-                {(txnSearch || txnAccountFilter || txnCategoryFilter) && (
+                {/* V50 — Month/year filter, grouped by year */}
+                <select value={txnMonthFilter} onChange={e => setTxnMonthFilter(e.target.value)} className="text-xs px-2 py-1 rounded bg-slate-800 border border-slate-600 focus:outline-none" disabled={availableTxnMonths.length === 0}>
+                  <option value="">All dates</option>
+                  {(() => {
+                    // Group YYYY-MM values by year so the dropdown displays:
+                    //   2026
+                    //     Jan
+                    //     Feb
+                    //   2025
+                    //     Apr
+                    //     Jul
+                    const byYear: Record<string, string[]> = {}
+                    for (const ym of availableTxnMonths) {
+                      const [y] = ym.split('-')
+                      ;(byYear[y] ||= []).push(ym)
+                    }
+                    const monthName = (ym: string) => {
+                      const [, m] = ym.split('-')
+                      const monthIdx = Math.max(0, Math.min(11, parseInt(m, 10) - 1))
+                      return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][monthIdx]
+                    }
+                    return Object.keys(byYear)
+                      .sort((a, b) => b.localeCompare(a))
+                      .map(year => (
+                        <optgroup key={year} label={year}>
+                          {byYear[year].map(ym => (
+                            <option key={ym} value={ym}>{monthName(ym)}</option>
+                          ))}
+                        </optgroup>
+                      ))
+                  })()}
+                </select>
+                {(txnSearch || txnAccountFilter || txnCategoryFilter || txnMonthFilter) && (
                   <Button
                     tone="secondary"
                     size="xs"
-                    onClick={() => { setTxnSearch(''); setTxnAccountFilter(''); setTxnCategoryFilter('') }}
+                    onClick={() => { setTxnSearch(''); setTxnAccountFilter(''); setTxnCategoryFilter(''); setTxnMonthFilter('') }}
                   >Clear</Button>
                 )}
               </div>
