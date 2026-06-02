@@ -50,6 +50,13 @@ export interface TransactionsTabProps {
   txnMonthFilter: string
   setTxnMonthFilter: React.Dispatch<React.SetStateAction<string>>
   availableTxnMonths: string[]
+  // V51 — faceted counts shown in every dropdown / filter pill
+  txnCountsByAccount: Record<string, number>
+  txnCountsByCategory: Record<string, number>
+  txnMonthsWithCounts: Array<{ ym: string; count: number }>
+  txnPillCounts: Record<string, number>
+  filteredTxnNet: number
+  totalTxnCount: number
   // Collapsible sections
   txnListOpen: boolean
   setTxnListOpen: React.Dispatch<React.SetStateAction<boolean>>
@@ -100,6 +107,8 @@ export function TransactionsTab({
   txnFilter, setTxnFilter, txnSearch, setTxnSearch,
   txnAccountFilter, setTxnAccountFilter, txnCategoryFilter, setTxnCategoryFilter,
   txnMonthFilter, setTxnMonthFilter, availableTxnMonths,
+  txnCountsByAccount, txnCountsByCategory, txnMonthsWithCounts, txnPillCounts,
+  filteredTxnNet, totalTxnCount,
   txnListOpen, setTxnListOpen,
   deleteFilteredConfirm, setDeleteFilteredConfirm,
   inlineTxnEditId, inlineTxnEditForm, setInlineTxnEditId, setInlineTxnEditForm,
@@ -177,29 +186,22 @@ export function TransactionsTab({
                   className="flex-1 min-w-[160px] px-2.5 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none placeholder:text-slate-600"
                 />
                 <select value={txnAccountFilter} onChange={e => setTxnAccountFilter(e.target.value)} className="text-xs px-2 py-1 rounded bg-slate-800 border border-slate-600 focus:outline-none">
-                  <option value="">All accounts</option>
-                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                  <option value="">All accounts ({txnCountsByAccount.__all__ ?? 0})</option>
+                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name} ({txnCountsByAccount[a.id] ?? 0})</option>)}
                 </select>
                 <select value={txnCategoryFilter} onChange={e => setTxnCategoryFilter(e.target.value)} className="text-xs px-2 py-1 rounded bg-slate-800 border border-slate-600 focus:outline-none">
-                  <option value="">All categories</option>
-                  <option value="__none__">Uncategorized</option>
-                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  <option value="">All categories ({txnCountsByCategory.__all__ ?? 0})</option>
+                  <option value="__none__">Uncategorized ({txnCountsByCategory.__none__ ?? 0})</option>
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.name} ({txnCountsByCategory[c.id] ?? 0})</option>)}
                 </select>
-                {/* V50 — Month/year filter, grouped by year */}
-                <select value={txnMonthFilter} onChange={e => setTxnMonthFilter(e.target.value)} className="text-xs px-2 py-1 rounded bg-slate-800 border border-slate-600 focus:outline-none" disabled={availableTxnMonths.length === 0}>
-                  <option value="">All dates</option>
+                {/* V50/V51 — Month/year filter: gap-filled from oldest to newest, counts per month */}
+                <select value={txnMonthFilter} onChange={e => setTxnMonthFilter(e.target.value)} className="text-xs px-2 py-1 rounded bg-slate-800 border border-slate-600 focus:outline-none" disabled={txnMonthsWithCounts.length === 0}>
+                  <option value="">All dates ({txnMonthsWithCounts.reduce((s, m) => s + m.count, 0)})</option>
                   {(() => {
-                    // Group YYYY-MM values by year so the dropdown displays:
-                    //   2026
-                    //     Jan
-                    //     Feb
-                    //   2025
-                    //     Apr
-                    //     Jul
-                    const byYear: Record<string, string[]> = {}
-                    for (const ym of availableTxnMonths) {
-                      const [y] = ym.split('-')
-                      ;(byYear[y] ||= []).push(ym)
+                    const byYear: Record<string, Array<{ ym: string; count: number }>> = {}
+                    for (const item of txnMonthsWithCounts) {
+                      const [y] = item.ym.split('-')
+                      ;(byYear[y] ||= []).push(item)
                     }
                     const monthName = (ym: string) => {
                       const [, m] = ym.split('-')
@@ -210,8 +212,8 @@ export function TransactionsTab({
                       .sort((a, b) => b.localeCompare(a))
                       .map(year => (
                         <optgroup key={year} label={year}>
-                          {byYear[year].map(ym => (
-                            <option key={ym} value={ym}>{monthName(ym)}</option>
+                          {byYear[year].map(item => (
+                            <option key={item.ym} value={item.ym}>{monthName(item.ym)} ({item.count})</option>
                           ))}
                         </optgroup>
                       ))
@@ -231,11 +233,10 @@ export function TransactionsTab({
                 {TXN_FILTER_OPTIONS.map(opt => {
                   const isNeedsReview   = opt.value === 'needs-review'
                   const isUncategorized = opt.value === 'uncategorized'
+                  const count           = txnPillCounts[opt.value] ?? 0
                   const isActive        = txnFilter === opt.value
                   const glowRing        = isUncategorized && showUncategorizedGlow && !isActive
-                  const badge           = isNeedsReview && needsReviewTxnCount > 0
-                    ? ` (${needsReviewTxnCount})` : isUncategorized && uncategorizedExpenseCount > 0
-                    ? ` (${uncategorizedExpenseCount})` : ''
+                  const badge           = ` (${count})`
                   return (
                     <button
                       key={opt.value}
@@ -260,8 +261,14 @@ export function TransactionsTab({
                 <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
                   <span className="text-xs text-slate-500">
                     {hasActiveFilters
-                      ? `Results: ${filteredTxns.length} of ${transactions.length} transaction${transactions.length !== 1 ? 's' : ''}`
-                      : `Showing all ${transactions.length} transaction${transactions.length !== 1 ? 's' : ''}`
+                      ? <>Showing <span className="text-slate-300 font-medium">{filteredTxns.length}</span> of {totalTxnCount} transaction{totalTxnCount !== 1 ? 's' : ''}
+                          {filteredTxns.length > 0 && (
+                            <> · Net: <span className={`font-medium font-num ${filteredTxnNet >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                              {filteredTxnNet >= 0 ? '+' : ''}{currency(filteredTxnNet)}
+                            </span></>
+                          )}
+                        </>
+                      : `Showing all ${totalTxnCount} transaction${totalTxnCount !== 1 ? 's' : ''}`
                     }
                   </span>
                   {hasActiveFilters && filteredTxns.length > 0 && (
@@ -489,6 +496,20 @@ export function TransactionsTab({
                     })}
                   </tbody>
                 </table>
+                {/* V51 — Empty state when filters yield zero results (but data exists) */}
+                {filteredTxns.length === 0 && hasActiveFilters && (
+                  <div className="px-4 py-8 text-center">
+                    <p className="text-sm text-slate-300 font-medium">No transactions match these filters</p>
+                    <p className="text-xs text-slate-500 mt-1 mb-3">Try removing one or more to see results.</p>
+                    <Button tone="secondary" size="sm" onClick={() => {
+                      setTxnSearch('')
+                      setTxnAccountFilter('')
+                      setTxnCategoryFilter('')
+                      setTxnMonthFilter('')
+                      setTxnFilter('all')
+                    }}>Clear all filters</Button>
+                  </div>
+                )}
               </div>
             </div>
           )}
