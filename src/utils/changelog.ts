@@ -8,6 +8,20 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V50',
+    date: '5/31/2026 at 12:00 AM',
+    what: [
+      'Transactions tab: month/year filter dropdown added next to Accounts and Categories. Months are grouped under their year (e.g., 2026 → Jan, Feb, May / 2025 → Apr, Jul) and the list auto-fills as new transactions get imported. Works in combination with the account filter — when a specific account is selected, the month list narrows to only that account\'s data. If the active month no longer exists after switching accounts, it auto-clears.',
+    ],
+    test: [
+      'Go to Transactions tab.',
+      'Open the new "All dates" dropdown next to Categories — months should be grouped under year headers.',
+      'Pick a month — list should narrow to only transactions from that month.',
+      'Switch the Account filter — month options should update to only that account\'s months.',
+      'Click Clear — all four filters (search, account, category, month) reset together.',
+    ],
+  },
+  {
     version: 'V49.1',
     date: '5/31/2026 at 12:00 AM',
     what: [
