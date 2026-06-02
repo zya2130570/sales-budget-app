@@ -108,8 +108,7 @@ const TXN_TYPES: TransactionType[] = ['expense', 'income', 'transfer', 'credit c
 export function TransactionsTab({
   transactions, accounts, categories,
   period,
-  filteredTxns, hasActiveFilters, needsReviewTxnCount,
-  uncategorizedExpenseCount, recurringCandidates,
+  filteredTxns, hasActiveFilters, needsReviewTxnCount,recurringCandidates,
   dismissedDupIds, confirmedDupIds, highlightedTxnId,
   txnFilter, setTxnFilter, txnSearch, setTxnSearch,
   txnAccountFilter, setTxnAccountFilter, txnCategoryFilter, setTxnCategoryFilter,
