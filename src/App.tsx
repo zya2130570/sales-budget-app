@@ -662,7 +662,11 @@ export default function App() {
   const [txnRedo, setTxnRedo]                 = useState<Transaction[][]>([])
 
 // V8.5 — review / filter
-  const [txnFilter, setTxnFilter]             = useState<typeof TXN_FILTER_OPTIONS[number]['value']>('all')
+  const [txnFilter, setTxnFilter]             = useState<typeof TXN_FILTER_OPTIONS[number]['value']>(() => {
+    const saved = localStorage.getItem('flow_txn_filter') as typeof TXN_FILTER_OPTIONS[number]['value'] | null
+    return saved ?? 'all'
+  })
+  useEffect(() => { localStorage.setItem('flow_txn_filter', txnFilter) }, [txnFilter])
   const [txnDupWarning, setTxnDupWarning]     = useState(false)
   // V8.7 — tracks how many uncategorized txns were visible when pill was last clicked
   const [accountHint, setAccountHint]         = useState('')
@@ -743,11 +747,16 @@ export default function App() {
   const permanentlyDeleteTxn = (txId: string) => {
     setDeletedTxns(prev => prev.filter(t => t.id !== txId))
   }
-  const [txnSearch, setTxnSearch]               = useState('')
-  const [txnAccountFilter, setTxnAccountFilter] = useState('')
-  const [txnCategoryFilter, setTxnCategoryFilter] = useState('')
+  const [txnSearch, setTxnSearch]               = useState(() => localStorage.getItem('flow_txn_search') ?? '')
+  useEffect(() => { localStorage.setItem('flow_txn_search', txnSearch) }, [txnSearch])
+  const [txnAccountFilter, setTxnAccountFilter] = useState(() => localStorage.getItem('flow_txn_account_filter') ?? '')
+  const [txnCategoryFilter, setTxnCategoryFilter] = useState(() => localStorage.getItem('flow_txn_category_filter') ?? '')
   // V50 — month filter (format "YYYY-MM" or "" for All)
-  const [txnMonthFilter, setTxnMonthFilter] = useState('')
+  const [txnMonthFilter, setTxnMonthFilter] = useState(() => localStorage.getItem('flow_txn_month_filter') ?? '')
+  // V52 #3 — persist all transaction filters across reloads
+  useEffect(() => { localStorage.setItem('flow_txn_account_filter', txnAccountFilter) }, [txnAccountFilter])
+  useEffect(() => { localStorage.setItem('flow_txn_category_filter', txnCategoryFilter) }, [txnCategoryFilter])
+  useEffect(() => { localStorage.setItem('flow_txn_month_filter', txnMonthFilter) }, [txnMonthFilter])
   // V9.6.1 — Duplicate resolution: IDs the user has explicitly dismissed from dup review
   const [dismissedDupIds, setDismissedDupIds]   = useState<Set<string>>(new Set())
   // V9.7 — Duplicate resolution: confirmed-as-intentional IDs (badge changes to "Kept Both")
@@ -1204,19 +1213,24 @@ export default function App() {
   // ── V8.4 Transaction-driven actuals ──────────────────────────────────────────
   // V9.2: Transfers and credit card payments are money movements — excluded from
   // budget category spending totals. Only genuine expenses count toward actuals.
+  // V52: Also tracks txn count per category for the Budget tab.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const txnActuals = useMemo(() => {
     const range = getPeriodDateRange(period)
     const result: Record<string, number> = {}
+    const counts: Record<string, number> = {}
     for (const tx of transactions) {
       if (!tx.categoryId) continue
       if (tx.date < range.start || tx.date > range.end) continue
-      // V9.2 — exclude transfers and credit card payments from budget spending
       if (isMoneyMovement(tx.type)) continue
       result[tx.categoryId] = (result[tx.categoryId] ?? 0) + tx.amount
+      counts[tx.categoryId] = (counts[tx.categoryId] ?? 0) + 1
     }
-    return result
+    return { totals: result, counts }
   }, [transactions, period])
+
+  // V52 — count of txns per category in the current period (used by Budget tab UI)
+  const txnCountPerCategoryPeriod = txnActuals.counts
 
   // Effective actual for one category = transaction total + manual adjustment.
   // If no transactions and no manual entry: null (nothing to show).
@@ -1224,7 +1238,7 @@ export default function App() {
   const effectiveCatActual = (catId: string): {
     total: number; txnAmt: number; manualAmt: number; hasTxn: boolean; hasManual: boolean
   } | null => {
-    const txnAmt    = txnActuals[catId] ?? 0
+    const txnAmt    = txnActuals.totals[catId] ?? 0
     const manualStr = actuals[catId]
     const hasManual = manualStr !== '' && manualStr !== undefined
     const manualAmt = hasManual ? (Number(manualStr) || 0) : 0
@@ -2573,26 +2587,41 @@ txnMerchantRef.current?.focus()
   const fullyFundedTargets = targets.filter(t => !t.completed && t.goalAmount > 0 && t.currentSaved >= t.goalAmount)
   const completedTargets = targets.filter(t => t.completed)
 
+  // V52 #1 — Sortable columns (persists)
+  type TxnSortKey = 'date' | 'amount' | 'merchant'
+  type TxnSortDir = 'asc' | 'desc'
+  const [txnSortKey, setTxnSortKey] = useState<TxnSortKey>(() => (localStorage.getItem('flow_txn_sort_key') as TxnSortKey) || 'date')
+  const [txnSortDir, setTxnSortDir] = useState<TxnSortDir>(() => (localStorage.getItem('flow_txn_sort_dir') as TxnSortDir) || 'desc')
+  useEffect(() => { localStorage.setItem('flow_txn_sort_key', txnSortKey) }, [txnSortKey])
+  useEffect(() => { localStorage.setItem('flow_txn_sort_dir', txnSortDir) }, [txnSortDir])
+
   // V9.12 — Filtered transactions (shared between results summary + table + delete action)
-  const filteredTxns = useMemo(() =>
-    [...transactions]
-      .filter(tx => {
-        if (txnFilter === 'uncategorized') { if (!(tx.type === 'expense' && !tx.categoryId)) return false }
-        else if (txnFilter === 'needs-review') { if (!txNeedsReview(tx, transactions, dismissedDupIds)) return false }
-        else if (txnFilter !== 'all') { if (tx.type !== txnFilter) return false }
-        if (txnSearch) {
-          const q = txnSearch.toLowerCase()
-          if (!tx.merchant.toLowerCase().includes(q) && !(tx.notes ?? '').toLowerCase().includes(q)) return false
-        }
-        if (txnAccountFilter && tx.accountId !== txnAccountFilter) return false
-        if (txnCategoryFilter === '__none__' && tx.categoryId) return false
-        if (txnCategoryFilter && txnCategoryFilter !== '__none__' && tx.categoryId !== txnCategoryFilter) return false
-        // V50 — month filter (YYYY-MM matches the YYYY-MM- prefix of tx.date)
-        if (txnMonthFilter && !tx.date.startsWith(txnMonthFilter + '-')) return false
-        return true
-      })
-      .sort((a, b) => b.date.localeCompare(a.date)),
-    [transactions, txnFilter, txnSearch, txnAccountFilter, txnCategoryFilter, txnMonthFilter, dismissedDupIds]
+  const filteredTxns = useMemo(() => {
+    const out = [...transactions].filter(tx => {
+      if (txnFilter === 'uncategorized') { if (!(tx.type === 'expense' && !tx.categoryId)) return false }
+      else if (txnFilter === 'needs-review') { if (!txNeedsReview(tx, transactions, dismissedDupIds)) return false }
+      else if (txnFilter !== 'all') { if (tx.type !== txnFilter) return false }
+      if (txnSearch) {
+        const q = txnSearch.toLowerCase()
+        if (!tx.merchant.toLowerCase().includes(q) && !(tx.notes ?? '').toLowerCase().includes(q)) return false
+      }
+      if (txnAccountFilter && tx.accountId !== txnAccountFilter) return false
+      if (txnCategoryFilter === '__none__' && tx.categoryId) return false
+      if (txnCategoryFilter && txnCategoryFilter !== '__none__' && tx.categoryId !== txnCategoryFilter) return false
+      if (txnMonthFilter && !tx.date.startsWith(txnMonthFilter + '-')) return false
+      return true
+    })
+    // V52 — apply current sort
+    out.sort((a, b) => {
+      let cmp = 0
+      if (txnSortKey === 'date') cmp = a.date.localeCompare(b.date)
+      else if (txnSortKey === 'amount') cmp = Math.abs(a.amount) - Math.abs(b.amount)
+      else if (txnSortKey === 'merchant') cmp = a.merchant.localeCompare(b.merchant)
+      return txnSortDir === 'asc' ? cmp : -cmp
+    })
+    return out
+  },
+    [transactions, txnFilter, txnSearch, txnAccountFilter, txnCategoryFilter, txnMonthFilter, dismissedDupIds, txnSortKey, txnSortDir]
   )
   const hasActiveFilters = txnFilter !== 'all' || !!txnSearch || !!txnAccountFilter || !!txnCategoryFilter || !!txnMonthFilter
 
@@ -2604,6 +2633,28 @@ txnMerchantRef.current?.focus()
       return sum
     }, 0)
   }, [filteredTxns])
+
+  // V52 #5 — Top 5 merchants by spend in current filtered set (expense-only)
+  const filteredTopMerchants = useMemo(() => {
+    const totals: Record<string, number> = {}
+    for (const tx of filteredTxns) {
+      if (tx.type !== 'expense') continue
+      totals[tx.merchant] = (totals[tx.merchant] ?? 0) + Math.abs(tx.amount)
+    }
+    return Object.entries(totals)
+      .map(([merchant, total]) => ({ merchant, total }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5)
+  }, [filteredTxns])
+
+  // V52 #4 — Bulk recategorize all currently-filtered transactions
+  const bulkRecategorizeFiltered = (categoryId: string) => {
+    if (filteredTxns.length === 0) return
+    const ids = new Set(filteredTxns.map(t => t.id))
+    setTxnWithHistory(prev => prev.map(tx => ids.has(tx.id) ? { ...tx, categoryId: categoryId || undefined, updatedAt: new Date().toISOString() } : tx))
+    const catName = categoryId ? (categories.find(c => c.id === categoryId)?.name ?? 'category') : 'Uncategorized'
+    showToast(`Categorized ${filteredTxns.length} transaction${filteredTxns.length !== 1 ? 's' : ''} as "${catName}"`)
+  }
 
   // V50 — Compute available months (YYYY-MM) from transactions, scoped by account filter
   const availableTxnMonths = useMemo(() => {
@@ -3124,9 +3175,9 @@ txnMerchantRef.current?.focus()
               </div>
             )}
 
-            {/* V44 #7 — Year-over-year spending history */}
+            {/* V44 #7 — Year-over-year spending history (V52: now reads from transactions directly) */}
             <YearOverYearPanel
-              allActualsByPeriod={allActualsByPeriod}
+              transactions={transactions}
               categories={categories}
             />
 
@@ -3732,7 +3783,7 @@ txnMerchantRef.current?.focus()
                 <p className="mt-2 text-xs text-slate-500">
                   {(() => {
                     const r = getPeriodDateRange(period)
-                    const hasTxnActuals = Object.keys(txnActuals).length > 0
+                    const hasTxnActuals = Object.keys(txnActuals.totals).length > 0
                     if (hasTxnActuals) {
                       return `Actuals include categorized transactions from ${r.start} to ${r.end}. Use the +adj field to add manual adjustments.`
                     }
@@ -4013,8 +4064,8 @@ txnMerchantRef.current?.focus()
                     const planned     = convertFromMonthly(c.amount, period)
                     const eff         = effectiveCatActual(c.id)
                     const rawActual   = actuals[c.id]
-                    const hasTxn      = (txnActuals[c.id] ?? 0) > 0
-                    const txnAmt      = txnActuals[c.id] ?? 0
+                    const hasTxn      = (txnActuals.totals[c.id] ?? 0) > 0
+                    const txnAmt      = txnActuals.totals[c.id] ?? 0
                     const hasManual   = rawActual !== '' && rawActual !== undefined
                     const hasActual   = eff !== null
                     const actualVal   = eff !== null ? eff.total : null
@@ -4206,8 +4257,15 @@ txnMerchantRef.current?.focus()
                               </div>
                               {eff && (
                                 <div className="flex items-center justify-between gap-2 border-t border-slate-700/60 pt-0.5 mt-0.5">
-                                  <span className="text-slate-500">Total Actual</span>
-                                  <span className="font-semibold text-slate-200">{currency(eff.total)}</span>
+                                  <span className="text-slate-500">
+                                    Total Actual
+                                    {(txnCountPerCategoryPeriod[c.id] ?? 0) > 0 && (
+                                      <span className="text-[10px] text-slate-600 ml-1">
+                                        ({txnCountPerCategoryPeriod[c.id]} txn{txnCountPerCategoryPeriod[c.id] !== 1 ? 's' : ''})
+                                      </span>
+                                    )}
+                                  </span>
+                                  <span className="font-semibold text-slate-200 font-num">{currency(eff.total)}</span>
                                 </div>
                               )}
                             </div>
@@ -4769,6 +4827,13 @@ txnMerchantRef.current?.focus()
             txnPillCounts={txnPillCounts}
             filteredTxnNet={filteredTxnNet}
             totalTxnCount={transactions.length}
+            // V52 — sort, top merchants, bulk recategorize
+            txnSortKey={txnSortKey}
+            setTxnSortKey={setTxnSortKey}
+            txnSortDir={txnSortDir}
+            setTxnSortDir={setTxnSortDir}
+            filteredTopMerchants={filteredTopMerchants}
+            bulkRecategorizeFiltered={bulkRecategorizeFiltered}
             txnListOpen={txnListOpen}
             setTxnListOpen={setTxnListOpen}
             deleteFilteredConfirm={deleteFilteredConfirm}
