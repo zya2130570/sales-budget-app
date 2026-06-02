@@ -13,6 +13,7 @@ import { RecurringSection } from './RecurringSection'
 import type { RecurringSectionProps } from './RecurringSection'
 import { ImportHistorySection } from './ImportHistorySection'
 import type { ImportHistorySectionProps } from './ImportHistorySection'
+import { ImportsByMonthAccount } from './ImportsByMonthAccount'
 import { Button, EmptyState, SectionToggle } from './ui'
 
 // ── Inline edit form shape ────────────────────────────────────────────────────
@@ -307,8 +308,8 @@ export function TransactionsTab({
                 </div>
               )}
 
-              {/* V52 #5 — Top merchants chips (only shown when filters active and there is data) */}
-              {hasActiveFilters && filteredTopMerchants.length > 0 && (
+              {/* V52 #5 — Top merchants chips (only when filters active AND result set is big enough to matter) */}
+              {hasActiveFilters && filteredTxns.length >= 10 && filteredTopMerchants.length > 0 && (
                 <div className="flex items-center gap-1.5 flex-wrap mb-3">
                   <span className="text-[10px] text-slate-500 uppercase tracking-wide font-medium mr-1">Top Spend:</span>
                   {filteredTopMerchants.map(m => (
@@ -597,6 +598,9 @@ export function TransactionsTab({
             : 'Log your first transaction above. Use Generate Sample to try it out.'}
         />
       )}
+
+      {/* V53 — Imports by Month / Account (works for pre-batch-tracking imports) */}
+      <ImportsByMonthAccount transactions={transactions} accounts={accounts} />
 
       {/* ── Import History + Data Integrity ── */}
       <ImportHistorySection {...importHistoryProps} />
