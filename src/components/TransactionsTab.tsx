@@ -113,7 +113,7 @@ export function TransactionsTab({
   dismissedDupIds, confirmedDupIds, highlightedTxnId,
   txnFilter, setTxnFilter, txnSearch, setTxnSearch,
   txnAccountFilter, setTxnAccountFilter, txnCategoryFilter, setTxnCategoryFilter,
-  txnMonthFilter, setTxnMonthFilter, availableTxnMonths,
+  txnMonthFilter, setTxnMonthFilter,
   txnCountsByAccount, txnCountsByCategory, txnMonthsWithCounts, txnPillCounts,
   filteredTxnNet, totalTxnCount,
   txnSortKey, setTxnSortKey, txnSortDir, setTxnSortDir,
