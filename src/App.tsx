@@ -2596,6 +2596,15 @@ txnMerchantRef.current?.focus()
   )
   const hasActiveFilters = txnFilter !== 'all' || !!txnSearch || !!txnAccountFilter || !!txnCategoryFilter || !!txnMonthFilter
 
+  // V51 — Filtered net total (income - expense) for the summary line at the top of the table
+  const filteredTxnNet = useMemo(() => {
+    return filteredTxns.reduce((sum, tx) => {
+      if (tx.type === 'income') return sum + Math.abs(tx.amount)
+      if (tx.type === 'expense') return sum - Math.abs(tx.amount)
+      return sum
+    }, 0)
+  }, [filteredTxns])
+
   // V50 — Compute available months (YYYY-MM) from transactions, scoped by account filter
   const availableTxnMonths = useMemo(() => {
     const months = new Set<string>()
@@ -2606,6 +2615,85 @@ txnMerchantRef.current?.focus()
     }
     return [...months].sort((a, b) => b.localeCompare(a))
   }, [transactions, txnAccountFilter])
+
+  // V51 — Faceted counts for every dropdown / filter pill.
+  // Each map answers: "if this option were the ONLY filter besides search, how many would I see?"
+  // Implementation note: counts use the FULL transactions list (not filteredTxns) so the user
+  // sees the population for each option, not just what's already filtered.
+  const txnCountsByAccount = useMemo(() => {
+    const m: Record<string, number> = { __all__: transactions.length }
+    for (const a of accounts) m[a.id] = 0
+    for (const tx of transactions) {
+      if (tx.accountId && m[tx.accountId] !== undefined) m[tx.accountId]++
+    }
+    return m
+  }, [transactions, accounts])
+
+  const txnCountsByCategory = useMemo(() => {
+    const m: Record<string, number> = { __all__: transactions.length, __none__: 0 }
+    for (const c of categories) m[c.id] = 0
+    for (const tx of transactions) {
+      if (!tx.categoryId) m.__none__++
+      else if (m[tx.categoryId] !== undefined) m[tx.categoryId]++
+    }
+    return m
+  }, [transactions, categories])
+
+  // V51 — Month list with gap-filling: every month from oldest to newest, including empty ones.
+  // Scoped by account filter (matches V50 behaviour for availableTxnMonths).
+  const txnMonthsWithCounts = useMemo<Array<{ ym: string; count: number }>>(() => {
+    const scoped = txnAccountFilter
+      ? transactions.filter(tx => tx.accountId === txnAccountFilter)
+      : transactions
+    if (scoped.length === 0) return []
+    const counts: Record<string, number> = {}
+    let minYM = '9999-99', maxYM = '0000-00'
+    for (const tx of scoped) {
+      const ym = tx.date.slice(0, 7)
+      if (ym.length !== 7) continue
+      counts[ym] = (counts[ym] ?? 0) + 1
+      if (ym < minYM) minYM = ym
+      if (ym > maxYM) maxYM = ym
+    }
+    // Generate every YYYY-MM between minYM and maxYM
+    const [minY, minM] = minYM.split('-').map(Number)
+    const [maxY, maxM] = maxYM.split('-').map(Number)
+    const result: Array<{ ym: string; count: number }> = []
+    let y = minY, m = minM
+    while (y < maxY || (y === maxY && m <= maxM)) {
+      const ym = `${y}-${String(m).padStart(2, '0')}`
+      result.push({ ym, count: counts[ym] ?? 0 })
+      m++
+      if (m > 12) { m = 1; y++ }
+    }
+    // Newest first
+    return result.reverse()
+  }, [transactions, txnAccountFilter])
+
+  // V51 — Counts for each filter pill (All / Income / Expense / Transfer / etc.)
+  // Uses search + account + category + month filters as the base, then counts by type.
+  const txnPillCounts = useMemo(() => {
+    const base = transactions.filter(tx => {
+      if (txnSearch) {
+        const q = txnSearch.toLowerCase()
+        if (!tx.merchant.toLowerCase().includes(q) && !(tx.notes ?? '').toLowerCase().includes(q)) return false
+      }
+      if (txnAccountFilter && tx.accountId !== txnAccountFilter) return false
+      if (txnCategoryFilter === '__none__' && tx.categoryId) return false
+      if (txnCategoryFilter && txnCategoryFilter !== '__none__' && tx.categoryId !== txnCategoryFilter) return false
+      if (txnMonthFilter && !tx.date.startsWith(txnMonthFilter + '-')) return false
+      return true
+    })
+    return {
+      all: base.length,
+      'needs-review': base.filter(tx => txNeedsReview(tx, transactions, dismissedDupIds)).length,
+      uncategorized: base.filter(tx => tx.type === 'expense' && !tx.categoryId).length,
+      expense: base.filter(tx => tx.type === 'expense').length,
+      income:  base.filter(tx => tx.type === 'income').length,
+      transfer: base.filter(tx => tx.type === 'transfer').length,
+      'credit card payment': base.filter(tx => tx.type === 'credit card payment').length,
+    } as Record<string, number>
+  }, [transactions, txnSearch, txnAccountFilter, txnCategoryFilter, txnMonthFilter, dismissedDupIds])
 
   // V50 — If account change removes the currently-selected month, clear it
   useEffect(() => {
@@ -4674,6 +4762,13 @@ txnMerchantRef.current?.focus()
             txnMonthFilter={txnMonthFilter}
             setTxnMonthFilter={setTxnMonthFilter}
             availableTxnMonths={availableTxnMonths}
+            // V51 — faceted counts
+            txnCountsByAccount={txnCountsByAccount}
+            txnCountsByCategory={txnCountsByCategory}
+            txnMonthsWithCounts={txnMonthsWithCounts}
+            txnPillCounts={txnPillCounts}
+            filteredTxnNet={filteredTxnNet}
+            totalTxnCount={transactions.length}
             txnListOpen={txnListOpen}
             setTxnListOpen={setTxnListOpen}
             deleteFilteredConfirm={deleteFilteredConfirm}
