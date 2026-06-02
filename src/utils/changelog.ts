@@ -8,6 +8,28 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V52',
+    date: '5/31/2026 at 12:00 AM',
+    what: [
+      'Spending History on the Dashboard now reads directly from transactions rather than the stale "actuals snapshot" store. The "Pre-period data" label is gone — months come from each transaction\'s actual date. So when you import CSVs for Jan/Feb/Mar 2025, you get three separate bars labeled "Jan 2025", "Feb 2025", "Mar 2025" with their real totals.',
+      'Sortable table columns on Transactions — click Date, Merchant, or Amount header to sort. Arrow shows current direction. Click again to flip asc/desc. Persists across reloads.',
+      'Filter state now persists — search query, account, category, month, and the All/Income/Expense/etc. pill choice all survive a page refresh.',
+      'Bulk recategorize: when filters are active, a "Bulk categorize all N filtered" dropdown appears above the table. Pick a category, confirm, and every visible transaction gets re-categorized at once.',
+      'Top spend chips — when filters are active, the 5 biggest merchants in the filtered set appear as chips above the table with their totals. Click one to filter further by that merchant.',
+      'Transaction counts on Budget actuals — expanding any category in the Budget tab now shows "(N txns)" next to the Total Actual so you know how many transactions add up to that number.',
+      'Import History is now expanded by default on the Transactions tab, so you can immediately see all CSV uploads (account, month, count, source, date) without having to expand a section first.',
+    ],
+    test: [
+      'Dashboard → Spending History: should now show real month labels (Jan 2026, Feb 2026, etc.) instead of "Pre-period data".',
+      'Transactions: click the Date, Merchant, or Amount header to sort. Refresh — your sort choice is remembered.',
+      'Apply any filter on Transactions — Top Spend chips appear above the table, and a Bulk categorize dropdown appears.',
+      'Pick a category from the bulk dropdown — confirm — all filtered transactions get re-categorized.',
+      'Refresh the page — your filter selections (search, account, category, month, pill) are all still applied.',
+      'Budget tab: expand any category with assigned transactions — you should see "(N txns)" next to Total Actual.',
+      'Transactions: scroll down — Import History section is open by default showing every CSV batch.',
+    ],
+  },
+  {
     version: 'V51',
     date: '5/31/2026 at 12:00 AM',
     what: [
