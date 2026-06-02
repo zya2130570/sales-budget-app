@@ -8,6 +8,24 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V53',
+    date: '6/1/2026 at 12:00 AM',
+    what: [
+      'Fixed: Uncategorized pill was showing (0) when transactions were clearly uncategorized. Root cause: when a category got deleted, the transactions referencing it kept their now-dead categoryId, so the cell displayed "—" but the filter check (!tx.categoryId) returned false. Two fixes: (1) Uncategorized now counts both missing-id and stale-id transactions consistently across the pill, the dropdown, and the filter logic. (2) Deleting a category now clears that ID from every referencing transaction so they show as Uncategorized going forward.',
+      'Top Spend chips only appear when ≥10 filtered transactions exist. Below that threshold, top-5 isn\'t meaningful (you can see the whole list already).',
+      'New section: "Imported Data by Month" — derives a per-account, per-month rollup from your transactions. Shows account, month, transaction count, date range covered, spent, received, and net. Appears on the Dashboard AND on the Transactions tab. Works even for old imports that pre-date ImportBatch tracking. Lets you spot months where a CSV is missing.',
+      'Fixed Gemini PDF parser — was hardcoded to gemini-1.5-flash which Google deprecated. Now tries gemini-2.5-flash, falls back to 2.0-flash, then 1.5-flash-latest, then 1.5-flash. Whichever model your API key has access to gets used.',
+    ],
+    test: [
+      'Transactions: filter to a month where you have uncategorized expenses. Pill should now show the correct count (e.g., "Uncategorized (5)" instead of (0)).',
+      'Filter to <10 transactions — Top Spend chip row should not appear.',
+      'Filter to ≥10 transactions — Top Spend chips appear as before.',
+      'Dashboard: scroll down — new "Imported Data by Month" panel shows each account × month combination.',
+      'Try the PDF import again — should now use a working Gemini model instead of erroring out.',
+      'Budget tab: delete a category that has transactions — those transactions should immediately move to Uncategorized rather than displaying "—" with a stale ID.',
+    ],
+  },
+  {
     version: 'V52',
     date: '5/31/2026 at 12:00 AM',
     what: [
