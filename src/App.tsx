@@ -113,6 +113,7 @@ import { hasDuplicateTransaction } from './utils/duplicateDetection'
 import { GoalPlanningSummary } from './components/GoalPlanningSummary'
 import { GoalCard } from './components/GoalCard'
 import { YearOverYearPanel } from './components/YearOverYearPanel'
+import { ImportsByMonthAccount } from './components/ImportsByMonthAccount'
 import { ScenarioWizard } from './components/ScenarioWizard'
 import { useScenarios } from './hooks/useScenarios'
 import { useForecast } from './hooks/useForecast'
@@ -2598,7 +2599,7 @@ txnMerchantRef.current?.focus()
   // V9.12 — Filtered transactions (shared between results summary + table + delete action)
   const filteredTxns = useMemo(() => {
     const out = [...transactions].filter(tx => {
-      if (txnFilter === 'uncategorized') { if (!(tx.type === 'expense' && !tx.categoryId)) return false }
+      if (txnFilter === 'uncategorized') { if (!(tx.type === 'expense' && (!tx.categoryId || !validCategoryIds.has(tx.categoryId)))) return false }
       else if (txnFilter === 'needs-review') { if (!txNeedsReview(tx, transactions, dismissedDupIds)) return false }
       else if (txnFilter !== 'all') { if (tx.type !== txnFilter) return false }
       if (txnSearch) {
@@ -2680,15 +2681,20 @@ txnMerchantRef.current?.focus()
     return m
   }, [transactions, accounts])
 
+  // V53 — A transaction is "effectively uncategorized" if it has no categoryId
+  // OR if it points to a category that was deleted. The latter happens because
+  // category deletes weren't propagating to transactions before V53.
+  const validCategoryIds = useMemo(() => new Set(categories.map(c => c.id)), [categories])
+
   const txnCountsByCategory = useMemo(() => {
     const m: Record<string, number> = { __all__: transactions.length, __none__: 0 }
     for (const c of categories) m[c.id] = 0
     for (const tx of transactions) {
-      if (!tx.categoryId) m.__none__++
-      else if (m[tx.categoryId] !== undefined) m[tx.categoryId]++
+      if (!tx.categoryId || !validCategoryIds.has(tx.categoryId)) m.__none__++
+      else m[tx.categoryId]++
     }
     return m
-  }, [transactions, categories])
+  }, [transactions, categories, validCategoryIds])
 
   // V51 — Month list with gap-filling: every month from oldest to newest, including empty ones.
   // Scoped by account filter (matches V50 behaviour for availableTxnMonths).
@@ -2738,13 +2744,13 @@ txnMerchantRef.current?.focus()
     return {
       all: base.length,
       'needs-review': base.filter(tx => txNeedsReview(tx, transactions, dismissedDupIds)).length,
-      uncategorized: base.filter(tx => tx.type === 'expense' && !tx.categoryId).length,
+      uncategorized: base.filter(tx => tx.type === 'expense' && (!tx.categoryId || !validCategoryIds.has(tx.categoryId))).length,
       expense: base.filter(tx => tx.type === 'expense').length,
       income:  base.filter(tx => tx.type === 'income').length,
       transfer: base.filter(tx => tx.type === 'transfer').length,
       'credit card payment': base.filter(tx => tx.type === 'credit card payment').length,
     } as Record<string, number>
-  }, [transactions, txnSearch, txnAccountFilter, txnCategoryFilter, txnMonthFilter, dismissedDupIds])
+  }, [transactions, txnSearch, txnAccountFilter, txnCategoryFilter, txnMonthFilter, dismissedDupIds, validCategoryIds])
 
   // V50 — If account change removes the currently-selected month, clear it
   useEffect(() => {
@@ -3179,6 +3185,12 @@ txnMerchantRef.current?.focus()
             <YearOverYearPanel
               transactions={transactions}
               categories={categories}
+            />
+
+            {/* V53 — Imports by Month / Account (derived from transactions, works for pre-batch-tracking imports) */}
+            <ImportsByMonthAccount
+              transactions={transactions}
+              accounts={accounts}
             />
 
             {/* ── V14 AI Financial Assistant ── */}
@@ -4335,7 +4347,14 @@ txnMerchantRef.current?.focus()
                             })
                             setTimeout(() => { inlineCatAmountRef.current?.focus(); inlineCatAmountRef.current?.select() }, 0)
                           }}>Edit</button>
-                          <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); addPendingDelete('categories', c.id); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
+                          <button className="text-red-300 hover:text-red-200" onClick={() => {
+                            pushBudgetHistory()
+                            addPendingDelete('categories', c.id)
+                            setCategories(prev => prev.filter(x => x.id !== c.id))
+                            // V53 — clear this categoryId from any transactions referencing it,
+                            // so they show as Uncategorized rather than as orphans pointing nowhere.
+                            setTxnWithHistory(prev => prev.map(tx => tx.categoryId === c.id ? { ...tx, categoryId: undefined } : tx))
+                          }}>Delete</button>
                           {/* V33 — Breakdown group */}
                           <button
                             onClick={() => setBreakdownEditId(c.id)}
