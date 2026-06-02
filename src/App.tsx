@@ -746,6 +746,8 @@ export default function App() {
   const [txnSearch, setTxnSearch]               = useState('')
   const [txnAccountFilter, setTxnAccountFilter] = useState('')
   const [txnCategoryFilter, setTxnCategoryFilter] = useState('')
+  // V50 — month filter (format "YYYY-MM" or "" for All)
+  const [txnMonthFilter, setTxnMonthFilter] = useState('')
   // V9.6.1 — Duplicate resolution: IDs the user has explicitly dismissed from dup review
   const [dismissedDupIds, setDismissedDupIds]   = useState<Set<string>>(new Set())
   // V9.7 — Duplicate resolution: confirmed-as-intentional IDs (badge changes to "Kept Both")
@@ -2585,12 +2587,32 @@ txnMerchantRef.current?.focus()
         if (txnAccountFilter && tx.accountId !== txnAccountFilter) return false
         if (txnCategoryFilter === '__none__' && tx.categoryId) return false
         if (txnCategoryFilter && txnCategoryFilter !== '__none__' && tx.categoryId !== txnCategoryFilter) return false
+        // V50 — month filter (YYYY-MM matches the YYYY-MM- prefix of tx.date)
+        if (txnMonthFilter && !tx.date.startsWith(txnMonthFilter + '-')) return false
         return true
       })
       .sort((a, b) => b.date.localeCompare(a.date)),
-    [transactions, txnFilter, txnSearch, txnAccountFilter, txnCategoryFilter, dismissedDupIds]
+    [transactions, txnFilter, txnSearch, txnAccountFilter, txnCategoryFilter, txnMonthFilter, dismissedDupIds]
   )
-  const hasActiveFilters = txnFilter !== 'all' || !!txnSearch || !!txnAccountFilter || !!txnCategoryFilter
+  const hasActiveFilters = txnFilter !== 'all' || !!txnSearch || !!txnAccountFilter || !!txnCategoryFilter || !!txnMonthFilter
+
+  // V50 — Compute available months (YYYY-MM) from transactions, scoped by account filter
+  const availableTxnMonths = useMemo(() => {
+    const months = new Set<string>()
+    for (const tx of transactions) {
+      if (txnAccountFilter && tx.accountId !== txnAccountFilter) continue
+      const ym = tx.date.slice(0, 7) // "YYYY-MM"
+      if (ym.length === 7) months.add(ym)
+    }
+    return [...months].sort((a, b) => b.localeCompare(a))
+  }, [transactions, txnAccountFilter])
+
+  // V50 — If account change removes the currently-selected month, clear it
+  useEffect(() => {
+    if (txnMonthFilter && !availableTxnMonths.includes(txnMonthFilter)) {
+      setTxnMonthFilter('')
+    }
+  }, [availableTxnMonths, txnMonthFilter])
 
   // V9.12 — Goal planning summary
   const goalPlanSummary = useMemo(() => {
@@ -4649,6 +4671,9 @@ txnMerchantRef.current?.focus()
             setTxnAccountFilter={setTxnAccountFilter}
             txnCategoryFilter={txnCategoryFilter}
             setTxnCategoryFilter={setTxnCategoryFilter}
+            txnMonthFilter={txnMonthFilter}
+            setTxnMonthFilter={setTxnMonthFilter}
+            availableTxnMonths={availableTxnMonths}
             txnListOpen={txnListOpen}
             setTxnListOpen={setTxnListOpen}
             deleteFilteredConfirm={deleteFilteredConfirm}
