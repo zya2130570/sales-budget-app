@@ -54,7 +54,7 @@ export function useTransactions() {
   const [csvIsAppleCard, setCsvIsAppleCard] = useState(false)
   const [csvCategoryHints, setCsvCategoryHints] = useState<Record<string, string>>({})
   const [importBatches, setImportBatches] = useState<ImportBatch[]>([])
-  const [csvShowHistory, setCsvShowHistory] = useState(false)
+  const [csvShowHistory, setCsvShowHistory] = useState(true) // V52 — default open so users see their CSV imports
   const [csvImportPreset, setCsvImportPreset] = useState<ImportPreset>('auto')
   const [csvColumnMapping, setCsvColumnMapping] = useState<Record<string, string> | null>(null)
   const [batchToDelete, setBatchToDelete] = useState<string | null>(null)
