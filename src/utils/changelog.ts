@@ -8,6 +8,22 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V51',
+    date: '5/31/2026 at 12:00 AM',
+    what: [
+      'Faceted counts everywhere on the Transactions tab. Accounts dropdown now shows "All accounts (78)", "Chase Checking (32)", "Cash (0)" etc. Same for Categories ("Uncategorized (4)", "Groceries (12)") and the filter pills (Income, Expense, Transfer, Needs Review, etc.).',
+      'Month dropdown gap-fills the timeline. If your oldest transaction is May 2024 and newest is May 2026, every month in between appears in the list with its count — even months with 0 transactions. So you can see "Apr 2025 (0)" and know nothing was uploaded for that month.',
+      'Added a "Showing X of Y transactions · Net: $Z" summary above the table when any filter is active. Net is income minus expenses across the filtered set, color-coded green/red.',
+      'Added a proper empty state when filters return nothing — replaces the blank table with a "No transactions match these filters" message and a Clear all button.',
+    ],
+    test: [
+      'Open Transactions tab. Each dropdown now shows counts in parentheses.',
+      'Select an Account → Month dropdown should update to only that account\'s months (with zero-counted months filling the gaps).',
+      'Pick a filter combination that yields zero results — you should see a clean empty state, not a blank table.',
+      'Filter to just Income (or any other pill) — the summary above the table should show the count and net total.',
+    ],
+  },
+  {
     version: 'V50',
     date: '5/31/2026 at 12:00 AM',
     what: [
