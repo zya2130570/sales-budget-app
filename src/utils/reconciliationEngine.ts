@@ -215,10 +215,14 @@ async function getTableSummary(
   userId: string,
   spec: CloudTableSpec,
 ): Promise<EntitySummary> {
+  // V49.1 — Filter out soft-deleted rows. Previously the count included rows
+  // with deleted_at set, which made "Use Local" appear to do nothing because
+  // the Compare panel kept showing the old total even after deletes completed.
   const { count, error: countError } = await supabase
     .from(spec.table)
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
+    .is('deleted_at', null)
 
   if (countError) {
     throw new Error(`${spec.table}: ${countError.message}`)
@@ -229,6 +233,7 @@ async function getTableSummary(
     .from(spec.table)
     .select(timestampColumn)
     .eq('user_id', userId)
+    .is('deleted_at', null)
     .order(timestampColumn, { ascending: false, nullsFirst: false })
     .limit(1)
     .maybeSingle()

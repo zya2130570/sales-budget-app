@@ -8,6 +8,19 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V49.1',
+    date: '5/31/2026 at 12:00 AM',
+    what: [
+      'Fixed: Compare panel was counting soft-deleted cloud rows. After running Use Local, the cloud-side counts wouldn\'t drop because getTableSummary did not filter deleted_at IS NULL. The deletes were actually happening — the UI just kept showing the old total. Added the filter to both the count query and the lastModifiedAt query. Verified with 3 unit tests including end-to-end simulation of 559 rows → 404 deleted → 155 visible.',
+    ],
+    test: [
+      'Open Cloud panel → Compare & Merge.',
+      'Run Use Local → confirm.',
+      'After sync completes (the Details line at top should show "X cloud records removed" alongside the upserts), click Compare again.',
+      'Cloud record count should now match local. If you ran Use Local + Sync previously without this fix, the cloud rows are already deleted — this fix just makes the count accurate.',
+    ],
+  },
+  {
     version: 'V49',
     date: '5/30/2026 at 12:00 AM',
     what: [
