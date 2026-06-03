@@ -74,7 +74,12 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
 
   const [connectionTested, setConnectionTested] = useState(false)
   const [connectionTestError, setConnectionTestError] = useState<string | null>(null)
-  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false)
+  // V54 — default ON so changes (including deletes) propagate without manual sync.
+  // Persisted so if the user explicitly turns it off, that choice survives reload.
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(() => {
+    const saved = localStorage.getItem('flow_auto_sync_enabled')
+    return saved === null ? true : saved === 'true'
+  })
   const autoSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [consecutiveSyncFailures, setConsecutiveSyncFailures] = useState(0)
   const [autoSyncPaused, setAutoSyncPaused] = useState(false)
@@ -244,6 +249,7 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
 
   const handleSetAutoSyncEnabled = useCallback((enabled: boolean) => {
     setAutoSyncEnabled(enabled)
+    localStorage.setItem('flow_auto_sync_enabled', String(enabled))
     if (!enabled && !connectionTested) setStatus(canSync ? 'idle' : 'guest')
   }, [canSync, connectionTested])
 
