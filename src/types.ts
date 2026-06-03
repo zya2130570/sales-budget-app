@@ -95,6 +95,14 @@ export type Transaction = {
 /** Import batch record. */
 export type ImportPreset = 'auto' | 'apple-card' | 'generic-csv' | 'chase-pdf-experimental'
 export type ImportSource = 'csv' | 'pdf' | 'manual' | 'generated'
+export type ImportBatchRow = {
+  date: string
+  merchant: string
+  amount: number
+  type: string
+  notes?: string
+}
+
 export type ImportBatch = {
   id: string
   source?: ImportSource
@@ -109,6 +117,8 @@ export type ImportBatch = {
   importedAt?: string
   importSource: string
   preset: ImportPreset
+  // V55 — snapshot of the rows exactly as they were imported (before any edits/deletes)
+  rowsSnapshot?: ImportBatchRow[]
 }
 
 /** Transaction rule model persisted in v42-transaction-rules. */

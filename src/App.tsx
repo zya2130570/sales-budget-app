@@ -113,7 +113,6 @@ import { hasDuplicateTransaction } from './utils/duplicateDetection'
 import { GoalPlanningSummary } from './components/GoalPlanningSummary'
 import { GoalCard } from './components/GoalCard'
 import { YearOverYearPanel } from './components/YearOverYearPanel'
-import { ImportsByMonthAccount } from './components/ImportsByMonthAccount'
 import { ScenarioWizard } from './components/ScenarioWizard'
 import { useScenarios } from './hooks/useScenarios'
 import { useForecast } from './hooks/useForecast'
@@ -2311,6 +2310,11 @@ txnMerchantRef.current?.focus()
       createdAt: new Date().toISOString(),
       importSource: 'pdf',
       preset: 'chase-pdf-experimental',
+      // V55 — snapshot
+      rowsSnapshot: newTxns.map(tx => ({
+        date: tx.date, merchant: tx.merchant,
+        amount: tx.amount, type: tx.type, notes: tx.notes,
+      })),
     }
     setImportBatches(prev => [batch, ...prev.slice(0, 49)])
     closeCsvImport()
@@ -2400,6 +2404,11 @@ txnMerchantRef.current?.focus()
       createdAt: new Date().toISOString(),
       importSource: 'csv',
       preset: csvIsAppleCard ? 'apple-card' : csvImportPreset,
+      // V55 — snapshot the raw imported rows so the user can view this import later
+      rowsSnapshot: newTxns.map(tx => ({
+        date: tx.date, merchant: tx.merchant,
+        amount: tx.amount, type: tx.type, notes: tx.notes,
+      })),
     }
     setImportBatches(prev => [batch, ...prev.slice(0, 49)])
     closeCsvImport()
