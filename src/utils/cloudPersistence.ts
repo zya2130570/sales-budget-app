@@ -686,6 +686,8 @@ export async function persistImportBatchesToCloud(
     preset: b.preset ?? 'auto',
     imported_at: b.importedAt ?? b.createdAt ?? nowIso(),
     created_at: b.createdAt ?? nowIso(),
+    // V55 — store the raw rows so users can view/replay an import
+    rows_snapshot: b.rowsSnapshot ? JSON.stringify(b.rowsSnapshot) : null,
   }))
 
   // Resolve account_id FK separately since accounts must be synced first

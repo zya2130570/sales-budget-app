@@ -315,6 +315,12 @@ export function addPendingDelete(table: string, localId: string): void {
     if (current.some(d => d.table === table && d.localId === localId)) return
     current.push({ table, localId, deletedAt: new Date().toISOString() })
     localStorage.setItem(wsKey(PENDING_DELETES_KEY), JSON.stringify(current))
+    // V55 — Notify the cloud sync hook so it can schedule an auto-sync.
+    // addPendingDelete writes to localStorage only (not React state), so the
+    // fingerprint never changes and auto-sync never fires unless we dispatch here.
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('flow:pendingdelete'))
+    }
   } catch { /* quota — ignore */ }
 }
 

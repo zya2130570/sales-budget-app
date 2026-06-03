@@ -144,6 +144,15 @@ function toTransaction(row: Row, accountMap: IdMap, categoryMap: IdMap, batchMap
 }
 
 function toImportBatch(row: Row, accountMap: IdMap): ImportBatch {
+  let rowsSnapshot: ImportBatch['rowsSnapshot']
+  if (row.rows_snapshot) {
+    try {
+      const parsed = typeof row.rows_snapshot === 'string'
+        ? JSON.parse(row.rows_snapshot)
+        : row.rows_snapshot
+      if (Array.isArray(parsed)) rowsSnapshot = parsed
+    } catch { /* ignore malformed snapshot */ }
+  }
   return {
     id: str(row.local_id),
     accountId: row.account_id ? (accountMap[str(row.account_id)] ?? str(row.account_id)) : '',
@@ -158,6 +167,7 @@ function toImportBatch(row: Row, accountMap: IdMap): ImportBatch {
     preset: str(row.preset, 'auto') as ImportPreset,
     createdAt: str(row.created_at, new Date().toISOString()),
     importedAt: row.imported_at ? str(row.imported_at) : undefined,
+    rowsSnapshot,
   }
 }
 

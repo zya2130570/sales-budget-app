@@ -8,6 +8,21 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V55',
+    date: '6/2/2026 at 12:00 AM',
+    what: [
+      'Fixed the actual root cause of deletions not propagating to cloud. addPendingDelete() writes to localStorage only (not React state), so the auto-sync fingerprint never changed and the 5-second timer never fired — even with auto-sync toggled ON. Fixed with a custom DOM event: addPendingDelete() now dispatches "flow:pendingdelete" which the sync hook listens for and schedules an auto-sync within 5 seconds. This affects every delete operation across the entire app.',
+      'Import History: each batch row now has a "View" button that expands a full table of every transaction in that import — date, merchant, amount, type. For imports done after V55 this is a permanent snapshot (stored with the batch). For older imports it falls back to showing current live transactions from that batch.',
+      'Import snapshots are stored in localStorage and synced to Supabase. Note: requires a one-time SQL migration on your Supabase project (see test notes).',
+      'Fixed TypeScript build error: removed unused ImportsByMonthAccount import from App.tsx.',
+    ],
+    test: [
+      'Delete a savings goal set. Within 5 seconds, Cloud Status should show a sync running. After it completes, check Compare — cloud count should decrease. Previously it would never sync unless you manually clicked Sync.',
+      'Import a new CSV. In Transactions tab → Import History, find the new batch and click "View". You should see a table of every row from that import.',
+      'SQL migration required for Supabase snapshot storage:\n  ALTER TABLE import_batches ADD COLUMN IF NOT EXISTS rows_snapshot jsonb;\nRun this once in your Supabase SQL editor. Without it, snapshots are only saved to localStorage (they still work locally, but don\'t persist to cloud).',
+    ],
+  },
+  {
     version: 'V54',
     date: '6/2/2026 at 12:00 AM',
     what: [
