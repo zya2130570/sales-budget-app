@@ -1,5 +1,5 @@
-import React from 'react'
-import type { Transaction, Account, ImportBatch } from '../types'
+import React, { useState } from 'react'
+import type { Transaction, Account, ImportBatch, ImportBatchRow } from '../types'
 import { currency } from '../utils/formatting'
 import { Button, Card, SectionToggle } from './ui'
 
@@ -29,6 +29,7 @@ export function ImportHistorySection({
   showRecentlyDeleted, setShowRecentlyDeleted,
   restoreDeletedTxn, permanentlyDeleteTxn,
 }: ImportHistorySectionProps) {
+  const [viewingBatchId, setViewingBatchId] = useState<string | null>(null)
   return (
     <>
       {/* ── Import History ── */}
@@ -68,25 +69,84 @@ export function ImportHistorySection({
                   </tr>
                 </thead>
                 <tbody>
-                  {importBatches.map(b => (
-                    <tr key={b.id} className="border-b border-slate-800 hover:bg-slate-800/30">
-                      <td className="py-1.5 pr-3 text-slate-300">{b.accountName}</td>
-                      <td className="py-1.5 pr-3 text-slate-400">{b.importMonth}</td>
-                      <td className="py-1.5 pr-3 text-slate-500 uppercase text-[10px]">{b.importSource ?? 'csv'}</td>
-                      <td className="py-1.5 pr-3 text-right text-green-400 font-medium">{b.importedCount}</td>
-                      <td className="py-1.5 pr-3 text-right text-amber-400">{b.skippedCount > 0 ? b.skippedCount : '—'}</td>
-                      <td className="py-1.5 pr-3 text-slate-500">{new Date(b.createdAt).toLocaleString()}</td>
-                      <td className="py-1.5">
-                        <Button
-                          tone="ghost"
-                          size="xs"
-                          className="text-red-400/70 hover:text-red-300"
-                          onClick={() => setBatchToDelete(b.id)}
-                          title="Delete this import and its transactions"
-                        >Delete</Button>
-                      </td>
-                    </tr>
-                  ))}
+                  {importBatches.map(b => {
+                    const isViewing = viewingBatchId === b.id
+                    // Fallback: derive rows from live transactions when no snapshot saved
+                    const snapshotRows: ImportBatchRow[] = b.rowsSnapshot ??
+                      transactions
+                        .filter(t => (t.batchId ?? t.importBatchId) === b.id)
+                        .map(t => ({ date: t.date, merchant: t.merchant, amount: t.amount, type: t.type, notes: t.notes }))
+                    return (
+                      <React.Fragment key={b.id}>
+                        <tr className="border-b border-slate-800 hover:bg-slate-800/30">
+                          <td className="py-1.5 pr-3 text-slate-300">{b.accountName}</td>
+                          <td className="py-1.5 pr-3 text-slate-400">{b.importMonth}</td>
+                          <td className="py-1.5 pr-3 text-slate-500 uppercase text-[10px]">{b.importSource ?? 'csv'}</td>
+                          <td className="py-1.5 pr-3 text-right text-green-400 font-medium">{b.importedCount}</td>
+                          <td className="py-1.5 pr-3 text-right text-amber-400">{b.skippedCount > 0 ? b.skippedCount : '—'}</td>
+                          <td className="py-1.5 pr-3 text-slate-500 text-xs">{new Date(b.createdAt).toLocaleString()}</td>
+                          <td className="py-1.5 flex items-center gap-2">
+                            {snapshotRows.length > 0 && (
+                              <Button
+                                tone="ghost"
+                                size="xs"
+                                className={isViewing ? 'text-blue-400' : 'text-slate-400 hover:text-slate-200'}
+                                onClick={() => setViewingBatchId(isViewing ? null : b.id)}
+                              >{isViewing ? 'Hide' : 'View'}</Button>
+                            )}
+                            <Button
+                              tone="ghost"
+                              size="xs"
+                              className="text-red-400/70 hover:text-red-300"
+                              onClick={() => setBatchToDelete(b.id)}
+                              title="Delete this import and its transactions"
+                            >Delete</Button>
+                          </td>
+                        </tr>
+                        {/* V55 — Expanded snapshot / transaction view */}
+                        {isViewing && (
+                          <tr className="bg-slate-900/60 border-b border-slate-700">
+                            <td colSpan={7} className="px-4 py-3">
+                              <p className="text-[10px] text-slate-500 mb-2 uppercase tracking-wide font-medium">
+                                {b.rowsSnapshot ? 'Original import — exactly as imported' : 'Current transactions from this batch'}
+                              </p>
+                              <div className="overflow-x-auto">
+                                <table className="w-full text-xs min-w-[480px]">
+                                  <thead>
+                                    <tr className="text-slate-400 border-b border-slate-700/60">
+                                      <th className="pb-1 pr-3 text-left font-medium">Date</th>
+                                      <th className="pb-1 pr-3 text-left font-medium">Merchant</th>
+                                      <th className="pb-1 pr-3 text-right font-medium">Amount</th>
+                                      <th className="pb-1 pr-3 text-left font-medium">Type</th>
+                                      <th className="pb-1 text-left font-medium">Notes</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {snapshotRows.map((r, i) => (
+                                      <tr key={i} className="border-b border-slate-800/40 hover:bg-slate-800/20">
+                                        <td className="py-1 pr-3 text-slate-400 font-num whitespace-nowrap">{r.date}</td>
+                                        <td className="py-1 pr-3 text-slate-200 max-w-[200px] overflow-hidden text-ellipsis whitespace-nowrap">{r.merchant}</td>
+                                        <td className={`py-1 pr-3 text-right font-num font-medium ${r.type === 'income' ? 'text-emerald-400' : 'text-red-400'}`}>
+                                          {r.type === 'income' ? '+' : '-'}{currency(Math.abs(r.amount))}
+                                        </td>
+                                        <td className="py-1 pr-3 text-slate-500 capitalize">{r.type}</td>
+                                        <td className="py-1 text-slate-500 text-[11px]">{r.notes ?? '—'}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                              {!b.rowsSnapshot && (
+                                <p className="text-[10px] text-slate-600 mt-2">
+                                  Full snapshot available for imports done after V55. This shows current live transactions from this batch.
+                                </p>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    )
+                  })}
                 </tbody>
               </table>
               <Button
