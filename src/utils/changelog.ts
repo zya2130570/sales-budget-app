@@ -8,6 +8,21 @@ export type VersionEntry = {
 
 export const CHANGELOG: VersionEntry[] = [
   {
+    version: 'V54',
+    date: '6/2/2026 at 12:00 AM',
+    what: [
+      'Auto-sync is now ON by default for signed-in users, and your choice persists across page reloads. Previously it defaulted to OFF every session — so pending deletes (savings goal sets, transactions, etc.) would sit in the queue and never fire unless you manually clicked Sync. This is the core reason things kept reappearing after delete.',
+      'Removed "Imported Data by Month" from Dashboard. It is still accessible in the Transactions tab.',
+      'Mobile layout: Budget categories table now hides Type, Variance, and Monthly reference columns on narrow screens — keeping Name, Planned, and Actual visible without horizontal scrolling. Text size slightly bumped across tables on mobile (12px → 13px).',
+    ],
+    test: [
+      'Sign in. Cloud Status dot should show auto-sync as ON. Delete a savings goal set — after 5 seconds it should sync automatically without clicking Sync.',
+      'Dashboard: "Imported Data by Month" panel is gone. Spending History and Financial Assistant remain.',
+      'On phone: Budget categories table should show Name + Planned + Actual columns clearly, no horizontal scroll needed.',
+      'Turn auto-sync off via Cloud Status toggle, refresh the page — it should still be off (preference persisted).',
+    ],
+  },
+  {
     version: 'V53',
     date: '6/1/2026 at 12:00 AM',
     what: [
