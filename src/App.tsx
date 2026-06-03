@@ -3187,12 +3187,6 @@ txnMerchantRef.current?.focus()
               categories={categories}
             />
 
-            {/* V53 — Imports by Month / Account (derived from transactions, works for pre-batch-tracking imports) */}
-            <ImportsByMonthAccount
-              transactions={transactions}
-              accounts={accounts}
-            />
-
             {/* ── V14 AI Financial Assistant ── */}
             <AIAssistantPanel
               messages={aiAssistant.messages}
@@ -4030,13 +4024,13 @@ txnMerchantRef.current?.focus()
                 <thead>
                   <tr className="text-left text-slate-400 border-b border-slate-700">
                     <th className="pb-1.5 pr-2">Name</th>
-                    <th className="pb-1.5 pr-2">Type</th>
+                    <th className="pb-1.5 pr-2 hidden sm:table-cell">Type</th>
                     {period === 'weekly'    && <th className="pb-1.5 pr-2">Weekly Planned</th>}
                     {period === 'bi-weekly' && <th className="pb-1.5 pr-2">Bi-weekly Planned</th>}
                     {period === 'monthly'   && <th className="pb-1.5 pr-2">Planned</th>}
                     {period === 'yearly'    && <th className="pb-1.5 pr-2">Yearly Planned</th>}
-                    {(period === 'weekly' || period === 'bi-weekly') && <th className="pb-1.5 pr-2">Monthly</th>}
-                    {period === 'yearly'    && <th className="pb-1.5 pr-2">Monthly</th>}
+                    {(period === 'weekly' || period === 'bi-weekly') && <th className="pb-1.5 pr-2 hidden sm:table-cell">Monthly</th>}
+                    {period === 'yearly'    && <th className="pb-1.5 pr-2 hidden sm:table-cell">Monthly</th>}
                     <th className="pb-1.5 pr-2">
                       <span className="inline-flex items-center gap-2">
                         <span>
@@ -4059,7 +4053,7 @@ txnMerchantRef.current?.focus()
                         )}
                       </span>
                     </th>
-                    <th className="pb-1.5 pr-2">Variance</th>
+                    <th className="pb-1.5 pr-2 hidden sm:table-cell">Variance</th>
                     <th className="pb-1.5 pr-2 hidden md:table-cell">Status</th>
                     <th className="pb-1.5" />
                   </tr>
@@ -4219,15 +4213,15 @@ txnMerchantRef.current?.focus()
                             <span>{billsToMomBudgetOpen ? '▾' : '▸'}</span><span>{c.name}</span>
                           </button>
                         ) : c.name}</td>
-                        <td className="py-1.5 pr-2 text-slate-400 text-xs">
+                        <td className="py-1.5 pr-2 text-slate-400 text-xs hidden sm:table-cell">
                           {c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}
                         </td>
                         {period === 'weekly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'weekly'))}</td>}
                         {period === 'bi-weekly' && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td>}
                         {period === 'monthly'   && <td className="py-1.5 pr-2">{currency(c.amount)}</td>}
                         {period === 'yearly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'yearly'))}</td>}
-                        {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
-                        {period === 'yearly' && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
+                        {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400 hidden sm:table-cell">{currency(c.amount)}</td>}
+                        {period === 'yearly' && <td className="py-1.5 pr-2 text-slate-400 hidden sm:table-cell">{currency(c.amount)}</td>}
                         {/* Actual cell: txn-driven breakdown or plain manual entry */}
                         <td className="py-1 pr-2">
                           {hasTxn ? (
@@ -4314,7 +4308,7 @@ txnMerchantRef.current?.focus()
                             </div>
                           )}
                         </td>
-                        <td className={`py-1.5 pr-2 font-medium ${varClass}`}>
+                        <td className={`py-1.5 pr-2 font-medium hidden sm:table-cell ${varClass}`}>
                           {variance === null
                             ? '—'
                             : Math.abs(variance) < 0.005

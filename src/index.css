@@ -199,3 +199,16 @@ body {
   background: var(--bg-card);
   box-shadow: -8px 0 12px -8px rgba(0,0,0,0.4);
 }
+
+/* V54 — Mobile readability. On narrow screens text-xs (12px) is too small.
+   Bump data tables to a readable size without blowing out layout. */
+@media (max-width: 640px) {
+  /* Slightly enlarge table text across the board */
+  table td, table th { font-size: 0.8125rem !important; }
+  /* Cards and section content — up from 12 to 13px */
+  .text-xs { font-size: 0.8125rem; }
+  /* Keep pill/badge text small so they don't overflow */
+  .pill-text { font-size: 0.6875rem !important; }
+  /* Ensure filter bars wrap instead of overflowing */
+  .filter-row { flex-wrap: wrap !important; }
+}
