@@ -254,6 +254,20 @@ export function useCloudPersistence(data: UseCloudPersistenceArgs) {
   }, [canSync, connectionTested])
 
   // ── True auto-sync: fires 5s after any data change when enabled + tested ──
+
+  // V55 — Also fires when pending deletes are queued. addPendingDelete only writes
+  // to localStorage (not React state), so the fingerprint never changes and the
+  // effect below never re-runs on its own. This listener bridges that gap.
+  useEffect(() => {
+    const scheduleSync = () => {
+      if (!autoSyncEnabled || !connectionTested || !canSync || autoSyncPaused) return
+      if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current)
+      autoSyncTimerRef.current = setTimeout(() => { void runSyncNow() }, 5000)
+    }
+    window.addEventListener('flow:pendingdelete', scheduleSync)
+    return () => window.removeEventListener('flow:pendingdelete', scheduleSync)
+  }, [autoSyncEnabled, connectionTested, canSync, autoSyncPaused, runSyncNow])
+
   useEffect(() => {
     if (!autoSyncEnabled || !connectionTested || !canSync || autoSyncPaused) return
     if (autoSyncTimerRef.current) clearTimeout(autoSyncTimerRef.current)
