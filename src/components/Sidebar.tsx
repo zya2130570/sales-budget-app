@@ -1,107 +1,41 @@
 /**
- * Sidebar.tsx — V46
+ * Sidebar.tsx — V29
  * Linear-style fixed left sidebar. Collapsible. Keyboard shortcuts.
- * V46: overhauled icons — clearer at 16–18px, settings now a proper gear,
- *      active tab gets brand-blue icon color (not just brighter white).
  */
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { loadBindings, MODIFIER_REQUIRED } from './KeyboardShortcutsPanel'
 
 type Tab = 'Dashboard' | 'Income' | 'Budget' | 'Accounts' | 'Transactions' | 'Scenarios' | 'Targets'
 
-// ── Icons ─────────────────────────────────────────────────────────────────────
-// All at 18×18 viewBox for crispness. Stroke-based, 1.6px weight.
-
-const Icon = {
-  dashboard: (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="1.5" y="1.5" width="6" height="6" rx="1.2"/>
-      <rect x="10.5" y="1.5" width="6" height="6" rx="1.2"/>
-      <rect x="1.5" y="10.5" width="6" height="6" rx="1.2"/>
-      <rect x="10.5" y="10.5" width="6" height="6" rx="1.2"/>
-    </svg>
-  ),
-  income: (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M9 2.5v13M6 5.5C6 4.4 7.3 3.5 9 3.5s3 .9 3 2-.9 1.8-3 2c-2.1.2-3 1-3 2.1s1.3 2 3 2 3-.9 3-2"/>
-    </svg>
-  ),
-  budget: (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M2 15V9M6.5 15V5.5M11 15V8M15.5 15V3"/>
-      <path d="M1 15h16"/>
-    </svg>
-  ),
-  accounts: (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="1.5" y="3.5" width="15" height="11" rx="1.5"/>
-      <path d="M1.5 7.5h15"/>
-      <circle cx="5" cy="11" r="1" fill="currentColor" stroke="none"/>
-      <path d="M9 11h4"/>
-    </svg>
-  ),
-  transactions: (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 5.5h12M12 2.5l3 3-3 3"/>
-      <path d="M15 12.5H3M6 9.5l-3 3 3 3"/>
-    </svg>
-  ),
-  scenarios: (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M10 2H6L4 9h5l-3 7 10-10h-5l2-4z"/>
-    </svg>
-  ),
-  targets: (
-    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="9" cy="9" r="7"/>
-      <circle cx="9" cy="9" r="3.5"/>
-      <circle cx="9" cy="9" r="1" fill="currentColor" stroke="none"/>
-    </svg>
-  ),
-  // Bottom bar icons
-  sun: (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/>
-    </svg>
-  ),
-  moon: (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M13.5 10.5A6 6 0 0 1 5.5 2.5 6.5 6.5 0 1 0 13.5 10.5z"/>
-    </svg>
-  ),
-  keyboard: (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="1.5" y="3" width="13" height="10" rx="1.5"/>
-      <path d="M4 6h.01M6.5 6h.01M9 6h.01M11.5 6h.01M4 8.5h.01M6.5 8.5h.01M9 8.5h.01M5 11h6"/>
-    </svg>
-  ),
-  // PROPER GEAR — outer ring with 8 teeth, inner hole
-  gear: (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="8" cy="8" r="2.2"/>
-      <path d="M8 1.5 L8.8 1.6 L9.4 3.1 A5.2 5.2 0 0 1 10.9 3.9 L12.4 3.3 L13.6 4.5 L13.0 6.0 A5.2 5.2 0 0 1 13.5 7.5 L13.5 8.5 L13.0 9.8 A5.2 5.2 0 0 1 12.4 10.7 L13.6 11.5 L12.4 12.7 L10.9 12.1 A5.2 5.2 0 0 1 9.4 12.9 L8.8 14.4 L7.2 14.4 L6.6 12.9 A5.2 5.2 0 0 1 5.1 12.1 L3.6 12.7 L2.4 11.5 L3.0 10.0 A5.2 5.2 0 0 1 2.5 8.5 L2.5 7.5 L3.0 6.0 A5.2 5.2 0 0 1 3.6 4.5 L2.4 3.3 L3.6 2.1 L5.1 2.7 A5.2 5.2 0 0 1 6.6 1.9 L7.2 0.4"/>
-    </svg>
-  ),
-  collapseLeft: (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M10 3L5 8l5 5M14 8H5"/>
-    </svg>
-  ),
-  collapseRight: (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M6 3l5 5-5 5M2 8h9"/>
-    </svg>
-  ),
-}
-
-const NAV: { id: Tab; label: string; shortcut: string; icon: React.ReactNode }[] = [
-  { id: 'Dashboard',    label: 'Dashboard',      shortcut: '1', icon: Icon.dashboard    },
-  { id: 'Income',       label: 'Income',          shortcut: '2', icon: Icon.income       },
-  { id: 'Budget',       label: 'Budget',          shortcut: '3', icon: Icon.budget       },
-  { id: 'Accounts',     label: 'Accounts',        shortcut: '4', icon: Icon.accounts     },
-  { id: 'Transactions', label: 'Transactions',    shortcut: '5', icon: Icon.transactions },
-  { id: 'Scenarios',    label: 'Scenarios',       shortcut: '6', icon: Icon.scenarios    },
-  { id: 'Targets',      label: 'Savings Goals',   shortcut: '7', icon: Icon.targets      },
+const NAV: { id: Tab; label: string; shortcut: string; icon: React.ReactNode; color: string }[] = [
+  {
+    id: 'Dashboard', label: 'Dashboard', shortcut: '1', color: '#7F77DD',
+    icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>,
+  },
+  {
+    id: 'Income', label: 'Income', shortcut: '2', color: '#5DCAA5',
+    icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5v7M6 6.5c0-.83.67-1.5 2-1.5s2 .67 2 1.5-.67 1.5-2 1.5-2 .67-2 1.5.67 1.5 2 1.5 2-.67 2-1.5"/></svg>,
+  },
+  {
+    id: 'Budget', label: 'Budget', shortcut: '3', color: '#85B7EB',
+    icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12V6l4-3 4 3v6"/><path d="M6 12V9h4v3"/><rect x="1" y="12" width="14" height="1.5" rx="0.5"/></svg>,
+  },
+  {
+    id: 'Accounts', label: 'Accounts', shortcut: '4', color: '#F0997B',
+    icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="1" y="3" width="14" height="10" rx="1.5"/><path d="M1 6.5h14"/><path d="M4 9.5h2M10 9.5h2"/></svg>,
+  },
+  {
+    id: 'Transactions', label: 'Transactions', shortcut: '5', color: '#FAC775',
+    icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M2 4h12M2 8h8M2 12h10"/><path d="M12 10l2 2-2 2"/></svg>,
+  },
+  {
+    id: 'Scenarios', label: 'Scenarios', shortcut: '6', color: '#ED93B1',
+    icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 2H5L3 8h4l-2 6 8-8H9l2-4z"/></svg>,
+  },
+  {
+    id: 'Targets', label: 'Savings Goals', shortcut: '7', color: '#1D9E75',
+    icon: <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="6.5"/><circle cx="8" cy="8" r="3"/><circle cx="8" cy="8" r="0.75" fill="currentColor" stroke="none"/></svg>,
+  },
 ]
 
 const SIDEBAR_WIDTH_KEY = 'flow_sidebar_width'
@@ -131,58 +65,24 @@ type Props = {
   onWidthChange?: (w: number) => void
 }
 
-// Reusable bottom-bar button
-function BottomBtn({
-  onClick, title, icon, label, shortcutLabel, collapsed: c, accent,
-}: {
-  onClick: () => void; title?: string; icon: React.ReactNode; label: string
-  shortcutLabel?: string; collapsed: boolean; accent?: boolean
-}) {
-  const [hover, setHover] = useState(false)
-  const base = accent ? 'rgba(94,106,210,0.8)' : 'rgba(255,255,255,0.35)'
-  const hovered = accent ? 'rgba(124,140,255,1)' : 'rgba(255,255,255,0.65)'
-  return (
-    <button
-      onClick={onClick}
-      title={c ? `${title ?? label}` : undefined}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      style={{
-        width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-        padding: c ? '8px 0' : '7px 16px',
-        justifyContent: c ? 'center' : 'flex-start',
-        color: hover ? hovered : base,
-        fontSize: 13, background: 'transparent', border: 'none',
-        cursor: 'pointer', transition: 'color 0.12s ease',
-      }}
-    >
-      <span style={{ flexShrink: 0 }}>{icon}</span>
-      {!c && (
-        <>
-          <span style={{ flex: 1, textAlign: 'left' }}>{label}</span>
-          {shortcutLabel && (
-            <kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>
-              {shortcutLabel}
-            </kbd>
-          )}
-        </>
-      )}
-    </button>
-  )
-}
-
 export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, collapsed, onToggle, theme = 'dark', onToggleTheme, onSync, onOpenAIChat, onOpenCloud, onOpenVersion, onWidthChange }: Props) {
 
+  // V42 — keyboard shortcuts read from saved bindings (rebindable via KeyboardShortcutsPanel)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const b = loadBindings()
       const k = e.key.toLowerCase()
+
+      // Modifier shortcuts (Ctrl/Cmd+key) — work even in input fields
       if ((e.metaKey || e.ctrlKey) && !e.altKey) {
         if (k === b.cloud.toLowerCase()) { e.preventDefault(); onOpenCloud?.(); return }
       }
+
       const tag = (e.target as HTMLElement).tagName
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
       if (e.ctrlKey || e.metaKey || e.altKey) return
+
+      // Single-key shortcuts
       if (k === b.sidebar.toLowerCase()) { onToggle(); return }
       if (k === b.settings.toLowerCase()) { e.preventDefault(); onOpenSettings(); return }
       if (k === b.ai.toLowerCase()) { e.preventDefault(); onOpenAIChat?.(); return }
@@ -190,6 +90,8 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
       if (k === b.profile.toLowerCase()) { e.preventDefault(); onOpenProfile?.(); return }
       if ((k === b.help.toLowerCase() || e.key === '/') && onOpenKeyboardShortcuts) { e.preventDefault(); onOpenKeyboardShortcuts(); return }
       if (k === b.theme.toLowerCase() && onToggleTheme) { e.preventDefault(); onToggleTheme(); return }
+
+      // Nav shortcuts 1-7
       const navIds: Array<keyof typeof b> = ['nav1','nav2','nav3','nav4','nav5','nav6','nav7']
       const navIdx = navIds.findIndex(id => !MODIFIER_REQUIRED.has(id as never) && k === b[id].toLowerCase())
       if (navIdx >= 0 && navIdx < NAV.length) onNavigate(NAV[navIdx].id)
@@ -209,6 +111,7 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
     dragging.current = true
     dragStartX.current = e.clientX
     dragStartW.current = customWidth
+
     const onMove = (ev: MouseEvent) => {
       if (!dragging.current) return
       const delta = ev.clientX - dragStartX.current
@@ -226,7 +129,24 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
     window.addEventListener('mouseup', onUp)
   }, [collapsed, customWidth, onWidthChange])
 
-  const W = collapsed ? 56 : customWidth
+  const MOBILE_BREAKPOINT = 640
+  const MOBILE_SIDEBAR_WIDTH = 72
+
+  // V56 — On mobile, the sidebar always shows icon + label (no collapse/expand cycling).
+  const [isMobile, setIsMobile] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth < MOBILE_BREAKPOINT : false
+  )
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < MOBILE_BREAKPOINT)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  const W = isMobile ? MOBILE_SIDEBAR_WIDTH : (collapsed ? 64 : customWidth)
+
+  // V56 — Bottom-section icon buttons (Theme, Shortcuts, AI, Settings, Collapse) render in
+  // icon-only mode on mobile, same as desktop's collapsed state.
+  const compact = collapsed || isMobile
 
   return (
     <aside
@@ -240,56 +160,80 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
       }}
     >
       {/* Logo */}
-      <div style={{ padding: collapsed ? '16px 0' : '16px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
-        {collapsed
+      <div style={{ padding: (collapsed || isMobile) ? '18px 0' : '18px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+        {(collapsed || isMobile)
           ? <div style={{ width: W, display: 'flex', justifyContent: 'center' }}>
-              <div style={{ width: 28, height: 28, borderRadius: 7, background: 'linear-gradient(135deg,#5E6AD2,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ color: 'white', fontSize: 14, fontWeight: 800 }}>F</span>
+              <div style={{ width: 28, height: 28, borderRadius: 6, background: 'linear-gradient(135deg,#5B6AF0,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span style={{ color: 'white', fontSize: 14, fontWeight: 700, letterSpacing: '-0.5px' }}>F</span>
               </div>
             </div>
           : <>
-              <div style={{ width: 28, height: 28, borderRadius: 7, background: 'linear-gradient(135deg,#5E6AD2,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <span style={{ color: 'white', fontSize: 14, fontWeight: 800 }}>F</span>
+              <div style={{ width: 28, height: 28, borderRadius: 6, background: 'linear-gradient(135deg,#5B6AF0,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <span style={{ color: 'white', fontSize: 14, fontWeight: 700 }}>F</span>
               </div>
-              <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16, fontWeight: 700, letterSpacing: '-0.3px', whiteSpace: 'nowrap' }}>Flow</span>
+              <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px', whiteSpace: 'nowrap' }}>Flow</span>
             </>
         }
       </div>
 
       {/* Nav items */}
-      <nav style={{ flex: 1, padding: '6px 0', overflowY: 'auto', overflowX: 'hidden' }}>
+      <nav style={{ flex: 1, padding: '8px 0', overflowY: 'auto', overflowX: 'hidden' }}>
         {NAV.map(item => {
           const isActive = currentTab === item.id
-          const [hover, setHover] = useState(false)
+
+          // V56 — Mobile: icon + label stacked vertically, semantic color per item.
+          // No hover/collapse cycling — always visible.
+          if (isMobile) {
+            return (
+              <button
+                key={item.id}
+                onClick={() => onNavigate(item.id)}
+                style={{
+                  width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  gap: 4, padding: '9px 2px',
+                  background: isActive ? `${item.color}24` : 'transparent',
+                  borderLeft: isActive ? `2px solid ${item.color}` : '2px solid transparent',
+                  cursor: 'pointer', border: 'none', outline: 'none', borderRadius: 0,
+                  transition: 'all 0.12s ease',
+                }}
+              >
+                <span style={{ color: item.color, opacity: isActive ? 1 : 0.85, display: 'flex' }}>{item.icon}</span>
+                <span style={{
+                  fontSize: 10, lineHeight: 1.15, textAlign: 'center', whiteSpace: 'nowrap',
+                  color: isActive ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.5)',
+                  fontWeight: isActive ? 600 : 500,
+                  maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>{item.label === 'Savings Goals' ? 'Goals' : item.label === 'Transactions' ? 'Txns' : item.label}</span>
+              </button>
+            )
+          }
+
           return (
             <button
               key={item.id}
               onClick={() => onNavigate(item.id)}
-              title={collapsed ? `${item.label}  [${item.shortcut}]` : undefined}
-              onMouseEnter={() => setHover(true)}
-              onMouseLeave={() => setHover(false)}
+              title={collapsed ? `${item.label} (${item.shortcut})` : undefined}
               style={{
                 width: '100%', display: 'flex', alignItems: 'center',
-                gap: 11, padding: collapsed ? '9px 0' : '9px 16px',
+                gap: 12, padding: collapsed ? '10px 0' : '10px 18px',
                 justifyContent: collapsed ? 'center' : 'flex-start',
-                background: isActive
-                  ? 'rgba(94,106,210,0.12)'
-                  : hover ? 'rgba(255,255,255,0.03)' : 'transparent',
-                borderLeft: isActive ? '2px solid #5E6AD2' : '2px solid transparent',
-                color: isActive
-                  ? '#818CF8'
-                  : hover ? 'rgba(255,255,255,0.65)' : 'rgba(255,255,255,0.38)',
-                fontSize: 14, fontWeight: isActive ? 600 : 400,
+                background: isActive ? 'rgba(255,255,255,0.07)' : 'transparent',
+                borderLeft: isActive ? '2px solid #5B6AF0' : '2px solid transparent',
+                color: isActive ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.42)',
+                fontSize: 15, fontWeight: isActive ? 600 : 500,
                 cursor: 'pointer', border: 'none', outline: 'none',
-                transition: 'color 0.1s, background 0.1s',
-                whiteSpace: 'nowrap', borderRadius: 0,
+                transition: 'all 0.12s ease',
+                whiteSpace: 'nowrap',
+                borderRadius: 0,
               }}
+              onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.72)'; (e.currentTarget as HTMLElement).style.background = isActive ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.03)' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = isActive ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.42)'; (e.currentTarget as HTMLElement).style.background = isActive ? 'rgba(255,255,255,0.07)' : 'transparent' }}
             >
-              <span style={{ flexShrink: 0 }}>{item.icon}</span>
+              <span style={{ flexShrink: 0, opacity: isActive ? 1 : 0.7 }}>{item.icon}</span>
               {!collapsed && (
                 <>
                   <span style={{ flex: 1, textAlign: 'left' }}>{item.label}</span>
-                  <kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.07)', color: 'rgba(255,255,255,0.22)', fontFamily: 'monospace', flexShrink: 0 }}>{item.shortcut}</kbd>
+                  <kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>{item.shortcut}</kbd>
                 </>
               )}
             </button>
@@ -297,44 +241,143 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
         })}
       </nav>
 
-      {/* Bottom bar */}
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', padding: '4px 0', flexShrink: 0 }}>
-        {onToggleTheme && (
-          <BottomBtn onClick={onToggleTheme} collapsed={collapsed}
-            icon={theme === 'dark' ? Icon.sun : Icon.moon}
-            label={theme === 'dark' ? 'Light mode' : 'Dark mode'}
-            shortcutLabel="T"
-          />
-        )}
-        {onOpenKeyboardShortcuts && (
-          <BottomBtn onClick={onOpenKeyboardShortcuts} collapsed={collapsed}
-            icon={Icon.keyboard} label="Keyboard shortcuts" shortcutLabel="?"
-          />
-        )}
-        {onOpenAIChat && (
-          <BottomBtn onClick={onOpenAIChat} collapsed={collapsed}
-            icon={<span style={{ fontSize: 15, lineHeight: 1, display: 'flex', alignItems: 'center' }}>✦</span>}
-            label="AI Assistant" shortcutLabel="8"
-          />
-        )}
-        {/* Settings — proper gear icon, not a sun */}
-        <BottomBtn onClick={onOpenSettings} collapsed={collapsed}
-          icon={Icon.gear} label="Settings" shortcutLabel="0"
-          title="Settings"
-        />
-        <BottomBtn
-          onClick={onToggle} collapsed={collapsed}
-          icon={collapsed ? Icon.collapseRight : Icon.collapseLeft}
-          label="Collapse"
-          shortcutLabel="["
-        />
-      </div>
+      {/* Bottom: Settings + Collapse */}
+      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', padding: '8px 0', flexShrink: 0 }}>
 
-      {/* Drag handle */}
-      {!collapsed && (
+        {/* Theme toggle */}
+        {onToggleTheme && (
+          <button
+            onClick={onToggleTheme}
+            title={compact ? `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode` : undefined}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+              padding: compact ? '8px 0' : '7px 16px',
+              justifyContent: compact ? 'center' : 'flex-start',
+              color: 'rgba(255,255,255,0.35)', fontSize: 15,
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              transition: 'color 0.12s ease',
+            }}
+            onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.65)'}
+            onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.35)'}
+          >
+            {theme === 'dark' ? (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="8" cy="8" r="3.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M2.8 2.8l1.4 1.4M11.8 11.8l1.4 1.4M2.8 13.2l1.4-1.4M11.8 4.2l1.4-1.4"/>
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M13.5 10.5A6 6 0 0 1 5.5 2.5 6.5 6.5 0 1 0 13.5 10.5z"/>
+              </svg>
+            )}
+            {!compact && <><span style={{ flex: 1, textAlign: 'left' }}>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span><kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>T</kbd></>}
+          </button>
+        )}
+
+        {/* Keyboard shortcuts */}
+        {onOpenKeyboardShortcuts && (
+          <button
+            onClick={onOpenKeyboardShortcuts}
+            title={compact ? 'Keyboard shortcuts (?)' : undefined}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+              padding: compact ? '8px 0' : '7px 16px',
+              justifyContent: compact ? 'center' : 'flex-start',
+              color: 'rgba(255,255,255,0.35)', fontSize: 15,
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              transition: 'color 0.12s ease',
+            }}
+            onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.65)'}
+            onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.35)'}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M4 6h.01M6.5 6h.01M9 6h.01M11.5 6h.01M4 8.5h.01M6.5 8.5h.01M9 8.5h.01M5 11h6"/>
+            </svg>
+            {!compact && <><span style={{ flex: 1, textAlign: 'left' }}>Keyboard shortcuts</span><kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>?</kbd></>}
+          </button>
+        )}
+
+        {/* V33 — AI Chat */}
+        {onOpenAIChat && (
+          <button
+            onClick={onOpenAIChat}
+            title={compact ? 'AI Assistant' : undefined}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+              padding: compact ? '8px 0' : '7px 16px',
+              justifyContent: compact ? 'center' : 'flex-start',
+              color: 'rgba(255,255,255,0.45)', fontSize: 15,
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              transition: 'color 0.12s ease',
+            }}
+            onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.75)'}
+            onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.45)'}
+          >
+            <span style={{ width: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>✦</span>
+            {!compact && (
+              <>
+                <span style={{ flex: 1, textAlign: 'left' }}>AI Assistant</span>
+                <kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>8</kbd>
+              </>
+            )}
+          </button>
+        )}
+
+        {/* Settings */}
+        <button
+          onClick={onOpenSettings}
+          title={compact ? 'Settings' : undefined}
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+            padding: compact ? '8px 0' : '7px 16px',
+            justifyContent: compact ? 'center' : 'flex-start',
+            color: 'rgba(255,255,255,0.35)', fontSize: 15,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            transition: 'color 0.12s ease',
+          }}
+          onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.65)'}
+          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.35)'}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/>
+          </svg>
+          {!compact && <><span style={{ flex: 1, textAlign: 'left' }}>Settings</span><kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>0</kbd></>}
+        </button>
+
+        {/* Collapse toggle — hidden on mobile (V56: no expand/collapse cycling needed) */}
+        {!isMobile && (
+        <button
+          onClick={onToggle}
+          title={compact ? 'Expand sidebar ([)' : 'Collapse sidebar ([)'}
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+            padding: compact ? '8px 0' : '7px 16px',
+            justifyContent: compact ? 'center' : 'flex-start',
+            color: 'rgba(255,255,255,0.25)', fontSize: 15,
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            transition: 'color 0.12s ease',
+          }}
+          onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.55)'}
+          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.25)'}
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            {compact
+              ? <path d="M6 3l5 5-5 5M2 8h9"/>
+              : <path d="M10 3L5 8l5 5M14 8H5"/>
+            }
+          </svg>
+          {!compact && <span style={{ fontSize: 12, letterSpacing: '0.02em' }}>Collapse <kbd style={{ fontSize: 10, padding: '0 4px', borderRadius: 3, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', fontFamily: 'monospace' }}>[</kbd></span>}
+        </button>
+        )}
+      </div>
+      {/* V41 — drag handle on right edge */}
+      {!compact && (
         <div
           onMouseDown={onMouseDown}
-          style={{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 5, cursor: 'col-resize', zIndex: 10, background: 'transparent' }}
+          style={{
+            position: 'absolute', top: 0, right: 0, bottom: 0, width: 5,
+            cursor: 'col-resize', zIndex: 10,
+            background: 'transparent',
+          }}
           title="Drag to resize sidebar"
         />
       )}
