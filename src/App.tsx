@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule, ImportBatch, ImportPreset, ExtraIncome } from './types'
+import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule, ImportBatch, ImportPreset, ExtraIncome, PayStub, TakeHomeSettings } from './types'
 
 import { currency, labelPeriod } from './utils/formatting'
 import {
@@ -7,6 +7,8 @@ import {
   BUMP_THRESHOLDS,
   convertFromMonthly,
   convertToMonthly,
+  annualizeFromPaycheck,
+  periodAmountsFromAnnual,
   remainingTierFromPeriodValue,
   income,
   estimateTaxBreakdown,
@@ -37,6 +39,8 @@ import {
   loadPendingDeletes,
   loadTakeHomeSettings,
   saveTakeHomeSettings,
+  loadPayStubs,
+  savePayStubs,
   saveImportBatches,
   saveToStorage,
   applyCloudRestoreToLocalStorage,
@@ -437,13 +441,25 @@ export default function App() {
     const v = localStorage.getItem('flow-manual-base-salary')
     return v ? Number(v) : 40000
   })
+  // V56 — takeHomeSettings as real state so mode changes (simple/manual/paystub) drive income() reactively
+  const [takeHomeSettings, setTakeHomeSettingsState] = useState<TakeHomeSettings>(() =>
+    loadTakeHomeSettings() ?? ZYAN_PERSONAL_PRELOAD.takeHomeSettings
+  )
+  const setTakeHomeSettings = (updater: TakeHomeSettings | ((prev: TakeHomeSettings) => TakeHomeSettings)) => {
+    setTakeHomeSettingsState(prev => {
+      const next = typeof updater === 'function' ? (updater as (p: TakeHomeSettings) => TakeHomeSettings)(prev) : updater
+      saveTakeHomeSettings(next)
+      return next
+    })
+  }
+  useEffect(() => { saveTakeHomeSettings(takeHomeSettings) }, [takeHomeSettings])
+  // V56 — Pay stub history
+  const [payStubs, setPayStubs] = useState<PayStub[]>(() => loadPayStubs() ?? [])
+  useEffect(() => { savePayStubs(payStubs) }, [payStubs])
 
   // V45 — extra income sources (side income, rental, partner, etc.)
   const [extraIncomes, setExtraIncomes] = useState<ExtraIncome[]>(() => loadExtraIncomes())
   const extraIncomesMonthly = extraIncomes.reduce((s, e) => s + e.monthlyAmount, 0)
-
-  // V49 — remember which saved budget was last applied so user can quick-save changes back to it
-  const [loadedBudgetName, setLoadedBudgetName] = useState<string | null>(null)
   const [budgetTitle, setBudgetTitle] = useState('')
   const [changeSummary, setChangeSummary] = useState<string[]>([])
   const [editId, setEditId] = useState<string | null>(null)
@@ -662,11 +678,7 @@ export default function App() {
   const [txnRedo, setTxnRedo]                 = useState<Transaction[][]>([])
 
 // V8.5 — review / filter
-  const [txnFilter, setTxnFilter]             = useState<typeof TXN_FILTER_OPTIONS[number]['value']>(() => {
-    const saved = localStorage.getItem('flow_txn_filter') as typeof TXN_FILTER_OPTIONS[number]['value'] | null
-    return saved ?? 'all'
-  })
-  useEffect(() => { localStorage.setItem('flow_txn_filter', txnFilter) }, [txnFilter])
+  const [txnFilter, setTxnFilter]             = useState<typeof TXN_FILTER_OPTIONS[number]['value']>('all')
   const [txnDupWarning, setTxnDupWarning]     = useState(false)
   // V8.7 — tracks how many uncategorized txns were visible when pill was last clicked
   const [accountHint, setAccountHint]         = useState('')
@@ -747,16 +759,9 @@ export default function App() {
   const permanentlyDeleteTxn = (txId: string) => {
     setDeletedTxns(prev => prev.filter(t => t.id !== txId))
   }
-  const [txnSearch, setTxnSearch]               = useState(() => localStorage.getItem('flow_txn_search') ?? '')
-  useEffect(() => { localStorage.setItem('flow_txn_search', txnSearch) }, [txnSearch])
-  const [txnAccountFilter, setTxnAccountFilter] = useState(() => localStorage.getItem('flow_txn_account_filter') ?? '')
-  const [txnCategoryFilter, setTxnCategoryFilter] = useState(() => localStorage.getItem('flow_txn_category_filter') ?? '')
-  // V50 — month filter (format "YYYY-MM" or "" for All)
-  const [txnMonthFilter, setTxnMonthFilter] = useState(() => localStorage.getItem('flow_txn_month_filter') ?? '')
-  // V52 #3 — persist all transaction filters across reloads
-  useEffect(() => { localStorage.setItem('flow_txn_account_filter', txnAccountFilter) }, [txnAccountFilter])
-  useEffect(() => { localStorage.setItem('flow_txn_category_filter', txnCategoryFilter) }, [txnCategoryFilter])
-  useEffect(() => { localStorage.setItem('flow_txn_month_filter', txnMonthFilter) }, [txnMonthFilter])
+  const [txnSearch, setTxnSearch]               = useState('')
+  const [txnAccountFilter, setTxnAccountFilter] = useState('')
+  const [txnCategoryFilter, setTxnCategoryFilter] = useState('')
   // V9.6.1 — Duplicate resolution: IDs the user has explicitly dismissed from dup review
   const [dismissedDupIds, setDismissedDupIds]   = useState<Set<string>>(new Set())
   // V9.7 — Duplicate resolution: confirmed-as-intentional IDs (badge changes to "Kept Both")
@@ -875,20 +880,6 @@ export default function App() {
   }
 
   const handleClearAllData = () => {
-    // V49 — queue cloud deletes for everything before clearing locally, otherwise
-    // cloud keeps the records and a future merge brings them back.
-    if (appAuth.user) {
-      const userId = appAuth.user.id
-      accounts.forEach(a => addPendingDelete('accounts', a.id))
-      categories.forEach(c => addPendingDelete('categories', c.id))
-      transactions.forEach(t => addPendingDelete('transactions', t.id))
-      targets.forEach(t => addPendingDelete('savings_goals', t.id))
-      rules.forEach(r => addPendingDelete('transaction_rules', r.id))
-      importBatches.forEach(b => addPendingDelete('import_batches', b.id))
-      savedBudgets.forEach(b => addPendingDelete('saved_budgets', `${userId}-budget-${encodeURIComponent(b.name)}`))
-      savedScenarios.forEach(s => addPendingDelete('scenarios', `${userId}-scenario-${encodeURIComponent(s.name)}`))
-      savedTargetSets.forEach(s => addPendingDelete('savings_goal_sets', `${userId}-goalset-${encodeURIComponent(s.name)}`))
-    }
     setAccountsWithHistory(() => [])
     setCategories([])
     setTxnWithHistory(() => [])
@@ -897,7 +888,6 @@ export default function App() {
     setSavedBudgets([])
     setSavedScenarios([])
     setSavedTargetSets([])
-    setImportBatches([])
   }
 
   const handleImportFromFile = (json: string) => {
@@ -1049,7 +1039,25 @@ export default function App() {
   const adjustedSalary = manualBaseSalary + (baseBumpsAchieved * 5000)
   const eligibleBumps = BUMP_THRESHOLDS.filter(t => gp >= t).length
   const nextUnreachedThreshold = BUMP_THRESHOLDS[eligibleBumps]
-  const inc = useMemo(() => income(gp, adjustedSalary), [gp, adjustedSalary])
+  // V56 — Effective take-home rate derives from takeHomeSettings.mode:
+  //  - 'simple': use simpleRate (the AZ-estimate-based default, e.g. 0.8243)
+  //  - 'manual': back-solve a rate from manualMonthlyNet ÷ (adjustedSalary/12), so
+  //              income() stays internally consistent across weekly/bi-weekly/monthly/yearly
+  //  - 'paystub': back-solve a rate from the active pay stub's annualized net pay
+  const activePayStub = payStubs.find(p => p.isActive) ?? null
+  const effectiveTakeHomeRate = useMemo(() => {
+    const baseGrossMonthly = adjustedSalary / 12
+    if (takeHomeSettings.mode === 'manual' && baseGrossMonthly > 0) {
+      return takeHomeSettings.manualMonthlyNet / baseGrossMonthly
+    }
+    if (takeHomeSettings.mode === 'paystub' && activePayStub && baseGrossMonthly > 0) {
+      const annualNet = annualizeFromPaycheck(activePayStub.netPay, activePayStub.payFrequency)
+      return (annualNet / 12) / baseGrossMonthly
+    }
+    return takeHomeSettings.simpleRate
+  }, [takeHomeSettings, adjustedSalary, activePayStub])
+
+  const inc = useMemo(() => income(gp, adjustedSalary, effectiveTakeHomeRate), [gp, adjustedSalary, effectiveTakeHomeRate])
   const grossSalary = adjustedSalary + (inc.cMonthly * 12)
 
   // Reset base bumps if GP drops below 20000
@@ -1213,24 +1221,19 @@ export default function App() {
   // ── V8.4 Transaction-driven actuals ──────────────────────────────────────────
   // V9.2: Transfers and credit card payments are money movements — excluded from
   // budget category spending totals. Only genuine expenses count toward actuals.
-  // V52: Also tracks txn count per category for the Budget tab.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const txnActuals = useMemo(() => {
     const range = getPeriodDateRange(period)
     const result: Record<string, number> = {}
-    const counts: Record<string, number> = {}
     for (const tx of transactions) {
       if (!tx.categoryId) continue
       if (tx.date < range.start || tx.date > range.end) continue
+      // V9.2 — exclude transfers and credit card payments from budget spending
       if (isMoneyMovement(tx.type)) continue
       result[tx.categoryId] = (result[tx.categoryId] ?? 0) + tx.amount
-      counts[tx.categoryId] = (counts[tx.categoryId] ?? 0) + 1
     }
-    return { totals: result, counts }
+    return result
   }, [transactions, period])
-
-  // V52 — count of txns per category in the current period (used by Budget tab UI)
-  const txnCountPerCategoryPeriod = txnActuals.counts
 
   // Effective actual for one category = transaction total + manual adjustment.
   // If no transactions and no manual entry: null (nothing to show).
@@ -1238,7 +1241,7 @@ export default function App() {
   const effectiveCatActual = (catId: string): {
     total: number; txnAmt: number; manualAmt: number; hasTxn: boolean; hasManual: boolean
   } | null => {
-    const txnAmt    = txnActuals.totals[catId] ?? 0
+    const txnAmt    = txnActuals[catId] ?? 0
     const manualStr = actuals[catId]
     const hasManual = manualStr !== '' && manualStr !== undefined
     const manualAmt = hasManual ? (Number(manualStr) || 0) : 0
@@ -2310,11 +2313,6 @@ txnMerchantRef.current?.focus()
       createdAt: new Date().toISOString(),
       importSource: 'pdf',
       preset: 'chase-pdf-experimental',
-      // V55 — snapshot
-      rowsSnapshot: newTxns.map(tx => ({
-        date: tx.date, merchant: tx.merchant,
-        amount: tx.amount, type: tx.type, notes: tx.notes,
-      })),
     }
     setImportBatches(prev => [batch, ...prev.slice(0, 49)])
     closeCsvImport()
@@ -2404,11 +2402,6 @@ txnMerchantRef.current?.focus()
       createdAt: new Date().toISOString(),
       importSource: 'csv',
       preset: csvIsAppleCard ? 'apple-card' : csvImportPreset,
-      // V55 — snapshot the raw imported rows so the user can view this import later
-      rowsSnapshot: newTxns.map(tx => ({
-        date: tx.date, merchant: tx.merchant,
-        amount: tx.amount, type: tx.type, notes: tx.notes,
-      })),
     }
     setImportBatches(prev => [batch, ...prev.slice(0, 49)])
     closeCsvImport()
@@ -2431,10 +2424,6 @@ txnMerchantRef.current?.focus()
     const batch = importBatches.find(b => b.id === batchId)
     const removed = transactions.filter(tx => tx.batchId === batchId)
     if (removed.length === 0 && !batch) return
-    // V49 — queue cloud deletes for each removed transaction and the batch itself,
-    // otherwise these become orphans in the cloud (they keep coming back on restore).
-    removed.forEach(tx => addPendingDelete('transactions', tx.id))
-    if (batch) addPendingDelete('import_batches', batch.id)
     setTxnWithHistory(prev => prev.filter(tx => tx.batchId !== batchId))
     setImportBatches(prev => prev.filter(b => b.id !== batchId))
     setBatchToDelete(null)
@@ -2597,176 +2586,26 @@ txnMerchantRef.current?.focus()
   const fullyFundedTargets = targets.filter(t => !t.completed && t.goalAmount > 0 && t.currentSaved >= t.goalAmount)
   const completedTargets = targets.filter(t => t.completed)
 
-  // V52 #1 — Sortable columns (persists)
-  type TxnSortKey = 'date' | 'amount' | 'merchant'
-  type TxnSortDir = 'asc' | 'desc'
-  const [txnSortKey, setTxnSortKey] = useState<TxnSortKey>(() => (localStorage.getItem('flow_txn_sort_key') as TxnSortKey) || 'date')
-  const [txnSortDir, setTxnSortDir] = useState<TxnSortDir>(() => (localStorage.getItem('flow_txn_sort_dir') as TxnSortDir) || 'desc')
-  useEffect(() => { localStorage.setItem('flow_txn_sort_key', txnSortKey) }, [txnSortKey])
-  useEffect(() => { localStorage.setItem('flow_txn_sort_dir', txnSortDir) }, [txnSortDir])
-
   // V9.12 — Filtered transactions (shared between results summary + table + delete action)
-  const filteredTxns = useMemo(() => {
-    const out = [...transactions].filter(tx => {
-      if (txnFilter === 'uncategorized') { if (!(tx.type === 'expense' && (!tx.categoryId || !validCategoryIds.has(tx.categoryId)))) return false }
-      else if (txnFilter === 'needs-review') { if (!txNeedsReview(tx, transactions, dismissedDupIds)) return false }
-      else if (txnFilter !== 'all') { if (tx.type !== txnFilter) return false }
-      if (txnSearch) {
-        const q = txnSearch.toLowerCase()
-        if (!tx.merchant.toLowerCase().includes(q) && !(tx.notes ?? '').toLowerCase().includes(q)) return false
-      }
-      if (txnAccountFilter && tx.accountId !== txnAccountFilter) return false
-      if (txnCategoryFilter === '__none__' && tx.categoryId) return false
-      if (txnCategoryFilter && txnCategoryFilter !== '__none__' && tx.categoryId !== txnCategoryFilter) return false
-      if (txnMonthFilter && !tx.date.startsWith(txnMonthFilter + '-')) return false
-      return true
-    })
-    // V52 — apply current sort
-    out.sort((a, b) => {
-      let cmp = 0
-      if (txnSortKey === 'date') cmp = a.date.localeCompare(b.date)
-      else if (txnSortKey === 'amount') cmp = Math.abs(a.amount) - Math.abs(b.amount)
-      else if (txnSortKey === 'merchant') cmp = a.merchant.localeCompare(b.merchant)
-      return txnSortDir === 'asc' ? cmp : -cmp
-    })
-    return out
-  },
-    [transactions, txnFilter, txnSearch, txnAccountFilter, txnCategoryFilter, txnMonthFilter, dismissedDupIds, txnSortKey, txnSortDir]
+  const filteredTxns = useMemo(() =>
+    [...transactions]
+      .filter(tx => {
+        if (txnFilter === 'uncategorized') { if (!(tx.type === 'expense' && !tx.categoryId)) return false }
+        else if (txnFilter === 'needs-review') { if (!txNeedsReview(tx, transactions, dismissedDupIds)) return false }
+        else if (txnFilter !== 'all') { if (tx.type !== txnFilter) return false }
+        if (txnSearch) {
+          const q = txnSearch.toLowerCase()
+          if (!tx.merchant.toLowerCase().includes(q) && !(tx.notes ?? '').toLowerCase().includes(q)) return false
+        }
+        if (txnAccountFilter && tx.accountId !== txnAccountFilter) return false
+        if (txnCategoryFilter === '__none__' && tx.categoryId) return false
+        if (txnCategoryFilter && txnCategoryFilter !== '__none__' && tx.categoryId !== txnCategoryFilter) return false
+        return true
+      })
+      .sort((a, b) => b.date.localeCompare(a.date)),
+    [transactions, txnFilter, txnSearch, txnAccountFilter, txnCategoryFilter, dismissedDupIds]
   )
-  const hasActiveFilters = txnFilter !== 'all' || !!txnSearch || !!txnAccountFilter || !!txnCategoryFilter || !!txnMonthFilter
-
-  // V51 — Filtered net total (income - expense) for the summary line at the top of the table
-  const filteredTxnNet = useMemo(() => {
-    return filteredTxns.reduce((sum, tx) => {
-      if (tx.type === 'income') return sum + Math.abs(tx.amount)
-      if (tx.type === 'expense') return sum - Math.abs(tx.amount)
-      return sum
-    }, 0)
-  }, [filteredTxns])
-
-  // V52 #5 — Top 5 merchants by spend in current filtered set (expense-only)
-  const filteredTopMerchants = useMemo(() => {
-    const totals: Record<string, number> = {}
-    for (const tx of filteredTxns) {
-      if (tx.type !== 'expense') continue
-      totals[tx.merchant] = (totals[tx.merchant] ?? 0) + Math.abs(tx.amount)
-    }
-    return Object.entries(totals)
-      .map(([merchant, total]) => ({ merchant, total }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 5)
-  }, [filteredTxns])
-
-  // V52 #4 — Bulk recategorize all currently-filtered transactions
-  const bulkRecategorizeFiltered = (categoryId: string) => {
-    if (filteredTxns.length === 0) return
-    const ids = new Set(filteredTxns.map(t => t.id))
-    setTxnWithHistory(prev => prev.map(tx => ids.has(tx.id) ? { ...tx, categoryId: categoryId || undefined, updatedAt: new Date().toISOString() } : tx))
-    const catName = categoryId ? (categories.find(c => c.id === categoryId)?.name ?? 'category') : 'Uncategorized'
-    showToast(`Categorized ${filteredTxns.length} transaction${filteredTxns.length !== 1 ? 's' : ''} as "${catName}"`)
-  }
-
-  // V50 — Compute available months (YYYY-MM) from transactions, scoped by account filter
-  const availableTxnMonths = useMemo(() => {
-    const months = new Set<string>()
-    for (const tx of transactions) {
-      if (txnAccountFilter && tx.accountId !== txnAccountFilter) continue
-      const ym = tx.date.slice(0, 7) // "YYYY-MM"
-      if (ym.length === 7) months.add(ym)
-    }
-    return [...months].sort((a, b) => b.localeCompare(a))
-  }, [transactions, txnAccountFilter])
-
-  // V51 — Faceted counts for every dropdown / filter pill.
-  // Each map answers: "if this option were the ONLY filter besides search, how many would I see?"
-  // Implementation note: counts use the FULL transactions list (not filteredTxns) so the user
-  // sees the population for each option, not just what's already filtered.
-  const txnCountsByAccount = useMemo(() => {
-    const m: Record<string, number> = { __all__: transactions.length }
-    for (const a of accounts) m[a.id] = 0
-    for (const tx of transactions) {
-      if (tx.accountId && m[tx.accountId] !== undefined) m[tx.accountId]++
-    }
-    return m
-  }, [transactions, accounts])
-
-  // V53 — A transaction is "effectively uncategorized" if it has no categoryId
-  // OR if it points to a category that was deleted. The latter happens because
-  // category deletes weren't propagating to transactions before V53.
-  const validCategoryIds = useMemo(() => new Set(categories.map(c => c.id)), [categories])
-
-  const txnCountsByCategory = useMemo(() => {
-    const m: Record<string, number> = { __all__: transactions.length, __none__: 0 }
-    for (const c of categories) m[c.id] = 0
-    for (const tx of transactions) {
-      if (!tx.categoryId || !validCategoryIds.has(tx.categoryId)) m.__none__++
-      else m[tx.categoryId]++
-    }
-    return m
-  }, [transactions, categories, validCategoryIds])
-
-  // V51 — Month list with gap-filling: every month from oldest to newest, including empty ones.
-  // Scoped by account filter (matches V50 behaviour for availableTxnMonths).
-  const txnMonthsWithCounts = useMemo<Array<{ ym: string; count: number }>>(() => {
-    const scoped = txnAccountFilter
-      ? transactions.filter(tx => tx.accountId === txnAccountFilter)
-      : transactions
-    if (scoped.length === 0) return []
-    const counts: Record<string, number> = {}
-    let minYM = '9999-99', maxYM = '0000-00'
-    for (const tx of scoped) {
-      const ym = tx.date.slice(0, 7)
-      if (ym.length !== 7) continue
-      counts[ym] = (counts[ym] ?? 0) + 1
-      if (ym < minYM) minYM = ym
-      if (ym > maxYM) maxYM = ym
-    }
-    // Generate every YYYY-MM between minYM and maxYM
-    const [minY, minM] = minYM.split('-').map(Number)
-    const [maxY, maxM] = maxYM.split('-').map(Number)
-    const result: Array<{ ym: string; count: number }> = []
-    let y = minY, m = minM
-    while (y < maxY || (y === maxY && m <= maxM)) {
-      const ym = `${y}-${String(m).padStart(2, '0')}`
-      result.push({ ym, count: counts[ym] ?? 0 })
-      m++
-      if (m > 12) { m = 1; y++ }
-    }
-    // Newest first
-    return result.reverse()
-  }, [transactions, txnAccountFilter])
-
-  // V51 — Counts for each filter pill (All / Income / Expense / Transfer / etc.)
-  // Uses search + account + category + month filters as the base, then counts by type.
-  const txnPillCounts = useMemo(() => {
-    const base = transactions.filter(tx => {
-      if (txnSearch) {
-        const q = txnSearch.toLowerCase()
-        if (!tx.merchant.toLowerCase().includes(q) && !(tx.notes ?? '').toLowerCase().includes(q)) return false
-      }
-      if (txnAccountFilter && tx.accountId !== txnAccountFilter) return false
-      if (txnCategoryFilter === '__none__' && tx.categoryId) return false
-      if (txnCategoryFilter && txnCategoryFilter !== '__none__' && tx.categoryId !== txnCategoryFilter) return false
-      if (txnMonthFilter && !tx.date.startsWith(txnMonthFilter + '-')) return false
-      return true
-    })
-    return {
-      all: base.length,
-      'needs-review': base.filter(tx => txNeedsReview(tx, transactions, dismissedDupIds)).length,
-      uncategorized: base.filter(tx => tx.type === 'expense' && (!tx.categoryId || !validCategoryIds.has(tx.categoryId))).length,
-      expense: base.filter(tx => tx.type === 'expense').length,
-      income:  base.filter(tx => tx.type === 'income').length,
-      transfer: base.filter(tx => tx.type === 'transfer').length,
-      'credit card payment': base.filter(tx => tx.type === 'credit card payment').length,
-    } as Record<string, number>
-  }, [transactions, txnSearch, txnAccountFilter, txnCategoryFilter, txnMonthFilter, dismissedDupIds, validCategoryIds])
-
-  // V50 — If account change removes the currently-selected month, clear it
-  useEffect(() => {
-    if (txnMonthFilter && !availableTxnMonths.includes(txnMonthFilter)) {
-      setTxnMonthFilter('')
-    }
-  }, [availableTxnMonths, txnMonthFilter])
+  const hasActiveFilters = txnFilter !== 'all' || !!txnSearch || !!txnAccountFilter || !!txnCategoryFilter
 
   // V9.12 — Goal planning summary
   const goalPlanSummary = useMemo(() => {
@@ -2875,7 +2714,18 @@ txnMerchantRef.current?.focus()
 
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
 
-  const effectiveSidebarW = sidebarCollapsed ? 64 : sidebarW
+  // V56 — On mobile, the sidebar is always 72px (icon+label rail), regardless of
+  // the collapsed/expanded preference (which only applies to desktop).
+  const [isMobileLayout, setIsMobileLayout] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 640 : false
+  )
+  useEffect(() => {
+    const onResize = () => setIsMobileLayout(window.innerWidth < 640)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  const effectiveSidebarW = isMobileLayout ? 72 : (sidebarCollapsed ? 64 : sidebarW)
 
   return (
     <div data-theme={theme} style={{ background: 'var(--bg-app)', minHeight: '100vh', color: 'var(--text-primary)' }}>
@@ -2901,18 +2751,8 @@ txnMerchantRef.current?.focus()
       {/* Single inner container with dynamic left margin */}
       <div className="min-h-screen" style={{ marginLeft: effectiveSidebarW, width: `calc(100vw - ${effectiveSidebarW}px)`, minWidth: 0, transition: 'margin-left 0.2s cubic-bezier(0.4,0,0.2,1), width 0.2s cubic-bezier(0.4,0,0.2,1)' }}>
 
-        {/* Compact sticky header — V47 refined */}
-        <header
-          style={{
-            position: 'sticky', top: 0, zIndex: 30,
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '0 24px', height: 52,
-            borderBottom: '1px solid var(--border-subtle)',
-            background: 'rgba(8,8,11,0.72)',
-            backdropFilter: 'blur(20px) saturate(180%)',
-            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-          }}
-        >
+        {/* Compact sticky header — logo + utility only, no tabs */}
+        <header style={{ position: 'sticky', top: 0, zIndex: 30, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', height: 48, borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'rgba(11,11,15,0.95)', backdropFilter: 'blur(12px)' }}>
           <div className="flex items-center gap-2">
             <VersionBadge version={CURRENT_VERSION} open={versionOpen} onOpenChange={setVersionOpen} />
           </div>
@@ -3057,6 +2897,7 @@ txnMerchantRef.current?.focus()
           onClose={() => setSettingsOpen(false)}
           onLoadDemo={handleLoadDemo}
           onClearAllData={handleClearAllData}
+          onDownloadBackup={downloadBackupFile}
           onImportFromFile={handleImportFromFile}
           lastSyncedAt={cloudPersistence.lastSyncedAt}
           version={CURRENT_VERSION}
@@ -3132,7 +2973,7 @@ txnMerchantRef.current?.focus()
             <DashboardStatusBanner status={dashboardStatus} theme={theme} />
 
             {/* ── Action Cards ── */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <ActionCard
                 title="Review Budget"
                 description={
@@ -3190,9 +3031,9 @@ txnMerchantRef.current?.focus()
               </div>
             )}
 
-            {/* V44 #7 — Year-over-year spending history (V52: now reads from transactions directly) */}
+            {/* V44 #7 — Year-over-year spending history */}
             <YearOverYearPanel
-              transactions={transactions}
+              allActualsByPeriod={allActualsByPeriod}
               categories={categories}
             />
 
@@ -3267,7 +3108,7 @@ txnMerchantRef.current?.focus()
               </div>
 
               {/* Summary cards */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                 <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
                   <div className="text-xs text-slate-400 mb-0.5">Starting Cash</div>
                   <div className={`text-lg font-bold ${cashFlowForecast.startingCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>{currency(cashFlowForecast.startingCash)}</div>
@@ -3367,7 +3208,7 @@ txnMerchantRef.current?.focus()
               )}
 
               {/* Summary */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                 {[
                   { label: 'Total Income', val: `+${currency(monthlyReview.income)}`, color: 'text-green-400' },
                   { label: 'Total Spending', val: `−${currency(monthlyReview.expenses)}`, color: 'text-red-400' },
@@ -3471,7 +3312,7 @@ txnMerchantRef.current?.focus()
 
         {tab === 'Dashboard' && targets.length > 0 && period === 'bi-weekly' && (
           <Card title="Log Savings From This Paycheck">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+            <div className="grid md:grid-cols-4 gap-2">
               <input type="date" className="p-2 rounded bg-slate-800 border border-slate-600" value={dashboardQuickDate} onChange={(e) => setDashboardQuickDate(e.target.value)} />
               <select className="p-2 rounded bg-slate-800 border border-slate-600" value={dashboardQuickTargetId} onChange={(e) => setDashboardQuickTargetId(e.target.value)}>
                 <option value="">Select target</option>
@@ -3573,7 +3414,7 @@ txnMerchantRef.current?.focus()
                   <div className="grid md:grid-cols-2 gap-3 mb-3">
                     <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
                       <div className="text-xs text-slate-400 mb-1">Estimated Annual Gross</div>
-                      <div className="text-lg font-bold font-num text-slate-200">{currency(bd.grossAnnual)}</div>
+                      <div className="text-lg font-bold text-slate-200">{currency(bd.grossAnnual)}</div>
                     </div>
                     <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
                       <div className="text-xs text-slate-400 mb-1">Est. Effective Take-Home Rate</div>
@@ -3581,7 +3422,7 @@ txnMerchantRef.current?.focus()
                     </div>
                     <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
                       <div className="text-xs text-slate-400 mb-1">Est. Annual Take-Home</div>
-                      <div className="text-lg font-bold font-num text-slate-200">{currency(bd.takeHomeAnnual)}</div>
+                      <div className="text-lg font-bold text-slate-200">{currency(bd.takeHomeAnnual)}</div>
                     </div>
                     <div className="rounded-lg bg-slate-800/60 border border-slate-700/60 px-3 py-2.5">
                       <div className="text-xs text-slate-400 mb-1">Est. Effective Withholding Rate</div>
@@ -3690,7 +3531,7 @@ txnMerchantRef.current?.focus()
           <section className="space-y-4 transition-all duration-300">
             <Card title="Budget Summary">
               <div className="flex gap-2 flex-wrap mb-4">{periods.map(p => <Pill key={p} active={period === p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid md:grid-cols-4 gap-3">
                 <Metric title="Available income" value={currency(selectedPeriodTotalNet)} />
                 <Metric title="Total planned" value={currency(plannedPeriodTotal)} />
                 <Metric title="Remaining" value={currency(selectedPeriodRemaining)} tone={remainingTone} glow={selectedPeriodRemaining < 0} />
@@ -3727,7 +3568,7 @@ txnMerchantRef.current?.focus()
                     </div>
                   </div>
                 </div>
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                     {[
                       { label: 'Total Planned', val: currency(budgetHealth.totalPlanned), color: 'text-slate-200' },
                       { label: 'Total Actual', val: hasAnyActual ? currency(budgetHealth.totalActual) : '—', color: 'text-slate-200' },
@@ -3798,7 +3639,7 @@ txnMerchantRef.current?.focus()
                 <p className="mt-2 text-xs text-slate-500">
                   {(() => {
                     const r = getPeriodDateRange(period)
-                    const hasTxnActuals = Object.keys(txnActuals.totals).length > 0
+                    const hasTxnActuals = Object.keys(txnActuals).length > 0
                     if (hasTxnActuals) {
                       return `Actuals include categorized transactions from ${r.start} to ${r.end}. Use the +adj field to add manual adjustments.`
                     }
@@ -3849,7 +3690,7 @@ txnMerchantRef.current?.focus()
               </div>
             </Card>
             <div ref={budgetCategoryTableRef} className="scroll-mt-4"><Card title="Budget Categories">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+              <div className="grid md:grid-cols-4 gap-2">
                 <div ref={autocompleteWrapRef} className="relative">
                   <input
                     ref={budgetNameRef}
@@ -3932,40 +3773,15 @@ txnMerchantRef.current?.focus()
               <div className="mt-2 flex gap-2">
                 <button onClick={undoBudget} disabled={!budgetHistory.length} className={`rounded-lg px-3 py-1.5 ${budgetHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoBudget} disabled={!budgetRedo.length} className={`rounded-lg px-3 py-1.5 ${budgetRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
-                <button onClick={() => {
-                  if (!categories.length) return
-                  pushBudgetHistory()
-                  // V49 — queue cloud deletes for each category before clearing
-                  categories.forEach(c => addPendingDelete('categories', c.id))
-                  setCategories([])
-                  showUndoableToast('Budget reset', undoBudget)
-                }} className="rounded-lg px-3 py-1.5 bg-slate-700 hover:bg-slate-600">Reset Budget</button>
+                <button onClick={() => { if (!categories.length) return; pushBudgetHistory(); setCategories([]); showUndoableToast('Budget reset', undoBudget) }} className="rounded-lg px-3 py-1.5 bg-slate-700 hover:bg-slate-600">Reset Budget</button>
                 <button onClick={generateSampleCategory} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample budget category">Generate Sample</button>
               </div>
               {budgetFormHint && <p className="mt-2 text-sm text-amber-300">{budgetFormHint}</p>}
-              <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div className="mt-3 grid md:grid-cols-3 gap-2">
                 <input className="p-2 rounded-lg bg-slate-800 border border-slate-600" placeholder="Budget name" value={budgetTitle} onChange={e => setBudgetTitle(e.target.value)} />
-                <button className="rounded-lg bg-blue-600 hover:bg-blue-500 px-3 py-2 text-sm font-medium text-white transition-colors" onClick={() => { const n = budgetTitle.trim(); if (!n) return; const ex = savedBudgets.find(x => x.name.toLowerCase() === n.toLowerCase()); if (ex && !window.confirm('Overwrite existing budget?')) return; setSavedBudgets([{ name: n, categories, savedAt: new Date().toISOString() }, ...savedBudgets.filter(x => x.name.toLowerCase() !== n.toLowerCase())]); if (ex) setChangeSummary([`Monthly expenses change: ${currency(monthlyBudget - (ex.categories.reduce((s, c) => s + c.amount, 0)))}`]); setLoadedBudgetName(n) }}>Save Budget</button>
+                <button className="rounded-lg bg-blue-600" onClick={() => { const n = budgetTitle.trim(); if (!n) return; const ex = savedBudgets.find(x => x.name.toLowerCase() === n.toLowerCase()); if (ex && !window.confirm('Overwrite existing budget?')) return; setSavedBudgets([{ name: n, categories, savedAt: new Date().toISOString() }, ...savedBudgets.filter(x => x.name.toLowerCase() !== n.toLowerCase())]); if (ex) setChangeSummary([`Monthly expenses change: ${currency(monthlyBudget - (ex.categories.reduce((s, c) => s + c.amount, 0)))}`]) }}>Save Budget</button>
                 <div className="text-xs text-slate-400 self-center">Saved locally</div>
               </div>
-              {/* V49 — Quick-save: overwrite the budget that was just loaded */}
-              {loadedBudgetName && savedBudgets.some(b => b.name === loadedBudgetName) && (
-                <div className="mt-2">
-                  <button
-                    className="rounded-lg bg-emerald-700/70 hover:bg-emerald-600/70 text-emerald-100 border border-emerald-600/40 px-3 py-1.5 text-xs font-medium transition-colors"
-                    onClick={() => {
-                      const ex = savedBudgets.find(x => x.name === loadedBudgetName)
-                      if (!ex) return
-                      setSavedBudgets([{ name: loadedBudgetName, categories, savedAt: new Date().toISOString() }, ...savedBudgets.filter(x => x.name !== loadedBudgetName)])
-                      const prevTotal = ex.categories.reduce((s, c) => s + c.amount, 0)
-                      setChangeSummary([`Updated "${loadedBudgetName}" — monthly change: ${currency(monthlyBudget - prevTotal)}`])
-                      showToast(`Saved changes to "${loadedBudgetName}".`)
-                    }}
-                  >
-                    ↻ Update "{loadedBudgetName}" with current categories
-                  </button>
-                </div>
-              )}
               {changeSummary.length > 0 && <div className="mt-2 text-sm rounded border border-slate-700 p-2">What Changed: {changeSummary.join(' • ')}</div>}
               <div className="mt-2 space-y-2">
                 {savedBudgets.map((b, idx) => (
@@ -4007,7 +3823,6 @@ txnMerchantRef.current?.focus()
                               if (window.confirm(`Apply "${b.name}" as your budget? This replaces your current categories.`)) {
                                 pushBudgetHistory()
                                 setCategories(b.categories)
-                                setLoadedBudgetName(b.name)
                                 showToast(`Applied template "${b.name}".`)
                               }
                             }}
@@ -4017,11 +3832,7 @@ txnMerchantRef.current?.focus()
                             setRenameBudgetValue(b.name)
                             setTimeout(() => { renameBudgetInputRef.current?.focus(); renameBudgetInputRef.current?.select() }, 0)
                           }}>Rename</button>
-                          <button className="text-red-300 hover:text-red-200 text-xs" onClick={() => {
-                            setSavedBudgets(prev => prev.filter(x => x.name !== b.name))
-                            if (appAuth.user) addPendingDelete('saved_budgets', `${appAuth.user.id}-budget-${encodeURIComponent(b.name)}`)
-                            showToast(`Deleted saved budget "${b.name}".`)
-                          }}>Delete</button>
+                          <button className="text-red-300 hover:text-red-200 text-xs" onClick={() => { setSavedBudgets(prev => prev.filter(x => x.name !== b.name)); showToast(`Deleted saved budget "${b.name}".`) }}>Delete</button>
                         </div>
                       </>
                     )}
@@ -4033,13 +3844,13 @@ txnMerchantRef.current?.focus()
                 <thead>
                   <tr className="text-left text-slate-400 border-b border-slate-700">
                     <th className="pb-1.5 pr-2">Name</th>
-                    <th className="pb-1.5 pr-2 hidden sm:table-cell">Type</th>
+                    <th className="pb-1.5 pr-2">Type</th>
                     {period === 'weekly'    && <th className="pb-1.5 pr-2">Weekly Planned</th>}
                     {period === 'bi-weekly' && <th className="pb-1.5 pr-2">Bi-weekly Planned</th>}
                     {period === 'monthly'   && <th className="pb-1.5 pr-2">Planned</th>}
                     {period === 'yearly'    && <th className="pb-1.5 pr-2">Yearly Planned</th>}
-                    {(period === 'weekly' || period === 'bi-weekly') && <th className="pb-1.5 pr-2 hidden sm:table-cell">Monthly</th>}
-                    {period === 'yearly'    && <th className="pb-1.5 pr-2 hidden sm:table-cell">Monthly</th>}
+                    {(period === 'weekly' || period === 'bi-weekly') && <th className="pb-1.5 pr-2">Monthly</th>}
+                    {period === 'yearly'    && <th className="pb-1.5 pr-2">Monthly</th>}
                     <th className="pb-1.5 pr-2">
                       <span className="inline-flex items-center gap-2">
                         <span>
@@ -4062,7 +3873,7 @@ txnMerchantRef.current?.focus()
                         )}
                       </span>
                     </th>
-                    <th className="pb-1.5 pr-2 hidden sm:table-cell">Variance</th>
+                    <th className="pb-1.5 pr-2">Variance</th>
                     <th className="pb-1.5 pr-2 hidden md:table-cell">Status</th>
                     <th className="pb-1.5" />
                   </tr>
@@ -4079,8 +3890,8 @@ txnMerchantRef.current?.focus()
                     const planned     = convertFromMonthly(c.amount, period)
                     const eff         = effectiveCatActual(c.id)
                     const rawActual   = actuals[c.id]
-                    const hasTxn      = (txnActuals.totals[c.id] ?? 0) > 0
-                    const txnAmt      = txnActuals.totals[c.id] ?? 0
+                    const hasTxn      = (txnActuals[c.id] ?? 0) > 0
+                    const txnAmt      = txnActuals[c.id] ?? 0
                     const hasManual   = rawActual !== '' && rawActual !== undefined
                     const hasActual   = eff !== null
                     const actualVal   = eff !== null ? eff.total : null
@@ -4222,15 +4033,15 @@ txnMerchantRef.current?.focus()
                             <span>{billsToMomBudgetOpen ? '▾' : '▸'}</span><span>{c.name}</span>
                           </button>
                         ) : c.name}</td>
-                        <td className="py-1.5 pr-2 text-slate-400 text-xs hidden sm:table-cell">
+                        <td className="py-1.5 pr-2 text-slate-400 text-xs">
                           {c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}
                         </td>
                         {period === 'weekly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'weekly'))}</td>}
                         {period === 'bi-weekly' && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'bi-weekly'))}</td>}
                         {period === 'monthly'   && <td className="py-1.5 pr-2">{currency(c.amount)}</td>}
                         {period === 'yearly'    && <td className="py-1.5 pr-2">{currency(convertFromMonthly(c.amount, 'yearly'))}</td>}
-                        {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400 hidden sm:table-cell">{currency(c.amount)}</td>}
-                        {period === 'yearly' && <td className="py-1.5 pr-2 text-slate-400 hidden sm:table-cell">{currency(c.amount)}</td>}
+                        {(period === 'weekly' || period === 'bi-weekly') && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
+                        {period === 'yearly' && <td className="py-1.5 pr-2 text-slate-400">{currency(c.amount)}</td>}
                         {/* Actual cell: txn-driven breakdown or plain manual entry */}
                         <td className="py-1 pr-2">
                           {hasTxn ? (
@@ -4272,15 +4083,8 @@ txnMerchantRef.current?.focus()
                               </div>
                               {eff && (
                                 <div className="flex items-center justify-between gap-2 border-t border-slate-700/60 pt-0.5 mt-0.5">
-                                  <span className="text-slate-500">
-                                    Total Actual
-                                    {(txnCountPerCategoryPeriod[c.id] ?? 0) > 0 && (
-                                      <span className="text-[10px] text-slate-600 ml-1">
-                                        ({txnCountPerCategoryPeriod[c.id]} txn{txnCountPerCategoryPeriod[c.id] !== 1 ? 's' : ''})
-                                      </span>
-                                    )}
-                                  </span>
-                                  <span className="font-semibold text-slate-200 font-num">{currency(eff.total)}</span>
+                                  <span className="text-slate-500">Total Actual</span>
+                                  <span className="font-semibold text-slate-200">{currency(eff.total)}</span>
                                 </div>
                               )}
                             </div>
@@ -4317,7 +4121,7 @@ txnMerchantRef.current?.focus()
                             </div>
                           )}
                         </td>
-                        <td className={`py-1.5 pr-2 font-medium hidden sm:table-cell ${varClass}`}>
+                        <td className={`py-1.5 pr-2 font-medium ${varClass}`}>
                           {variance === null
                             ? '—'
                             : Math.abs(variance) < 0.005
@@ -4350,14 +4154,7 @@ txnMerchantRef.current?.focus()
                             })
                             setTimeout(() => { inlineCatAmountRef.current?.focus(); inlineCatAmountRef.current?.select() }, 0)
                           }}>Edit</button>
-                          <button className="text-red-300 hover:text-red-200" onClick={() => {
-                            pushBudgetHistory()
-                            addPendingDelete('categories', c.id)
-                            setCategories(prev => prev.filter(x => x.id !== c.id))
-                            // V53 — clear this categoryId from any transactions referencing it,
-                            // so they show as Uncategorized rather than as orphans pointing nowhere.
-                            setTxnWithHistory(prev => prev.map(tx => tx.categoryId === c.id ? { ...tx, categoryId: undefined } : tx))
-                          }}>Delete</button>
+                          <button className="text-red-300 hover:text-red-200" onClick={() => { pushBudgetHistory(); addPendingDelete('categories', c.id); setCategories(prev => prev.filter(x => x.id !== c.id)) }}>Delete</button>
                           {/* V33 — Breakdown group */}
                           <button
                             onClick={() => setBreakdownEditId(c.id)}
@@ -4401,7 +4198,7 @@ txnMerchantRef.current?.focus()
                                     <button onClick={() => setBreakdownEditId(c.id)} className="text-[10px] text-violet-400 hover:text-violet-300 px-1.5 py-0.5 rounded border border-violet-700/30 transition-colors">Edit</button>
                                   </div>
                                 </div>
-                                <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
+                                <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
                                   {breakdowns[c.id].map(item => (
                                     <div key={item.id} className="rounded-lg border border-slate-700 bg-slate-800/70 p-2">
                                       <div className="text-[11px] text-slate-400">{item.label}</div>
@@ -4583,12 +4380,7 @@ txnMerchantRef.current?.focus()
                 <button onClick={undoAccount} disabled={!accountHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoAccount} disabled={!accountRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${accountRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 {accounts.length > 0 && (
-                  <button onClick={() => {
-                    if (!accounts.length) return
-                    accounts.forEach(a => addPendingDelete('accounts', a.id))
-                    setAccountsWithHistory(() => [])
-                    showUndoableToast(`${accounts.length} account${accounts.length !== 1 ? 's' : ''} cleared`, undoAccount)
-                  }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                  <button onClick={() => { if (!accounts.length) return; setAccountsWithHistory(() => []); showUndoableToast(`${accounts.length} account${accounts.length !== 1 ? 's' : ''} cleared`, undoAccount) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
                 <button onClick={generateSampleAccount} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample account">Generate Sample</button>
               </div>
@@ -4598,18 +4390,18 @@ txnMerchantRef.current?.focus()
             {accounts.length > 0 ? (
               <Card title="Your Accounts" headerAction={<button onClick={() => setReconcileFAQOpen(true)} className="text-[10px] px-2 py-0.5 rounded-full border border-slate-600 text-slate-500 hover:text-slate-200 hover:border-slate-400 transition-colors">? reconcile help</button>}>
                 {/* V9.3 — Summary cards */}
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                   <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
                     <div className="text-xs text-slate-400 mb-0.5">Cash &amp; Bank</div>
                     <div className={`text-lg font-bold ${netWorthSummary.totalCash >= 0 ? 'text-green-400' : 'text-red-400'}`}>{currency(netWorthSummary.totalCash)}</div>
                   </div>
                   <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
                     <div className="text-xs text-slate-400 mb-0.5">Investments</div>
-                    <div className="text-lg font-bold font-num text-blue-300">{currency(netWorthSummary.totalInvestments)}</div>
+                    <div className="text-lg font-bold text-blue-300">{currency(netWorthSummary.totalInvestments)}</div>
                   </div>
                   <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
                     <div className="text-xs text-slate-400 mb-0.5">Total Debt</div>
-                    <div className="text-lg font-bold font-num text-red-400">{currency(netWorthSummary.totalDebt)}</div>
+                    <div className="text-lg font-bold text-red-400">{currency(netWorthSummary.totalDebt)}</div>
                   </div>
                   <div className="rounded-lg bg-slate-800 border border-slate-700/60 px-3 py-2.5">
                     <div className="text-xs text-slate-400 mb-0.5">Net Worth</div>
@@ -4629,17 +4421,17 @@ txnMerchantRef.current?.focus()
                   <span className="text-slate-400 font-medium">Imported Activity</span> = net effect of logged transactions for review only.{' '}
                   <span className="text-slate-400 font-medium">Unexplained</span> only appears after you reconcile an account; partial imports are not treated as errors.
                 </p>
-                <div className="overflow-x-auto h-scroll-visible">
+                <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-slate-400 border-b border-slate-700">
                         <th className="pb-1.5 pr-4 font-medium">Name</th>
                         <th className="pb-1.5 pr-4 font-medium">Type</th>
-                        <th className="pb-1.5 pr-4 font-medium text-right whitespace-nowrap">Current Balance</th>
-                        <th className="pb-1.5 pr-4 font-medium text-right whitespace-nowrap">Imported Activity</th>
+                        <th className="pb-1.5 pr-4 font-medium text-right">Current Balance</th>
+                        <th className="pb-1.5 pr-4 font-medium text-right">Imported Activity</th>
                         <th className="pb-1.5 pr-4 font-medium">Unexplained</th>
                         <th className="pb-1.5 pr-4 font-medium">Institution</th>
-                        <th className="pb-1.5 sticky-actions" />
+                        <th className="pb-1.5" />
                       </tr>
                     </thead>
                     <tbody>
@@ -4765,7 +4557,7 @@ txnMerchantRef.current?.focus()
                               ) : (a.institution || '—')}
                             </td>
                             {/* Actions */}
-                            <td className="py-2 whitespace-nowrap space-x-2 sticky-actions">
+                            <td className="py-2 whitespace-nowrap space-x-2">
                               {isEdit ? (
                                 <>
                                   <button className="text-green-400 hover:text-green-300 text-xs" onMouseDown={e => { e.preventDefault(); saveInlineAccountEdit(a.id) }}>Save</button>
@@ -4839,23 +4631,6 @@ txnMerchantRef.current?.focus()
             setTxnAccountFilter={setTxnAccountFilter}
             txnCategoryFilter={txnCategoryFilter}
             setTxnCategoryFilter={setTxnCategoryFilter}
-            txnMonthFilter={txnMonthFilter}
-            setTxnMonthFilter={setTxnMonthFilter}
-            availableTxnMonths={availableTxnMonths}
-            // V51 — faceted counts
-            txnCountsByAccount={txnCountsByAccount}
-            txnCountsByCategory={txnCountsByCategory}
-            txnMonthsWithCounts={txnMonthsWithCounts}
-            txnPillCounts={txnPillCounts}
-            filteredTxnNet={filteredTxnNet}
-            totalTxnCount={transactions.length}
-            // V52 — sort, top merchants, bulk recategorize
-            txnSortKey={txnSortKey}
-            setTxnSortKey={setTxnSortKey}
-            txnSortDir={txnSortDir}
-            setTxnSortDir={setTxnSortDir}
-            filteredTopMerchants={filteredTopMerchants}
-            bulkRecategorizeFiltered={bulkRecategorizeFiltered}
             txnListOpen={txnListOpen}
             setTxnListOpen={setTxnListOpen}
             deleteFilteredConfirm={deleteFilteredConfirm}
@@ -5177,13 +4952,7 @@ txnMerchantRef.current?.focus()
                 <button onClick={undoTxn} disabled={!txnHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoTxn} disabled={!txnRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${txnRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 {transactions.length > 0 && (
-                  <button onClick={() => {
-                    if (!transactions.length) return
-                    // V49 — queue cloud deletes before clearing local
-                    transactions.forEach(t => addPendingDelete('transactions', t.id))
-                    setTxnWithHistory(() => [])
-                    showUndoableToast(`${transactions.length} transaction${transactions.length !== 1 ? 's' : ''} cleared`, undoTxn)
-                  }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                  <button onClick={() => { if (!transactions.length) return; setTxnWithHistory(() => []); showUndoableToast(`${transactions.length} transaction${transactions.length !== 1 ? 's' : ''} cleared`, undoTxn) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
                 <button onClick={generateSampleTransaction} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a random sample transaction">Generate Sample</button>
                 <button onClick={generateTenSamples} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Add 10 varied samples — mixed categories, some uncategorized, some duplicate-like">Generate 10 Samples</button>
@@ -5351,12 +5120,7 @@ txnMerchantRef.current?.focus()
                 <button onClick={undoRule} disabled={!ruleHistory.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleHistory.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Undo</button>
                 <button onClick={redoRule} disabled={!ruleRedo.length} className={`rounded-lg px-3 py-1.5 text-sm ${ruleRedo.length ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-slate-500 cursor-not-allowed'}`}>Redo</button>
                 {rules.length > 0 && (
-                  <button onClick={() => {
-                    if (!rules.length) return
-                    rules.forEach(r => addPendingDelete('transaction_rules', r.id))
-                    setRulesWithHistory(() => [])
-                    showUndoableToast(`${rules.length} rule${rules.length !== 1 ? 's' : ''} cleared`, undoRule)
-                  }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
+                  <button onClick={() => { if (!rules.length) return; setRulesWithHistory(() => []); showUndoableToast(`${rules.length} rule${rules.length !== 1 ? 's' : ''} cleared`, undoRule) }} className="rounded-lg px-3 py-1.5 text-xs bg-red-900/60 hover:bg-red-800 text-red-300 transition-colors">Clear All</button>
                 )}
                 <button onClick={generateSampleRule} className="rounded-lg px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-400 border border-slate-700 transition-colors" title="Instantly add a sample rule">Generate Sample</button>
               </div>
@@ -5571,7 +5335,7 @@ txnMerchantRef.current?.focus()
             {/* ── Scenario inputs ── */}
             <Card title="Scenario Inputs">
               <div className="flex gap-2 mb-3">{periods.map(p => <Pill key={p} active={period === p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+              <div className="grid md:grid-cols-4 gap-2">
                 {(['Slow', 'Medium', 'Fast', 'Custom'] as ScenarioName[]).map(n => (
                   <div key={n}>
                     <label className="text-xs text-slate-400">{n}</label>
@@ -5655,11 +5419,7 @@ txnMerchantRef.current?.focus()
                             while (savedScenarios.find(x => x.name === dupeName)) { dupeName = `${dupeBase} ${i++}` }
                             setSavedScenarios(prev => [{ ...s, name: dupeName, savedAt: new Date().toISOString() }, ...prev])
                           }}>Duplicate</button>
-                          <button className="text-red-300 hover:text-red-200 text-xs" onClick={() => {
-                            setSavedScenarios(prev => prev.filter(x => x.name !== s.name))
-                            setScenarioNotes(prev => { const n = { ...prev }; delete n[s.name]; return n })
-                            if (appAuth.user) addPendingDelete('scenarios', `${appAuth.user.id}-scenario-${encodeURIComponent(s.name)}`)
-                          }}>Delete</button>
+                          <button className="text-red-300 hover:text-red-200 text-xs" onClick={() => { setSavedScenarios(prev => prev.filter(x => x.name !== s.name)); setScenarioNotes(prev => { const n = { ...prev }; delete n[s.name]; return n }) }}>Delete</button>
                         </div>
                       </div>
                       {/* Per-scenario notes */}
@@ -5979,12 +5739,7 @@ txnMerchantRef.current?.focus()
                 Redo
               </button>
               <button
-                onClick={() => {
-                  if (!targets.length) return
-                  targets.forEach(t => addPendingDelete('savings_goals', t.id))
-                  setTargetsWithHistory(() => [])
-                  showUndoableToast(`${targets.length} savings goal${targets.length !== 1 ? 's' : ''} cleared`, undoTarget)
-                }}
+                onClick={() => { if (!targets.length) return; setTargetsWithHistory(() => []); showUndoableToast(`${targets.length} savings goal${targets.length !== 1 ? 's' : ''} cleared`, undoTarget) }}
                 className="rounded-lg px-3 py-1.5 text-sm bg-red-900 hover:bg-red-800 text-red-200"
               >
                 Clear Savings Goals
@@ -6077,11 +5832,7 @@ txnMerchantRef.current?.focus()
                             }
                           }}>Load</button>
                           <button className="text-slate-400 hover:text-slate-300 text-sm" onClick={() => { setEditingSetIdx(idx); setRenameSetValue(s.name) }}>Rename</button>
-                          <button className="text-red-300 hover:text-red-200 text-sm" onClick={() => {
-                            pushSetHistory(savedTargetSets)
-                            setSavedTargetSets(prev => deleteGoalSet(prev, s.name))
-                            if (appAuth.user) addPendingDelete('savings_goal_sets', `${appAuth.user.id}-goalset-${encodeURIComponent(s.name)}`)
-                          }}>Delete</button>
+                          <button className="text-red-300 hover:text-red-200 text-sm" onClick={() => { pushSetHistory(savedTargetSets); setSavedTargetSets(prev => deleteGoalSet(prev, s.name)) }}>Delete</button>
                         </div>
                       </>
                     )}
