@@ -61,7 +61,7 @@ export function useTransactions() {
   const [deleteDupsConfirm, setDeleteDupsConfirm] = useState(false)
   const [deleteFilteredConfirm, setDeleteFilteredConfirm] = useState(false)
   const [csvImportIsPdf, setCsvImportIsPdf] = useState(false)
-  const [pdfPreviewRows, setPdfPreviewRows] = useState<Array<{ date: string; merchant: string; amount: number; confidence: 'high' | 'medium' | 'low'; isDup?: boolean }>>([])
+  const [pdfPreviewRows, setPdfPreviewRows] = useState<Array<{ date: string; merchant: string; amount: number; rawSign: number; confidence: 'high' | 'medium' | 'low'; isDup?: boolean }>>([])
   const [pdfParseWarning, setPdfParseWarning] = useState('')
   const [deletedTxns, setDeletedTxns] = useState<Transaction[]>([])
   const [showRecentlyDeleted, setShowRecentlyDeleted] = useState(false)

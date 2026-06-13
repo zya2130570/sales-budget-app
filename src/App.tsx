@@ -67,7 +67,7 @@ import {
 // V9.0 — CSV import pipeline
 import { runImportPipeline, buildImportedTransactions } from './utils/importHelpers'
 import type { ImportPipelineResult } from './utils/importHelpers'
-import { parseCsv, detectColumns, generateSampleCsvString } from './utils/csv'
+import { parseCsv, detectColumns, generateSampleCsvString, detectBankFromAccountName } from './utils/csv'
 // V10.1 — extracted helpers
 import { normalizeMerchant } from './utils/merchantNormalization'
 import { loadCategoryMemory, saveCategoryMemory } from './utils/categoryMemory'
@@ -205,7 +205,7 @@ function extractCategoryHints(rows: Array<Record<string, string>>): Record<strin
 const PAYMENT_PATTERNS = /payment|transfer|zelle|venmo|paypal|apple cash|e-payment|gsbank|discover e|online transfer/i
 
 // ── V9.9 PDF Import ───────────────────────────────────────────────────────────
-type PdfImportRow = { date: string; merchant: string; amount: number; confidence: 'high' | 'medium' | 'low'; isDup?: boolean }
+type PdfImportRow = { date: string; merchant: string; amount: number; rawSign: number; confidence: 'high' | 'medium' | 'low'; isDup?: boolean }
 
 /**
  * Extract transaction rows from raw PDF text (text-based/accessible PDFs only).
@@ -230,7 +230,8 @@ function parsePdfText(raw: string): { rows: PdfImportRow[]; warning: string } {
   const patB = /(-?[\d,]+\.\d{2})\s+([\w *&\-'/.,#]{3,55}?)\s+(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)/g
 
   const addRow = (dateRaw: string, desc: string, amtRaw: string) => {
-    const amount = Math.abs(parseFloat(amtRaw.replace(/,/g, '')))
+    const raw = parseFloat(amtRaw.replace(/,/g, ''))
+    const amount = Math.abs(raw)
     if (!amount || amount > 99_999) return
     const parts = dateRaw.split('/')
     const month = String(parseInt(parts[0])).padStart(2, '0')
@@ -243,7 +244,7 @@ function parsePdfText(raw: string): { rows: PdfImportRow[]; warning: string } {
     const key = `${date}|${merchant.toLowerCase()}|${amount.toFixed(2)}`
     if (seen.has(key)) return
     seen.add(key)
-    rows.push({ date, merchant, amount, confidence: 'medium' })
+    rows.push({ date, merchant, amount, rawSign: Math.sign(raw), confidence: 'medium' })
   }
 
   let m: RegExpExecArray | null
@@ -2174,6 +2175,9 @@ txnMerchantRef.current?.focus()
   const openCsvImport = () => {
     setCsvImportOpen(true)
     resetImportSession()
+    // Auto-detect bank from the currently selected (or default) account
+    const acct = accounts.find(a => a.id === csvImportAccountId) ?? accounts[0]
+    if (acct) setCsvImportPreset(detectBankFromAccountName(acct.name) as typeof csvImportPreset)
   }
   const closeCsvImport = () => {
     setCsvImportOpen(false)
@@ -2290,7 +2294,7 @@ txnMerchantRef.current?.focus()
       accountId: effectiveAccountId,
       merchant: r.merchant,
       amount: r.amount,
-      type: (PAYMENT_PATTERNS.test(r.merchant) ? 'credit card payment' : 'expense') as TransactionType,
+      type: (PAYMENT_PATTERNS.test(r.merchant) ? 'credit card payment' : /salary|payroll|direct deposit|deposit|income|interest earned|dividend/i.test(r.merchant) || r.rawSign < 0 ? 'income' : 'expense') as TransactionType,
       batchId,
       importBatchId: batchId,
       importedCategoryHint: 'pdf',
@@ -2743,15 +2747,46 @@ txnMerchantRef.current?.focus()
   // V12.4 — Local-first cloud persistence. localStorage remains runtime source of truth.
   // V14 — AI assistant
   const aiAssistant = useAIAssistant()
-  const aiContext = useMemo(() => ({
-    income: { monthlyNet: inc.totalMonthly, weeklyNet: convertFromMonthly(inc.totalMonthly, 'weekly') },
-    budget: { monthlyTotal: monthlyBudget, monthlyRemaining: monthlyLeft, isOverIncome: monthlyBudget > inc.totalMonthly },
-    cashFlow: { status: cashFlowForecast.status, projectedEnd: cashFlowForecast.projectedEnd, safeToSpend: cashFlowForecast.safeToSpend },
-    categories: categories.slice(0, 12).map(c => ({ name: c.name, type: c.type, monthlyBudget: c.amount })),
-    savingsGoals: targets.filter(t => !t.completed).map(t => ({ name: t.name, saved: t.currentSaved, goal: t.goalAmount, deadline: t.deadline, pct: t.goalAmount > 0 ? Math.round((t.currentSaved / t.goalAmount) * 100) : 0 })),
-    recentSpending: { last30DaysTotal: monthlyReview.expenses, txnCount: monthlyReview.txns.length, reviewMonth },
-    currentInsights: spendingInsights.map(i => `[${i.priority}] ${i.title}`),
-  }), [inc, monthlyBudget, monthlyLeft, cashFlowForecast, categories, targets, monthlyReview, reviewMonth, spendingInsights])
+  const aiContext = useMemo(() => {
+    // Group all transactions by month for full history
+    const byMonth: Record<string, { income: number; expenses: number; count: number }> = {}
+    for (const tx of transactions) {
+      const ym = tx.date.slice(0, 7)
+      if (!byMonth[ym]) byMonth[ym] = { income: 0, expenses: 0, count: 0 }
+      if (tx.type === 'income') byMonth[ym].income += tx.amount
+      else if (tx.type === 'expense') byMonth[ym].expenses += tx.amount
+      byMonth[ym].count++
+    }
+    // Category actuals (all time per category)
+    const catActuals = categories.map(c => {
+      const txnsForCat = transactions.filter(tx => tx.categoryId === c.id && tx.type === 'expense')
+      const monthsWithData = new Set(txnsForCat.map(tx => tx.date.slice(0, 7))).size
+      const total = txnsForCat.reduce((s, tx) => s + tx.amount, 0)
+      const avgMonthly = monthsWithData > 0 ? Math.round(total / monthsWithData) : 0
+      return { name: c.name, type: c.type, monthlyBudget: c.amount, avgMonthlyActual: avgMonthly }
+    })
+    return {
+      period,
+      income: { monthlyNet: inc.totalMonthly, weeklyNet: convertFromMonthly(inc.totalMonthly, 'weekly'), grossAnnual: adjustedSalary },
+      budget: { monthlyTotal: monthlyBudget, monthlyRemaining: monthlyLeft, isOverIncome: monthlyBudget > inc.totalMonthly },
+      cashFlow: { status: cashFlowForecast.status, projectedEnd: cashFlowForecast.projectedEnd, safeToSpend: cashFlowForecast.safeToSpend },
+      accounts: accounts.map(a => ({ name: a.name, type: a.type, balance: a.balance ?? 0 })),
+      extraIncomes: extraIncomes.map(e => ({ label: e.label, monthlyAmount: e.monthlyAmount })),
+      categories: catActuals,
+      savingsGoals: targets.filter(t => !t.completed).map(t => ({ name: t.name, saved: t.currentSaved, goal: t.goalAmount, deadline: t.deadline, pct: t.goalAmount > 0 ? Math.round((t.currentSaved / t.goalAmount) * 100) : 0 })),
+      spendingHistory: byMonth,
+      totalTransactions: transactions.length,
+      recentMonth: {
+        month: reviewMonth,
+        income: monthlyReview.income,
+        expenses: monthlyReview.expenses,
+        netCash: monthlyReview.netCash,
+        txnCount: monthlyReview.txns.length,
+        topCategories: monthlyReview.catBreakdown.slice(0, 8).map(b => ({ name: b.name, actual: b.actual, budget: b.planned })),
+      },
+      currentInsights: spendingInsights.map(i => `[${i.priority}] ${i.title}`),
+    }
+  }, [inc, period, adjustedSalary, monthlyBudget, monthlyLeft, cashFlowForecast, accounts, extraIncomes, categories, targets, transactions, monthlyReview, reviewMonth, spendingInsights])
 
   const cloudPersistence = useCloudPersistence({
     accounts,
@@ -2813,7 +2848,7 @@ txnMerchantRef.current?.focus()
       <div className="min-h-screen" style={{ marginLeft: effectiveSidebarW, width: `calc(100vw - ${effectiveSidebarW}px)`, minWidth: 0, transition: 'margin-left 0.2s cubic-bezier(0.4,0,0.2,1), width 0.2s cubic-bezier(0.4,0,0.2,1)' }}>
 
         {/* Compact sticky header — logo + utility only, no tabs */}
-        <header style={{ position: 'sticky', top: 0, zIndex: 30, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', height: 48, borderBottom: '1px solid rgba(255,255,255,0.05)', background: 'rgba(11,11,15,0.95)', backdropFilter: 'blur(12px)' }}>
+        <header style={{ position: 'sticky', top: 0, zIndex: 30, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', height: 48, borderBottom: theme === 'dark' ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.09)', background: theme === 'dark' ? 'rgba(11,11,15,0.95)' : 'rgba(248,249,250,0.95)', backdropFilter: 'blur(12px)' }}>
           <div className="flex items-center gap-2">
             <VersionBadge version={CURRENT_VERSION} open={versionOpen} onOpenChange={setVersionOpen} />
           </div>
@@ -6040,7 +6075,14 @@ txnMerchantRef.current?.focus()
           preset={csvImportPreset}
           columnMapping={csvColumnMapping}
           onPresetChange={p => { setCsvImportPreset(p); setCsvImportPreview(null); setCsvColumnMapping(null); setCsvImportIsPdf(p === 'chase-pdf-experimental') }}
-          onImportAccountChange={id => { setCsvImportAccountId(id); setCsvImportPreview(null); setCsvCategoryHints({}); setPdfPreviewRows([]) }}
+          onImportAccountChange={id => {
+            setCsvImportAccountId(id)
+            setCsvImportPreview(null)
+            setCsvCategoryHints({})
+            setPdfPreviewRows([])
+            const acct = accounts.find(a => a.id === id)
+            if (acct) setCsvImportPreset(detectBankFromAccountName(acct.name) as typeof csvImportPreset)
+          }}
           onImportMonthChange={setCsvImportMonth}
           onFileSelect={handleCsvFileSelect}
           onDrop={handleCsvDrop}

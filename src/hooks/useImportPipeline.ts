@@ -6,6 +6,7 @@ export type PdfImportPreviewRow = {
   date: string
   merchant: string
   amount: number
+  rawSign: number
   confidence: 'high' | 'medium' | 'low'
   isDup?: boolean
 }

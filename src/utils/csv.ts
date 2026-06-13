@@ -114,6 +114,17 @@ export function getBankTemplate(id: string): BankTemplate | undefined {
   return BANK_TEMPLATES.find(t => t.id === id)
 }
 
+export function detectBankFromAccountName(name: string): string {
+  const n = name.toLowerCase()
+  if (n.includes('apple card') || (n.includes('apple') && n.includes('card'))) return 'apple-card'
+  if (n.includes('chase')) return 'chase-csv'
+  if (n.includes('bank of america') || n.includes('bofa') || n.includes('boa')) return 'bofa'
+  if (n.includes('wells fargo') || n.includes('wellsfargo')) return 'wellsfargo'
+  if (n.includes('capital one') || n.includes('capitalone')) return 'capitalone'
+  if (n.includes('citi')) return 'citi'
+  return 'generic-csv'
+}
+
 // ── V9.0 CSV Parser ───────────────────────────────────────────────────────────
 // Pure, side-effect-free CSV parsing utilities.
 // Handles quoted fields, escaped quotes, CRLF, LF, and trailing newlines.
