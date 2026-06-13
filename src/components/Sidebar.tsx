@@ -66,6 +66,19 @@ type Props = {
 }
 
 export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile, onOpenKeyboardShortcuts, collapsed, onToggle, theme = 'dark', onToggleTheme, onSync, onOpenAIChat, onOpenCloud, onOpenVersion, onWidthChange }: Props) {
+  const isDark = theme === 'dark'
+  const sidebarBg    = isDark ? '#0D0D11' : '#F8F9FA'
+  const borderColor  = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.09)'
+  const textMuted    = isDark ? 'rgba(255,255,255,0.35)' : 'rgba(0,0,0,0.45)'
+  const textMutedHov = isDark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.75)'
+  const textSubtle   = isDark ? 'rgba(255,255,255,0.42)' : 'rgba(0,0,0,0.52)'
+  const textActive   = isDark ? 'rgba(255,255,255,0.92)' : 'rgba(0,0,0,0.90)'
+  const activeBg     = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)'
+  const hoverBg      = isDark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.03)'
+  const kbdBg        = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'
+  const kbdBorder    = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.10)'
+  const kbdColor     = isDark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.35)'
+  const logoText     = isDark ? 'rgba(255,255,255,0.9)' : 'rgba(0,0,0,0.85)'
 
   // V42 — keyboard shortcuts read from saved bindings (rebindable via KeyboardShortcutsPanel)
   useEffect(() => {
@@ -152,15 +165,18 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
     <aside
       style={{
         position: 'fixed', top: 0, left: 0, bottom: 0, width: W, zIndex: 40,
-        background: '#0D0D11',
-        borderRight: '1px solid rgba(255,255,255,0.05)',
+        background: sidebarBg,
+        borderRight: `1px solid ${borderColor}`,
         transition: dragging.current ? 'none' : 'width 0.2s cubic-bezier(0.4,0,0.2,1)',
         display: 'flex', flexDirection: 'column',
         overflow: 'hidden',
       }}
     >
-      {/* Logo */}
-      <div style={{ padding: (collapsed || isMobile) ? '18px 0' : '18px 16px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+      {/* Logo — clickable → Dashboard */}
+      <button
+        onClick={() => onNavigate('Dashboard')}
+        style={{ padding: (collapsed || isMobile) ? '18px 0' : '18px 16px', display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, background: 'transparent', border: 'none', borderBottom: `1px solid ${borderColor}`, cursor: 'pointer', width: '100%' }}
+      >
         {(collapsed || isMobile)
           ? <div style={{ width: W, display: 'flex', justifyContent: 'center' }}>
               <div style={{ width: 28, height: 28, borderRadius: 6, background: 'linear-gradient(135deg,#5B6AF0,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -171,10 +187,10 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
               <div style={{ width: 28, height: 28, borderRadius: 6, background: 'linear-gradient(135deg,#5B6AF0,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 <span style={{ color: 'white', fontSize: 14, fontWeight: 700 }}>F</span>
               </div>
-              <span style={{ color: 'rgba(255,255,255,0.9)', fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px', whiteSpace: 'nowrap' }}>Flow</span>
+              <span style={{ color: logoText, fontSize: 17, fontWeight: 700, letterSpacing: '-0.3px', whiteSpace: 'nowrap' }}>Flow</span>
             </>
         }
-      </div>
+      </button>
 
       {/* Nav items */}
       <nav style={{ flex: 1, padding: '8px 0', overflowY: 'auto', overflowX: 'hidden' }}>
@@ -200,7 +216,7 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
                 <span style={{ color: item.color, opacity: isActive ? 1 : 0.85, display: 'flex' }}>{item.icon}</span>
                 <span style={{
                   fontSize: 10, lineHeight: 1.15, textAlign: 'center', whiteSpace: 'nowrap',
-                  color: isActive ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.5)',
+                  color: isActive ? textActive : textSubtle,
                   fontWeight: isActive ? 600 : 500,
                   maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis',
                 }}>{item.label === 'Savings Goals' ? 'Goals' : item.label === 'Transactions' ? 'Txns' : item.label}</span>
@@ -217,23 +233,23 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
                 width: '100%', display: 'flex', alignItems: 'center',
                 gap: 12, padding: collapsed ? '10px 0' : '10px 18px',
                 justifyContent: collapsed ? 'center' : 'flex-start',
-                background: isActive ? 'rgba(255,255,255,0.07)' : 'transparent',
+                background: isActive ? activeBg : 'transparent',
                 borderLeft: isActive ? '2px solid #5B6AF0' : '2px solid transparent',
-                color: isActive ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.42)',
+                color: isActive ? textActive : textSubtle,
                 fontSize: 15, fontWeight: isActive ? 600 : 500,
                 cursor: 'pointer', border: 'none', outline: 'none',
                 transition: 'all 0.12s ease',
                 whiteSpace: 'nowrap',
                 borderRadius: 0,
               }}
-              onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.72)'; (e.currentTarget as HTMLElement).style.background = isActive ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.03)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = isActive ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.42)'; (e.currentTarget as HTMLElement).style.background = isActive ? 'rgba(255,255,255,0.07)' : 'transparent' }}
+              onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLElement).style.color = isDark ? 'rgba(255,255,255,0.72)' : 'rgba(0,0,0,0.80)'; (e.currentTarget as HTMLElement).style.background = isActive ? activeBg : hoverBg }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = isActive ? textActive : textSubtle; (e.currentTarget as HTMLElement).style.background = isActive ? activeBg : 'transparent' }}
             >
               <span style={{ flexShrink: 0, opacity: isActive ? 1 : 0.7 }}>{item.icon}</span>
               {!collapsed && (
                 <>
                   <span style={{ flex: 1, textAlign: 'left' }}>{item.label}</span>
-                  <kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>{item.shortcut}</kbd>
+                  <kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: kbdBg, border: `1px solid ${kbdBorder}`, color: kbdColor, fontFamily: 'monospace', flexShrink: 0 }}>{item.shortcut}</kbd>
                 </>
               )}
             </button>
@@ -242,7 +258,7 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
       </nav>
 
       {/* Bottom: Settings + Collapse */}
-      <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', padding: '8px 0', flexShrink: 0 }}>
+      <div style={{ borderTop: `1px solid ${borderColor}`, padding: '8px 0', paddingBottom: isMobile ? '28px' : '8px', flexShrink: 0 }}>
 
         {/* Theme toggle */}
         {onToggleTheme && (
@@ -253,12 +269,12 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
               width: '100%', display: 'flex', alignItems: 'center', gap: 10,
               padding: compact ? '8px 0' : '7px 16px',
               justifyContent: compact ? 'center' : 'flex-start',
-              color: 'rgba(255,255,255,0.35)', fontSize: 15,
+              color: textMuted, fontSize: 15,
               background: 'transparent', border: 'none', cursor: 'pointer',
               transition: 'color 0.12s ease',
             }}
-            onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.65)'}
-            onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.35)'}
+            onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = textMutedHov}
+            onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = textMuted}
           >
             {theme === 'dark' ? (
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -269,7 +285,7 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
                 <path d="M13.5 10.5A6 6 0 0 1 5.5 2.5 6.5 6.5 0 1 0 13.5 10.5z"/>
               </svg>
             )}
-            {!compact && <><span style={{ flex: 1, textAlign: 'left' }}>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span><kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>T</kbd></>}
+            {!compact && <><span style={{ flex: 1, textAlign: 'left' }}>{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span><kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: kbdBg, border: `1px solid ${kbdBorder}`, color: kbdColor, fontFamily: 'monospace', flexShrink: 0 }}>T</kbd></>}
           </button>
         )}
 
@@ -282,17 +298,17 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
               width: '100%', display: 'flex', alignItems: 'center', gap: 10,
               padding: compact ? '8px 0' : '7px 16px',
               justifyContent: compact ? 'center' : 'flex-start',
-              color: 'rgba(255,255,255,0.35)', fontSize: 15,
+              color: textMuted, fontSize: 15,
               background: 'transparent', border: 'none', cursor: 'pointer',
               transition: 'color 0.12s ease',
             }}
-            onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.65)'}
-            onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.35)'}
+            onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = textMutedHov}
+            onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = textMuted}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="1.5" y="3" width="13" height="10" rx="1.5"/><path d="M4 6h.01M6.5 6h.01M9 6h.01M11.5 6h.01M4 8.5h.01M6.5 8.5h.01M9 8.5h.01M5 11h6"/>
             </svg>
-            {!compact && <><span style={{ flex: 1, textAlign: 'left' }}>Keyboard shortcuts</span><kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>?</kbd></>}
+            {!compact && <><span style={{ flex: 1, textAlign: 'left' }}>Keyboard shortcuts</span><kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: kbdBg, border: `1px solid ${kbdBorder}`, color: kbdColor, fontFamily: 'monospace', flexShrink: 0 }}>?</kbd></>}
           </button>
         )}
 
@@ -305,18 +321,18 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
               width: '100%', display: 'flex', alignItems: 'center', gap: 10,
               padding: compact ? '8px 0' : '7px 16px',
               justifyContent: compact ? 'center' : 'flex-start',
-              color: 'rgba(255,255,255,0.45)', fontSize: 15,
+              color: isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.55)', fontSize: 15,
               background: 'transparent', border: 'none', cursor: 'pointer',
               transition: 'color 0.12s ease',
             }}
-            onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.75)'}
-            onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.45)'}
+            onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = isDark ? 'rgba(255,255,255,0.75)' : 'rgba(0,0,0,0.85)'}
+            onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = isDark ? 'rgba(255,255,255,0.45)' : 'rgba(0,0,0,0.55)'}
           >
             <span style={{ width: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>✦</span>
             {!compact && (
               <>
                 <span style={{ flex: 1, textAlign: 'left' }}>AI Assistant</span>
-                <kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>8</kbd>
+                <kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: kbdBg, border: `1px solid ${kbdBorder}`, color: kbdColor, fontFamily: 'monospace', flexShrink: 0 }}>8</kbd>
               </>
             )}
           </button>
@@ -330,17 +346,17 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
             width: '100%', display: 'flex', alignItems: 'center', gap: 10,
             padding: compact ? '8px 0' : '7px 16px',
             justifyContent: compact ? 'center' : 'flex-start',
-            color: 'rgba(255,255,255,0.35)', fontSize: 15,
+            color: textMuted, fontSize: 15,
             background: 'transparent', border: 'none', cursor: 'pointer',
             transition: 'color 0.12s ease',
           }}
-          onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.65)'}
-          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.35)'}
+          onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = textMutedHov}
+          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = textMuted}
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="8" cy="8" r="2"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/>
           </svg>
-          {!compact && <><span style={{ flex: 1, textAlign: 'left' }}>Settings</span><kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.28)', fontFamily: 'monospace', flexShrink: 0 }}>0</kbd></>}
+          {!compact && <><span style={{ flex: 1, textAlign: 'left' }}>Settings</span><kbd style={{ fontSize: 10, padding: '1px 5px', borderRadius: 4, background: kbdBg, border: `1px solid ${kbdBorder}`, color: kbdColor, fontFamily: 'monospace', flexShrink: 0 }}>0</kbd></>}
         </button>
 
         {/* Collapse toggle — hidden on mobile (V56: no expand/collapse cycling needed) */}
@@ -352,12 +368,12 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
             width: '100%', display: 'flex', alignItems: 'center', gap: 10,
             padding: compact ? '8px 0' : '7px 16px',
             justifyContent: compact ? 'center' : 'flex-start',
-            color: 'rgba(255,255,255,0.25)', fontSize: 15,
+            color: isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.30)', fontSize: 15,
             background: 'transparent', border: 'none', cursor: 'pointer',
             transition: 'color 0.12s ease',
           }}
-          onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.55)'}
-          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = 'rgba(255,255,255,0.25)'}
+          onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.60)'}
+          onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = isDark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.30)'}
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             {compact
@@ -365,12 +381,12 @@ export function Sidebar({ currentTab, onNavigate, onOpenSettings, onOpenProfile,
               : <path d="M10 3L5 8l5 5M14 8H5"/>
             }
           </svg>
-          {!compact && <span style={{ fontSize: 12, letterSpacing: '0.02em' }}>Collapse <kbd style={{ fontSize: 10, padding: '0 4px', borderRadius: 3, background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', fontFamily: 'monospace' }}>[</kbd></span>}
+          {!compact && <span style={{ fontSize: 12, letterSpacing: '0.02em' }}>Collapse <kbd style={{ fontSize: 10, padding: '0 4px', borderRadius: 3, background: kbdBg, border: `1px solid ${kbdBorder}`, fontFamily: 'monospace' }}>[</kbd></span>}
         </button>
         )}
       </div>
       {/* V41 — drag handle on right edge */}
-      {!compact && (
+      {!compact && !isMobile && (
         <div
           onMouseDown={onMouseDown}
           style={{
