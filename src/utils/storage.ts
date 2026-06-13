@@ -1,4 +1,4 @@
-import type { Tab, Period, Category, SavedBudget, SavedScenarioSet, Target, SavedTargetSet, Account, Transaction, TransactionRule, TakeHomeSettings, ImportBatch, ExtraIncome, ExportRecord } from '../types'
+import type { Tab, Period, Category, SavedBudget, SavedScenarioSet, Target, SavedTargetSet, Account, Transaction, TransactionRule, TakeHomeSettings, ImportBatch, ExtraIncome, ExportRecord, PayStub } from '../types'
 import { CURRENT_SCHEMA_VERSION } from '../types'
 import { STORAGE_KEYS } from './storageKeys'
 import { wsKey } from './workspace'
@@ -447,6 +447,13 @@ export function applyCloudRestoreToLocalStorage(data: {
 }
 
 // ─── V45: Extra incomes ───────────────────────────────────────────────────────
+
+export function loadPayStubs(): PayStub[] | null {
+  return storageGet<PayStub[]>('flow-pay-stubs')
+}
+export function savePayStubs(stubs: PayStub[]): void {
+  saveToStorage('flow-pay-stubs', stubs)
+}
 
 export function loadExtraIncomes(): ExtraIncome[] {
   return storageGet<ExtraIncome[]>(STORAGE_KEYS.extraIncomes) ?? []
