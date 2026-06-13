@@ -152,9 +152,20 @@ export type MonthlyReview = {
   checklist?: Record<string, boolean>
 }
 
-export type TakeHomeMode = 'simple' | 'manual'
+export type TakeHomeMode = 'simple' | 'manual' | 'paystub'
 export type TakeHomeSettings = { mode: TakeHomeMode; simpleRate: number; manualMonthlyNet: number; baseSalary?: number; updatedAt?: string }
 export const DEFAULT_TAKE_HOME_SETTINGS: TakeHomeSettings = { mode: "simple", simpleRate: 0.8243, manualMonthlyNet: 0 }
+
+export type PayFrequency = 'weekly' | 'bi-weekly' | 'semi-monthly' | 'monthly'
+export type PayStub = {
+  id: string
+  date: string
+  netPay: number
+  grossPay: number
+  payFrequency: PayFrequency
+  isActive: boolean
+  label?: string
+}
 
 // V45 — additional income sources (side income, rental, partner, etc.)
 export type ExtraIncome = { id: string; label: string; monthlyAmount: number }

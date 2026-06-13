@@ -74,22 +74,30 @@ export function commission(gp: number): number {
 
 // --- Income breakdown ---------------------------------------------------------
 
-export function income(gp: number, adjustedSalary: number) {
+export function annualizeFromPaycheck(netPay: number, frequency: string): number {
+  const multipliers: Record<string, number> = {
+    'weekly': 52, 'bi-weekly': 26, 'semi-monthly': 24, 'monthly': 12,
+  }
+  return netPay * (multipliers[frequency] ?? 26)
+}
+
+export function income(gp: number, adjustedSalary: number, takeHomeRate?: number) {
+  const rate = takeHomeRate ?? TAKE_HOME_RATE
   const baseGrossMonthly = adjustedSalary / 12
-  const baseMonthly = baseGrossMonthly * TAKE_HOME_RATE
+  const baseMonthly = baseGrossMonthly * rate
   const c = commission(gp)
   const totalMonthly = baseMonthly + c
   return {
     baseGrossMonthly,
     baseMonthly,
-    baseWeekly:    (adjustedSalary / 52) * TAKE_HOME_RATE,
-    baseBiWeekly:  (adjustedSalary / 26) * TAKE_HOME_RATE,
+    baseWeekly:    (adjustedSalary / 52) * rate,
+    baseBiWeekly:  (adjustedSalary / 26) * rate,
     cMonthly:      c,
     cWeekly:       c / 4,
     cBiWeekly:     c / 2,
     totalMonthly,
-    totalWeekly:   ((adjustedSalary / 52) * TAKE_HOME_RATE) + c / 4,
-    totalBiWeekly: ((adjustedSalary / 26) * TAKE_HOME_RATE) + c / 2,
+    totalWeekly:   ((adjustedSalary / 52) * rate) + c / 4,
+    totalBiWeekly: ((adjustedSalary / 26) * rate) + c / 2,
     commissionPct: totalMonthly > 0 ? (c / totalMonthly) * 100 : 0,
   }
 }

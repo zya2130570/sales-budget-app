@@ -8,7 +8,6 @@ import {
   convertFromMonthly,
   convertToMonthly,
   annualizeFromPaycheck,
-  periodAmountsFromAnnual,
   remainingTierFromPeriodValue,
   income,
   estimateTaxBreakdown,
@@ -442,19 +441,12 @@ export default function App() {
     return v ? Number(v) : 40000
   })
   // V56 — takeHomeSettings as real state so mode changes (simple/manual/paystub) drive income() reactively
-  const [takeHomeSettings, setTakeHomeSettingsState] = useState<TakeHomeSettings>(() =>
+  const [takeHomeSettings, _setTakeHomeSettings] = useState<TakeHomeSettings>(() =>
     loadTakeHomeSettings() ?? ZYAN_PERSONAL_PRELOAD.takeHomeSettings
   )
-  const setTakeHomeSettings = (updater: TakeHomeSettings | ((prev: TakeHomeSettings) => TakeHomeSettings)) => {
-    setTakeHomeSettingsState(prev => {
-      const next = typeof updater === 'function' ? (updater as (p: TakeHomeSettings) => TakeHomeSettings)(prev) : updater
-      saveTakeHomeSettings(next)
-      return next
-    })
-  }
   useEffect(() => { saveTakeHomeSettings(takeHomeSettings) }, [takeHomeSettings])
   // V56 — Pay stub history
-  const [payStubs, setPayStubs] = useState<PayStub[]>(() => loadPayStubs() ?? [])
+  const [payStubs, _setPayStubs] = useState<PayStub[]>(() => loadPayStubs() ?? [])
   useEffect(() => { savePayStubs(payStubs) }, [payStubs])
 
   // V45 — extra income sources (side income, rental, partner, etc.)
@@ -762,6 +754,9 @@ export default function App() {
   const [txnSearch, setTxnSearch]               = useState('')
   const [txnAccountFilter, setTxnAccountFilter] = useState('')
   const [txnCategoryFilter, setTxnCategoryFilter] = useState('')
+  const [txnMonthFilter, setTxnMonthFilter] = useState('')
+  const [txnSortKey, setTxnSortKey] = useState<'date' | 'amount' | 'merchant'>('date')
+  const [txnSortDir, setTxnSortDir] = useState<'asc' | 'desc'>('desc')
   // V9.6.1 — Duplicate resolution: IDs the user has explicitly dismissed from dup review
   const [dismissedDupIds, setDismissedDupIds]   = useState<Set<string>>(new Set())
   // V9.7 — Duplicate resolution: confirmed-as-intentional IDs (badge changes to "Kept Both")
@@ -2600,12 +2595,78 @@ txnMerchantRef.current?.focus()
         if (txnAccountFilter && tx.accountId !== txnAccountFilter) return false
         if (txnCategoryFilter === '__none__' && tx.categoryId) return false
         if (txnCategoryFilter && txnCategoryFilter !== '__none__' && tx.categoryId !== txnCategoryFilter) return false
+        if (txnMonthFilter && !tx.date.startsWith(txnMonthFilter)) return false
         return true
       })
-      .sort((a, b) => b.date.localeCompare(a.date)),
-    [transactions, txnFilter, txnSearch, txnAccountFilter, txnCategoryFilter, dismissedDupIds]
+      .sort((a, b) => {
+        let cmp = 0
+        if (txnSortKey === 'date') cmp = a.date.localeCompare(b.date)
+        else if (txnSortKey === 'amount') cmp = a.amount - b.amount
+        else if (txnSortKey === 'merchant') cmp = a.merchant.localeCompare(b.merchant)
+        return txnSortDir === 'asc' ? cmp : -cmp
+      }),
+    [transactions, txnFilter, txnSearch, txnAccountFilter, txnCategoryFilter, txnMonthFilter, txnSortKey, txnSortDir, dismissedDupIds]
   )
-  const hasActiveFilters = txnFilter !== 'all' || !!txnSearch || !!txnAccountFilter || !!txnCategoryFilter
+  const hasActiveFilters = txnFilter !== 'all' || !!txnSearch || !!txnAccountFilter || !!txnCategoryFilter || !!txnMonthFilter
+
+  const availableTxnMonths = useMemo(() => {
+    const months = new Set(transactions.map(tx => tx.date.slice(0, 7)))
+    return Array.from(months).sort().reverse()
+  }, [transactions])
+
+  const txnCountsByAccount = useMemo(() => {
+    const counts: Record<string, number> = { __all__: filteredTxns.length }
+    for (const tx of filteredTxns) counts[tx.accountId] = (counts[tx.accountId] ?? 0) + 1
+    return counts
+  }, [filteredTxns])
+
+  const txnCountsByCategory = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const tx of filteredTxns) counts[tx.categoryId ?? '__none__'] = (counts[tx.categoryId ?? '__none__'] ?? 0) + 1
+    return counts
+  }, [filteredTxns])
+
+  const txnMonthsWithCounts = useMemo(() => {
+    const countMap: Record<string, number> = {}
+    for (const tx of transactions) {
+      const ym = tx.date.slice(0, 7)
+      countMap[ym] = (countMap[ym] ?? 0) + 1
+    }
+    return Object.entries(countMap).sort((a, b) => b[0].localeCompare(a[0])).map(([ym, count]) => ({ ym, count }))
+  }, [transactions])
+
+  const txnPillCounts = useMemo(() => {
+    const counts: Record<string, number> = {
+      all: transactions.length,
+      uncategorized: transactions.filter(tx => tx.type === 'expense' && !tx.categoryId).length,
+      'needs-review': transactions.filter(tx => txNeedsReview(tx, transactions, dismissedDupIds)).length,
+    }
+    for (const tx of transactions) counts[tx.type] = (counts[tx.type] ?? 0) + 1
+    return counts
+  }, [transactions, dismissedDupIds])
+
+  const filteredTxnNet = useMemo(() =>
+    filteredTxns.reduce((sum, tx) => {
+      if (tx.type === 'expense' || tx.type === 'credit card payment') return sum - tx.amount
+      if (tx.type === 'income') return sum + tx.amount
+      return sum
+    }, 0)
+  , [filteredTxns])
+
+  const totalTxnCount = transactions.length
+
+  const filteredTopMerchants = useMemo(() => {
+    const totals: Record<string, number> = {}
+    for (const tx of filteredTxns) {
+      if (tx.type === 'expense') totals[tx.merchant] = (totals[tx.merchant] ?? 0) + tx.amount
+    }
+    return Object.entries(totals).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([merchant, total]) => ({ merchant, total }))
+  }, [filteredTxns])
+
+  const bulkRecategorizeFiltered = (categoryId: string) => {
+    const ids = new Set(filteredTxns.map(tx => tx.id))
+    setTxnWithHistory(prev => prev.map(tx => ids.has(tx.id) ? { ...tx, categoryId } : tx))
+  }
 
   // V9.12 — Goal planning summary
   const goalPlanSummary = useMemo(() => {
@@ -2897,7 +2958,6 @@ txnMerchantRef.current?.focus()
           onClose={() => setSettingsOpen(false)}
           onLoadDemo={handleLoadDemo}
           onClearAllData={handleClearAllData}
-          onDownloadBackup={downloadBackupFile}
           onImportFromFile={handleImportFromFile}
           lastSyncedAt={cloudPersistence.lastSyncedAt}
           version={CURRENT_VERSION}
@@ -3033,7 +3093,7 @@ txnMerchantRef.current?.focus()
 
             {/* V44 #7 — Year-over-year spending history */}
             <YearOverYearPanel
-              allActualsByPeriod={allActualsByPeriod}
+              transactions={transactions}
               categories={categories}
             />
 
@@ -4631,6 +4691,21 @@ txnMerchantRef.current?.focus()
             setTxnAccountFilter={setTxnAccountFilter}
             txnCategoryFilter={txnCategoryFilter}
             setTxnCategoryFilter={setTxnCategoryFilter}
+            txnMonthFilter={txnMonthFilter}
+            setTxnMonthFilter={setTxnMonthFilter}
+            availableTxnMonths={availableTxnMonths}
+            txnCountsByAccount={txnCountsByAccount}
+            txnCountsByCategory={txnCountsByCategory}
+            txnMonthsWithCounts={txnMonthsWithCounts}
+            txnPillCounts={txnPillCounts}
+            filteredTxnNet={filteredTxnNet}
+            totalTxnCount={totalTxnCount}
+            txnSortKey={txnSortKey}
+            setTxnSortKey={setTxnSortKey}
+            txnSortDir={txnSortDir}
+            setTxnSortDir={setTxnSortDir}
+            filteredTopMerchants={filteredTopMerchants}
+            bulkRecategorizeFiltered={bulkRecategorizeFiltered}
             txnListOpen={txnListOpen}
             setTxnListOpen={setTxnListOpen}
             deleteFilteredConfirm={deleteFilteredConfirm}
