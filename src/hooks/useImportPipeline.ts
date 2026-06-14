@@ -7,6 +7,7 @@ export type PdfImportPreviewRow = {
   merchant: string
   amount: number
   rawSign: number
+  inferredType: 'income' | 'expense' | 'transfer' | 'credit card payment'
   confidence: 'high' | 'medium' | 'low'
   isDup?: boolean
 }
