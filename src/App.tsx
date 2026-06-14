@@ -67,7 +67,7 @@ import {
 // V9.0 — CSV import pipeline
 import { runImportPipeline, buildImportedTransactions } from './utils/importHelpers'
 import type { ImportPipelineResult } from './utils/importHelpers'
-import { parseCsv, detectColumns, generateSampleCsvString, detectBankFromAccountName } from './utils/csv'
+import { parseCsv, detectColumns, generateSampleCsvString, detectBankFromAccountName, getBankTemplate } from './utils/csv'
 // V10.1 — extracted helpers
 import { normalizeMerchant } from './utils/merchantNormalization'
 import { loadCategoryMemory, saveCategoryMemory } from './utils/categoryMemory'
@@ -132,7 +132,6 @@ import { OnboardingGuide } from './components/OnboardingGuide'
 import { CommandPalette } from './components/CommandPalette'
 import { Sidebar } from './components/Sidebar'
 import { CloudStatusButton } from './components/CloudStatusButton'
-import { BankSelector } from './components/BankSelector'
 import { AIChatDrawer } from './components/AIChatDrawer'
 import { ReconcileFAQ } from './components/ReconcileFAQ'
 import { BreakdownEditor } from './components/BreakdownEditor'
@@ -205,7 +204,7 @@ function extractCategoryHints(rows: Array<Record<string, string>>): Record<strin
 const PAYMENT_PATTERNS = /payment|transfer|zelle|venmo|paypal|apple cash|e-payment|gsbank|discover e|online transfer/i
 
 // ── V9.9 PDF Import ───────────────────────────────────────────────────────────
-type PdfImportRow = { date: string; merchant: string; amount: number; rawSign: number; confidence: 'high' | 'medium' | 'low'; isDup?: boolean }
+type PdfImportRow = { date: string; merchant: string; amount: number; rawSign: number; inferredType: 'income' | 'expense' | 'transfer' | 'credit card payment'; confidence: 'high' | 'medium' | 'low'; isDup?: boolean }
 
 /**
  * Extract transaction rows from raw PDF text (text-based/accessible PDFs only).
@@ -244,7 +243,12 @@ function parsePdfText(raw: string): { rows: PdfImportRow[]; warning: string } {
     const key = `${date}|${merchant.toLowerCase()}|${amount.toFixed(2)}`
     if (seen.has(key)) return
     seen.add(key)
-    rows.push({ date, merchant, amount, rawSign: Math.sign(raw), confidence: 'medium' })
+    const rawSign = Math.sign(raw)
+    const inferredType: PdfImportRow['inferredType'] =
+      PAYMENT_PATTERNS.test(merchant) ? 'credit card payment'
+      : rawSign < 0 || /salary|payroll|direct deposit|deposit|income|interest earned|dividend/i.test(merchant) ? 'income'
+      : 'expense'
+    rows.push({ date, merchant, amount, rawSign, inferredType, confidence: 'medium' })
   }
 
   let m: RegExpExecArray | null
@@ -2261,14 +2265,30 @@ txnMerchantRef.current?.focus()
         const effectiveAccountId = csvImportAccountId || (accounts[0]?.id ?? '')
         const existingForAccount = transactions.filter(tx => tx.accountId === effectiveAccountId)
 
-        const marked = parsed.map((r: any) => ({
-          ...r,
-          isDup: existingForAccount.some(tx =>
-            tx.date === r.date &&
-            tx.merchant.toLowerCase() === r.merchant.toLowerCase() &&
-            Math.abs(tx.amount - Math.abs(r.amount)) < 0.01
-          ),
-        }))
+        const marked = parsed.map((r: any) => {
+          const rawSign = Math.sign(r.amount as number)
+          const amount = Math.abs(r.amount as number)
+          const merchant = (r.merchant ?? '') as string
+          const aiType = (r.type ?? '') as string
+          const inferredType: 'income' | 'expense' | 'transfer' | 'credit card payment' =
+            PAYMENT_PATTERNS.test(merchant) ? 'credit card payment'
+            : aiType === 'income' || rawSign < 0 || /salary|payroll|direct deposit|deposit|income|interest earned|dividend/i.test(merchant) ? 'income'
+            : aiType === 'transfer' ? 'transfer'
+            : 'expense'
+          return {
+            date: r.date,
+            merchant,
+            amount,
+            rawSign,
+            inferredType,
+            confidence: (r.confidence ?? 'medium') as 'high' | 'medium' | 'low',
+            isDup: existingForAccount.some(tx =>
+              tx.date === r.date &&
+              tx.merchant.toLowerCase() === merchant.toLowerCase() &&
+              Math.abs(tx.amount - amount) < 0.01
+            ),
+          }
+        })
 
         setPdfPreviewRows(marked)
         setPdfParseWarning(
@@ -2283,18 +2303,17 @@ txnMerchantRef.current?.focus()
     reader.onerror = () => { setCsvImportError('Could not read the PDF file.'); setCsvImportLoading(false) }
     reader.readAsDataURL(file)
   }
-  const commitPdfImport = () => {
-    const readyRows = pdfPreviewRows.filter(r => !r.isDup)
-    if (readyRows.length === 0) { closeCsvImport(); return }
+  const doPdfImport = (rows: typeof pdfPreviewRows) => {
+    if (rows.length === 0) { closeCsvImport(); return }
     const effectiveAccountId = csvImportAccountId || (accounts[0]?.id ?? '')
     const batchId = crypto.randomUUID().slice(0, 8)
-    const newTxns: Transaction[] = readyRows.map(r => ({
+    const newTxns: Transaction[] = rows.map(r => ({
       id: crypto.randomUUID(),
       date: r.date,
       accountId: effectiveAccountId,
       merchant: r.merchant,
-      amount: r.amount,
-      type: (PAYMENT_PATTERNS.test(r.merchant) ? 'credit card payment' : /salary|payroll|direct deposit|deposit|income|interest earned|dividend/i.test(r.merchant) || r.rawSign < 0 ? 'income' : 'expense') as TransactionType,
+      amount: Math.abs(r.amount),
+      type: r.inferredType as TransactionType,
       batchId,
       importBatchId: batchId,
       importedCategoryHint: 'pdf',
@@ -2308,7 +2327,7 @@ txnMerchantRef.current?.focus()
       accountName: acct?.name ?? 'Unknown Account',
       importMonth: csvImportMonth,
       importedCount: newTxns.length,
-      skippedCount: pdfPreviewRows.filter(r => r.isDup).length,
+      skippedCount: 0,
       createdAt: new Date().toISOString(),
       importSource: 'pdf',
       preset: 'chase-pdf-experimental',
@@ -2316,12 +2335,13 @@ txnMerchantRef.current?.focus()
     setImportBatches(prev => [batch, ...prev.slice(0, 49)])
     closeCsvImport()
     if (newTxns[0]) flashHighlight(newTxns[0].id, setHighlightedTxnId, highlightTxnTimerRef)
-    const skipped = pdfPreviewRows.filter(r => r.isDup).length
     showUndoableToast(
-      `Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''} from PDF.${skipped > 0 ? ` Skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''}.` : ''}`,
+      `Imported ${newTxns.length} transaction${newTxns.length !== 1 ? 's' : ''} from PDF.`,
       undoTxn
     )
   }
+  const commitPdfImport = () => doPdfImport(pdfPreviewRows.filter(r => !r.isDup))
+  const commitPdfImportAll = () => doPdfImport(pdfPreviewRows)
   const handleCsvFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -6074,7 +6094,6 @@ txnMerchantRef.current?.focus()
           pdfWarning={pdfParseWarning}
           preset={csvImportPreset}
           columnMapping={csvColumnMapping}
-          onPresetChange={p => { setCsvImportPreset(p); setCsvImportPreview(null); setCsvColumnMapping(null); setCsvImportIsPdf(p === 'chase-pdf-experimental') }}
           onImportAccountChange={id => {
             setCsvImportAccountId(id)
             setCsvImportPreview(null)
@@ -6088,6 +6107,7 @@ txnMerchantRef.current?.focus()
           onDrop={handleCsvDrop}
           onCommit={commitCsvImport}
           onCommitPdf={commitPdfImport}
+          onCommitPdfAll={commitPdfImportAll}
           onCancel={closeCsvImport}
           onResetPreview={resetImportPreview}
           onDownloadSample={downloadSampleCsv}
@@ -6246,11 +6266,11 @@ interface CsvImportModalProps {
   columnMapping: Record<string, string> | null
   onImportAccountChange: (id: string) => void
   onImportMonthChange: (month: string) => void
-  onPresetChange: (preset: ImportPreset) => void
   onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void
   onDrop: (e: React.DragEvent<HTMLDivElement>) => void
   onCommit: () => void
   onCommitPdf: () => void
+  onCommitPdfAll: () => void
   onCancel: () => void
   onDownloadSample: () => void
   onUseSampleData: () => void
@@ -6264,11 +6284,27 @@ function CsvImportModal({
   hintRules, hintCategories, hintMemory,
   isPdf, pdfRows, pdfWarning,
   preset, columnMapping,
-  onImportAccountChange, onImportMonthChange, onPresetChange,
+  onImportAccountChange, onImportMonthChange,
   onFileSelect, onDrop,
-  onCommit, onCommitPdf, onCancel, onDownloadSample, onUseSampleData, fileInputRef, onResetPreview,
+  onCommit, onCommitPdf, onCommitPdfAll, onCancel, onDownloadSample, onUseSampleData, fileInputRef, onResetPreview,
 }: CsvImportModalProps) {
   const [dragOver, setDragOver] = useState(false)
+
+  // PDF progress bar timer
+  const [pdfProgress, setPdfProgress] = useState(0)
+  const [pdfSecondsLeft, setPdfSecondsLeft] = useState<number | null>(null)
+  useEffect(() => {
+    if (!loading || !isPdf) { setPdfProgress(0); setPdfSecondsLeft(null); return }
+    const totalMs = 18000
+    const start = Date.now()
+    const iv = setInterval(() => {
+      const elapsed = Date.now() - start
+      const pct = Math.min(88, (elapsed / totalMs) * 100)
+      setPdfProgress(pct)
+      setPdfSecondsLeft(pct >= 88 ? null : Math.max(1, Math.round((totalMs - elapsed) / 1000)))
+    }, 300)
+    return () => clearInterval(iv)
+  }, [loading, isPdf])
 
   // ESC key closes modal
   useEffect(() => {
@@ -6335,11 +6371,24 @@ function CsvImportModal({
             </div>
           </div>
 
-          {/* V35 — Bank selector with export instructions */}
-          <BankSelector
-            selected={preset ?? 'generic-csv'}
-            onSelect={p => onPresetChange(p)}
-          />
+          {/* Auto-detected export instructions (no manual bank picker) */}
+          {(() => {
+            const tmpl = getBankTemplate(preset ?? 'generic-csv')
+            if (!tmpl || tmpl.id === 'generic-csv' || tmpl.instructions.length === 0) return null
+            return (
+              <div className="rounded-xl border border-slate-700/50 bg-slate-800/40 p-3">
+                <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-2">How to export from {tmpl.name}</p>
+                <ol className="space-y-1.5">
+                  {tmpl.instructions.map((step, i) => (
+                    <li key={i} className="flex gap-2 text-xs text-slate-300">
+                      <span className="flex-shrink-0 w-4 h-4 rounded-full bg-blue-600/30 text-blue-300 text-[10px] flex items-center justify-center font-bold">{i + 1}</span>
+                      {step}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )
+          })()}
 
           {effectiveAccount && (
             <div className="rounded-lg border border-slate-700/60 bg-slate-800/40 px-3 py-2 text-xs text-slate-400 flex items-center gap-2">
@@ -6376,7 +6425,24 @@ function CsvImportModal({
             </div>
           )}
 
-          {loading && <div className="text-center py-8 space-y-2"><div className="text-slate-400">{isPdf ? '✦ AI is reading your PDF…' : 'Parsing CSV…'}</div>{isPdf && <div className="text-xs text-slate-600">Gemini is extracting transactions from your statement</div>}</div>}
+          {loading && (
+            <div className="text-center py-6 space-y-3">
+              <div className="text-slate-300 font-medium">{isPdf ? '✦ AI is reading your PDF…' : 'Parsing CSV…'}</div>
+              {isPdf && (
+                <>
+                  <div className="text-xs text-slate-500">Gemini is extracting transactions from your statement</div>
+                  <div className="mx-auto max-w-xs space-y-1.5">
+                    <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                      <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${pdfProgress}%` }} />
+                    </div>
+                    <div className="text-xs text-slate-600">
+                      {pdfSecondsLeft != null ? `~${pdfSecondsLeft}s remaining` : 'Almost done…'}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           {error && (
             <div className="rounded-lg border border-red-700/50 bg-red-900/20 px-4 py-3 text-sm text-red-300">{error}</div>
@@ -6406,30 +6472,64 @@ function CsvImportModal({
                 Review detected transactions. All will be marked <span className="font-medium text-slate-300">Needs Review</span> for category assignment after import.{' '}
                 <button onClick={onResetPreview} className="underline text-blue-400 hover:text-blue-300">Choose a different file</button>
               </p>
-              <div className="overflow-y-auto max-h-64 rounded-lg border border-slate-700/60">
+              {/* Income/expense summary */}
+              {(() => {
+                const newRows = pdfRows.filter(r => !r.isDup)
+                const totalIncome = newRows.filter(r => r.inferredType === 'income').reduce((s, r) => s + r.amount, 0)
+                const totalExpenses = newRows.filter(r => r.inferredType === 'expense').reduce((s, r) => s + r.amount, 0)
+                if (totalIncome === 0 && totalExpenses === 0) return null
+                return (
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-lg bg-green-900/20 border border-green-700/30 px-3 py-2 text-center">
+                      <div className="text-[10px] text-green-400 mb-0.5">Income (new)</div>
+                      <div className="text-sm font-bold text-green-300">+{currency(totalIncome)}</div>
+                    </div>
+                    <div className="rounded-lg bg-red-900/20 border border-red-700/30 px-3 py-2 text-center">
+                      <div className="text-[10px] text-red-400 mb-0.5">Expenses (new)</div>
+                      <div className="text-sm font-bold text-red-300">{currency(totalExpenses)}</div>
+                    </div>
+                  </div>
+                )
+              })()}
+              <div className="overflow-y-auto max-h-56 rounded-lg border border-slate-700/60">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 bg-slate-800 z-10">
                     <tr className="text-left text-slate-400 border-b border-slate-700">
                       <th className="py-1.5 px-2 font-medium whitespace-nowrap">Date</th>
                       <th className="py-1.5 px-2 font-medium">Merchant</th>
                       <th className="py-1.5 px-2 font-medium text-right whitespace-nowrap">Amount</th>
+                      <th className="py-1.5 px-2 font-medium text-center whitespace-nowrap">Type</th>
                       <th className="py-1.5 px-2 font-medium" />
                     </tr>
                   </thead>
                   <tbody>
-                    {pdfRows.map((row, i) => (
-                      <tr key={i} className={`border-b border-slate-800 ${row.isDup ? 'opacity-50' : 'hover:bg-slate-800/40'}`}>
-                        <td className="py-1 px-2 text-slate-300 whitespace-nowrap">{row.date}</td>
-                        <td className="py-1 px-2 text-slate-200 max-w-[180px] truncate">{normalizeMerchant(row.merchant)}</td>
-                        <td className="py-1 px-2 text-right text-slate-300">${row.amount.toFixed(2)}</td>
-                        <td className="py-1 px-2">
-                          {row.isDup
-                            ? <span className="text-[10px] text-amber-400 bg-amber-900/30 border border-amber-700/30 px-1 py-0.5 rounded">Duplicate</span>
-                            : <span className="text-[10px] bg-green-900/60 text-green-300 border border-green-700/40 px-1.5 py-0.5 rounded">New</span>
-                          }
-                        </td>
-                      </tr>
-                    ))}
+                    {pdfRows.map((row, i) => {
+                      const isIncome = row.inferredType === 'income'
+                      const isTransfer = row.inferredType === 'transfer' || row.inferredType === 'credit card payment'
+                      return (
+                        <tr key={i} className={`border-b border-slate-800 ${row.isDup ? 'opacity-40' : 'hover:bg-slate-800/40'}`}>
+                          <td className="py-1 px-2 text-slate-300 whitespace-nowrap">{row.date}</td>
+                          <td className="py-1 px-2 text-slate-200 max-w-[140px] truncate">{normalizeMerchant(row.merchant)}</td>
+                          <td className={`py-1 px-2 text-right font-medium ${isIncome ? 'text-green-400' : isTransfer ? 'text-blue-300' : 'text-slate-300'}`}>
+                            {isIncome ? '+' : ''}{currency(Math.abs(row.amount))}
+                          </td>
+                          <td className="py-1 px-2 text-center">
+                            {isIncome
+                              ? <span className="text-[9px] bg-green-900/50 text-green-300 border border-green-700/30 px-1 py-0.5 rounded">Income</span>
+                              : isTransfer
+                              ? <span className="text-[9px] bg-blue-900/40 text-blue-300 border border-blue-700/30 px-1 py-0.5 rounded">Transfer</span>
+                              : <span className="text-[9px] bg-slate-700/60 text-slate-400 border border-slate-600/40 px-1 py-0.5 rounded">Expense</span>
+                            }
+                          </td>
+                          <td className="py-1 px-2">
+                            {row.isDup
+                              ? <span className="text-[9px] text-amber-400 bg-amber-900/30 border border-amber-700/30 px-1 py-0.5 rounded">Dup</span>
+                              : <span className="text-[9px] bg-green-900/60 text-green-300 border border-green-700/40 px-1 py-0.5 rounded">New</span>
+                            }
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -6578,15 +6678,27 @@ function CsvImportModal({
               </button>
             )}
           </div>
-          {isPdf && pdfRows.filter(r => !r.isDup).length > 0 && !noAccounts && (
-            <button onClick={onCommitPdf} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-5 py-2 text-sm font-medium transition-colors">
-              Import {pdfRows.filter(r => !r.isDup).length} transaction{pdfRows.filter(r => !r.isDup).length !== 1 ? 's' : ''} from PDF → {effectiveAccount?.name ?? 'account'}
-            </button>
+          {isPdf && pdfRows.length > 0 && !noAccounts && (
+            <div className="flex gap-2 flex-wrap justify-end">
+              <button onClick={onCommitPdf} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-sm font-medium transition-colors">
+                Import New ({pdfRows.filter(r => !r.isDup).length})
+              </button>
+              <button onClick={onCommitPdfAll} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-2 text-sm font-medium transition-colors border border-slate-600">
+                Import All ({pdfRows.length})
+              </button>
+            </div>
           )}
           {!isPdf && preview && preview.readyCount > 0 && !noAccounts && (
-            <button onClick={onCommit} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-5 py-2 text-sm font-medium transition-colors">
-              Import {preview.readyCount} transaction{preview.readyCount !== 1 ? 's' : ''} → {effectiveAccount?.name ?? 'account'}
-            </button>
+            <div className="flex gap-2 flex-wrap justify-end">
+              <button onClick={onCommit} className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-2 text-sm font-medium transition-colors">
+                Import New ({preview.readyCount})
+              </button>
+              {(preview.importRows?.length ?? 0) > preview.readyCount && (
+                <button onClick={onCommit} className="rounded-lg bg-slate-700 hover:bg-slate-600 px-4 py-2 text-sm font-medium transition-colors border border-slate-600">
+                  Import All ({preview.importRows?.length ?? 0})
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>
