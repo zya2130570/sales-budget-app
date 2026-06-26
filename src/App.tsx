@@ -3537,47 +3537,66 @@ txnMerchantRef.current?.focus()
             {/* Take-Home Override — lets user enter actual check amount */}
             <Card title="Take-Home Pay Override">
               <p className="text-xs text-slate-400 mb-3">
-                Your actual paycheck take-home may differ from the AZ estimate below. Override it here so all income calculations use your real number.
+                Enter your actual paycheck amount — the app converts it to monthly so all income calculations use your real take-home.
               </p>
-              <div className="flex gap-2 mb-3">
+              <div className="flex gap-2 mb-4">
                 {(['simple', 'manual'] as const).map(m => (
                   <button
                     key={m}
                     onClick={() => setTakeHomeSettings(prev => ({ ...prev, mode: m, updatedAt: new Date().toISOString() }))}
                     className={`px-3 py-1 text-xs rounded-full transition-colors ${takeHomeSettings.mode === m ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
                   >
-                    {m === 'simple' ? 'Auto (AZ estimate)' : 'Manual (enter check)'}
+                    {m === 'simple' ? 'Auto (AZ estimate)' : 'My actual check'}
                   </button>
                 ))}
               </div>
               {takeHomeSettings.mode === 'manual' && (
                 <div className="space-y-3">
-                  <div className="flex items-center gap-3">
-                    <label className="text-xs text-slate-400 w-44 shrink-0">Actual monthly take-home</label>
-                    <div className="relative">
-                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
-                      <input
-                        type="number"
-                        min={0}
-                        step={50}
-                        value={takeHomeSettings.manualMonthlyNet || ''}
-                        placeholder="e.g. 2400"
-                        onChange={e => {
-                          const v = Math.max(0, Number(e.target.value) || 0)
-                          setTakeHomeSettings(prev => ({ ...prev, manualMonthlyNet: v, updatedAt: new Date().toISOString() }))
-                        }}
-                        className="w-32 pl-6 pr-2 py-1.5 text-xs rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200"
-                      />
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400 shrink-0">Per check</span>
+                      <div className="relative">
+                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          value={takeHomeSettings.manualCheckAmount ?? ''}
+                          placeholder="e.g. 1250.47"
+                          onChange={e => {
+                            const checkAmt = Math.max(0, Number(e.target.value) || 0)
+                            const freq = takeHomeSettings.manualCheckFrequency ?? 'bi-weekly'
+                            const monthly = annualizeFromPaycheck(checkAmt, freq) / 12
+                            setTakeHomeSettings(prev => ({ ...prev, manualCheckAmount: checkAmt, manualMonthlyNet: monthly, updatedAt: new Date().toISOString() }))
+                          }}
+                          className="w-32 pl-6 pr-2 py-1.5 text-xs rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200"
+                        />
+                      </div>
                     </div>
-                    <span className="text-[10px] text-slate-500">/month</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400 shrink-0">Frequency</span>
+                      <select
+                        value={takeHomeSettings.manualCheckFrequency ?? 'bi-weekly'}
+                        onChange={e => {
+                          const freq = e.target.value as import('./types').PayFrequency
+                          const checkAmt = takeHomeSettings.manualCheckAmount ?? 0
+                          const monthly = annualizeFromPaycheck(checkAmt, freq) / 12
+                          setTakeHomeSettings(prev => ({ ...prev, manualCheckFrequency: freq, manualMonthlyNet: monthly, updatedAt: new Date().toISOString() }))
+                        }}
+                        className="text-xs px-2 py-1.5 rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200"
+                      >
+                        <option value="weekly">Weekly (52×/yr)</option>
+                        <option value="bi-weekly">Bi-weekly (26×/yr)</option>
+                        <option value="semi-monthly">Semi-monthly (24×/yr)</option>
+                        <option value="monthly">Monthly (12×/yr)</option>
+                      </select>
+                    </div>
                   </div>
-                  <p className="text-[10px] text-slate-500">
-                    Tip: add up your actual paychecks for the month. Bi-weekly = two paychecks × net per check.
-                  </p>
-                  {takeHomeSettings.manualMonthlyNet > 0 && adjustedSalary > 0 && (
+                  {(takeHomeSettings.manualCheckAmount ?? 0) > 0 && (
                     <div className="rounded-lg bg-slate-800/60 border border-slate-700/40 px-3 py-2 space-y-0.5">
-                      <Row l="Implied take-home rate" v={`${(effectiveTakeHomeRate * 100).toFixed(1)}%`} />
-                      <Row l="Monthly net (this override)" v={currency(inc.baseMonthly)} />
+                      <Row l="Monthly equivalent" v={currency(inc.baseMonthly)} />
+                      <Row l="Annual take-home (base only)" v={currency(inc.baseMonthly * 12)} />
+                      {adjustedSalary > 0 && <Row l="Implied take-home rate" v={`${(effectiveTakeHomeRate * 100).toFixed(1)}%`} />}
                       <Row l="Total monthly (base + commission)" v={currency(inc.totalMonthly)} />
                     </div>
                   )}
