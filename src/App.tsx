@@ -1049,6 +1049,12 @@ export default function App() {
   const effectiveTakeHomeRate = useMemo(() => {
     const baseGrossMonthly = adjustedSalary / 12
     if (takeHomeSettings.mode === 'manual' && baseGrossMonthly > 0) {
+      // Prefer manualCheckAmount (always fresh) over manualMonthlyNet (may be stale from old formula)
+      if (takeHomeSettings.manualCheckAmount) {
+        const freq = takeHomeSettings.manualCheckFrequency ?? 'bi-weekly'
+        const perMonth = freq === 'weekly' ? 4 : freq === 'semi-monthly' ? 2 : freq === 'monthly' ? 1 : 2
+        return (takeHomeSettings.manualCheckAmount * perMonth) / baseGrossMonthly
+      }
       return takeHomeSettings.manualMonthlyNet / baseGrossMonthly
     }
     if (takeHomeSettings.mode === 'paystub' && activePayStub && baseGrossMonthly > 0) {
