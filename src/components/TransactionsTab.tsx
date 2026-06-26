@@ -187,13 +187,22 @@ export function TransactionsTab({
             <div className="px-4 pb-4">
               {/* Search + account/category filters */}
               <div className="flex flex-wrap gap-2 mb-3">
-                <input
-                  type="text"
-                  placeholder="Search merchant or notes…"
-                  value={txnSearch}
-                  onChange={e => setTxnSearch(e.target.value)}
-                  className="flex-1 min-w-[160px] px-2.5 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none placeholder:text-slate-600"
-                />
+                <div className="relative flex-1 min-w-[160px]">
+                  <input
+                    type="text"
+                    placeholder="Search merchant or notes…"
+                    value={txnSearch}
+                    onChange={e => setTxnSearch(e.target.value)}
+                    className="w-full px-2.5 py-1 text-xs rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none placeholder:text-slate-600 pr-6"
+                  />
+                  {txnSearch && (
+                    <button
+                      onClick={() => setTxnSearch('')}
+                      title="Clear search"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 leading-none text-xs px-0.5"
+                    >✕</button>
+                  )}
+                </div>
                 <select value={txnAccountFilter} onChange={e => setTxnAccountFilter(e.target.value)} className="text-xs px-2 py-1 rounded bg-slate-800 border border-slate-600 focus:outline-none">
                   <option value="">All accounts ({txnCountsByAccount.__all__ ?? 0})</option>
                   {accounts.map(a => <option key={a.id} value={a.id}>{a.name} ({txnCountsByAccount[a.id] ?? 0})</option>)}
@@ -205,7 +214,7 @@ export function TransactionsTab({
                 </select>
                 {/* V50/V51 — Month/year filter: gap-filled from oldest to newest, counts per month */}
                 <select value={txnMonthFilter} onChange={e => setTxnMonthFilter(e.target.value)} className="text-xs px-2 py-1 rounded bg-slate-800 border border-slate-600 focus:outline-none" disabled={txnMonthsWithCounts.length === 0}>
-                  <option value="">All dates ({txnMonthsWithCounts.reduce((s, m) => s + m.count, 0)})</option>
+                  <option value="">All dates ({txnPillCounts.all ?? txnMonthsWithCounts.reduce((s, m) => s + m.count, 0)})</option>
                   {(() => {
                     const byYear: Record<string, Array<{ ym: string; count: number }>> = {}
                     for (const item of txnMonthsWithCounts) {
