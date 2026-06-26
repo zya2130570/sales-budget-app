@@ -174,3 +174,48 @@ export type ExportRecord = { id: string; exportedAt: string; fileSizeKb: number 
 
 export type BudgetActualsByPeriod = Record<string, Record<string, string>>
 export type BudgetActualsEnvelope = { version: 2; lastPeriodKey?: string; actualsByPeriod: BudgetActualsByPeriod }
+
+// ─── Budget Sandbox ───────────────────────────────────────────────────────────
+
+export type SandboxCategoryBehavior = 'fixed' | 'flexible' | 'percentage' | 'overflow'
+export type SandboxSortMode = 'custom' | 'fixed-first' | 'flexible-first' | 'savings-first' | 'investing-first' | 'amount-desc' | 'amount-asc'
+
+export type SandboxCategory = {
+  id: string
+  name: string
+  amount: number        // monthly, same convention as Category
+  type: CategoryType
+  behavior: SandboxCategoryBehavior
+  minAmount?: number
+  targetAmount?: number
+  maxAmount?: number
+  percentageOfIncome?: number
+  notes?: string
+}
+
+export type SandboxIncomeScenario = {
+  id: string
+  name: string
+  monthlyIncome: number
+}
+
+export type SandboxChangeRule = {
+  id: string
+  label: string
+}
+
+export type SandboxDraft = {
+  id: string
+  name: string
+  categories: SandboxCategory[]
+  scenarios: SandboxIncomeScenario[]
+  activeScenarioId: string
+  period: Period
+  startingFrom: string   // 'current' | 'blank' | saved-budget name
+  sortMode: SandboxSortMode
+  categoryOrder: string[] // category ids for custom drag order
+  increaseRules: SandboxChangeRule[]
+  decreaseRules: SandboxChangeRule[]
+  createdAt: string
+  updatedAt: string
+}

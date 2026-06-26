@@ -36,6 +36,9 @@ export const STORAGE_KEYS = {
   breakdowns: 'flow_breakdowns',
   extraIncomes: 'flow_extra_incomes',
   exportHistory: 'flow_export_history',
+
+  // Budget Sandbox
+  sandboxDrafts: 'flow_sandbox_drafts',
 } as const
 
 export type StorageKeyName = keyof typeof STORAGE_KEYS
