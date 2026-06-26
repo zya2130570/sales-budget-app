@@ -13,6 +13,7 @@ import {
   estimateTaxBreakdown,
   computeTargetStatus,
   requiredForTarget,
+  commissionBrackets,
 } from './utils/calculations'
 import type { DashboardStatus } from './utils/calculations'
 import {
@@ -446,7 +447,7 @@ export default function App() {
     return v ? Number(v) : 40000
   })
   // V56 — takeHomeSettings as real state so mode changes (simple/manual/paystub) drive income() reactively
-  const [takeHomeSettings, _setTakeHomeSettings] = useState<TakeHomeSettings>(() =>
+  const [takeHomeSettings, setTakeHomeSettings] = useState<TakeHomeSettings>(() =>
     loadTakeHomeSettings() ?? ZYAN_PERSONAL_PRELOAD.takeHomeSettings
   )
   useEffect(() => { saveTakeHomeSettings(takeHomeSettings) }, [takeHomeSettings])
@@ -1186,7 +1187,7 @@ export default function App() {
   const savingsRate = (inc.totalMonthly + extraIncomesMonthly) > 0 ? ((byType.savings + byType.investing) / (inc.totalMonthly + extraIncomesMonthly)) * 100 : 0
   const dep = inc.commissionPct
   const depColor = dep <= 35 ? 'text-green-400' : dep <= 55 ? 'text-yellow-300' : 'text-red-400'
-  const baseNetByPeriod = period === 'weekly' ? inc.baseWeekly : period === 'bi-weekly' ? inc.baseBiWeekly : period === 'yearly' ? inc.baseMonthly * 12 : inc.baseMonthly
+  const baseNetByPeriod = convertFromMonthly(inc.baseMonthly, period)
 
   const top = [...categories].sort((a, b) => b.amount - a.amount)
   const suggestionList = form.name.trim() ? categorySuggestions.filter(s => s.toLowerCase().includes(form.name.toLowerCase())) : categorySuggestions
@@ -2660,14 +2661,26 @@ txnMerchantRef.current?.focus()
   }, [transactions])
 
   const txnPillCounts = useMemo(() => {
+    // Filter by all active non-pill filters so pill counts reflect the current account/month/search/category context
+    const base = transactions.filter(tx => {
+      if (txnAccountFilter && tx.accountId !== txnAccountFilter) return false
+      if (txnCategoryFilter === '__none__' && tx.categoryId) return false
+      if (txnCategoryFilter && txnCategoryFilter !== '__none__' && tx.categoryId !== txnCategoryFilter) return false
+      if (txnMonthFilter && !tx.date.startsWith(txnMonthFilter)) return false
+      if (txnSearch) {
+        const q = txnSearch.toLowerCase()
+        if (!tx.merchant.toLowerCase().includes(q) && !(tx.notes ?? '').toLowerCase().includes(q)) return false
+      }
+      return true
+    })
     const counts: Record<string, number> = {
-      all: transactions.length,
-      uncategorized: transactions.filter(tx => tx.type === 'expense' && !tx.categoryId).length,
-      'needs-review': transactions.filter(tx => txNeedsReview(tx, transactions, dismissedDupIds)).length,
+      all: base.length,
+      uncategorized: base.filter(tx => tx.type === 'expense' && !tx.categoryId).length,
+      'needs-review': base.filter(tx => txNeedsReview(tx, transactions, dismissedDupIds)).length,
     }
-    for (const tx of transactions) counts[tx.type] = (counts[tx.type] ?? 0) + 1
+    for (const tx of base) counts[tx.type] = (counts[tx.type] ?? 0) + 1
     return counts
-  }, [transactions, dismissedDupIds])
+  }, [transactions, txnAccountFilter, txnCategoryFilter, txnMonthFilter, txnSearch, dismissedDupIds])
 
   const filteredTxnNet = useMemo(() =>
     filteredTxns.reduce((sum, tx) => {
@@ -2787,7 +2800,26 @@ txnMerchantRef.current?.focus()
     })
     return {
       period,
-      income: { monthlyNet: inc.totalMonthly, weeklyNet: convertFromMonthly(inc.totalMonthly, 'weekly'), grossAnnual: adjustedSalary },
+      income: {
+        monthlyNet: inc.totalMonthly,
+        weeklyNet: convertFromMonthly(inc.totalMonthly, 'weekly'),
+        biWeeklyNet: convertFromMonthly(inc.totalMonthly, 'bi-weekly'),
+        grossAnnual: adjustedSalary,
+        baseSalary: adjustedSalary,
+        baseSalaryMonthly: inc.baseGrossMonthly,
+        baseNetMonthly: inc.baseMonthly,
+        commissionMonthly: inc.cMonthly,
+        commissionPct: inc.commissionPct,
+        grossProfit: gp,
+        effectiveTakeHomeRate: effectiveTakeHomeRate,
+        takeHomeMode: takeHomeSettings.mode,
+        manualMonthlyNet: takeHomeSettings.mode === 'manual' ? takeHomeSettings.manualMonthlyNet : null,
+        extraIncomesMonthly,
+        totalIncludingExtras: inc.totalMonthly + extraIncomesMonthly,
+        commissionBrackets: commissionBrackets.map(b => ({ upTo: b.upTo === Infinity ? 'unlimited' : b.upTo, rate: `${(b.rate * 100).toFixed(0)}%` })),
+        baseBumpsApplied: baseBumpsAchieved,
+        baseBumpThresholds: BUMP_THRESHOLDS,
+      },
       budget: { monthlyTotal: monthlyBudget, monthlyRemaining: monthlyLeft, isOverIncome: monthlyBudget > inc.totalMonthly },
       cashFlow: { status: cashFlowForecast.status, projectedEnd: cashFlowForecast.projectedEnd, safeToSpend: cashFlowForecast.safeToSpend },
       accounts: accounts.map(a => ({ name: a.name, type: a.type, balance: a.balance ?? 0 })),
@@ -2806,7 +2838,7 @@ txnMerchantRef.current?.focus()
       },
       currentInsights: spendingInsights.map(i => `[${i.priority}] ${i.title}`),
     }
-  }, [inc, period, adjustedSalary, monthlyBudget, monthlyLeft, cashFlowForecast, accounts, extraIncomes, categories, targets, transactions, monthlyReview, reviewMonth, spendingInsights])
+  }, [inc, period, adjustedSalary, gp, effectiveTakeHomeRate, takeHomeSettings, baseBumpsAchieved, extraIncomesMonthly, monthlyBudget, monthlyLeft, cashFlowForecast, accounts, extraIncomes, categories, targets, transactions, monthlyReview, reviewMonth, spendingInsights])
 
   const cloudPersistence = useCloudPersistence({
     accounts,
@@ -3501,6 +3533,63 @@ txnMerchantRef.current?.focus()
                 </p>
               )}
             </Card>
+
+            {/* Take-Home Override — lets user enter actual check amount */}
+            <Card title="Take-Home Pay Override">
+              <p className="text-xs text-slate-400 mb-3">
+                Your actual paycheck take-home may differ from the AZ estimate below. Override it here so all income calculations use your real number.
+              </p>
+              <div className="flex gap-2 mb-3">
+                {(['simple', 'manual'] as const).map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setTakeHomeSettings(prev => ({ ...prev, mode: m, updatedAt: new Date().toISOString() }))}
+                    className={`px-3 py-1 text-xs rounded-full transition-colors ${takeHomeSettings.mode === m ? 'bg-blue-600 text-white' : 'bg-slate-700 hover:bg-slate-600 text-slate-300'}`}
+                  >
+                    {m === 'simple' ? 'Auto (AZ estimate)' : 'Manual (enter check)'}
+                  </button>
+                ))}
+              </div>
+              {takeHomeSettings.mode === 'manual' && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-3">
+                    <label className="text-xs text-slate-400 w-44 shrink-0">Actual monthly take-home</label>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={50}
+                        value={takeHomeSettings.manualMonthlyNet || ''}
+                        placeholder="e.g. 2400"
+                        onChange={e => {
+                          const v = Math.max(0, Number(e.target.value) || 0)
+                          setTakeHomeSettings(prev => ({ ...prev, manualMonthlyNet: v, updatedAt: new Date().toISOString() }))
+                        }}
+                        className="w-32 pl-6 pr-2 py-1.5 text-xs rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200"
+                      />
+                    </div>
+                    <span className="text-[10px] text-slate-500">/month</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500">
+                    Tip: add up your actual paychecks for the month. Bi-weekly = two paychecks × net per check.
+                  </p>
+                  {takeHomeSettings.manualMonthlyNet > 0 && adjustedSalary > 0 && (
+                    <div className="rounded-lg bg-slate-800/60 border border-slate-700/40 px-3 py-2 space-y-0.5">
+                      <Row l="Implied take-home rate" v={`${(effectiveTakeHomeRate * 100).toFixed(1)}%`} />
+                      <Row l="Monthly net (this override)" v={currency(inc.baseMonthly)} />
+                      <Row l="Total monthly (base + commission)" v={currency(inc.totalMonthly)} />
+                    </div>
+                  )}
+                </div>
+              )}
+              {takeHomeSettings.mode === 'simple' && (
+                <p className="text-xs text-slate-500">
+                  Using AZ single-filer estimate: <span className="text-slate-300">{(effectiveTakeHomeRate * 100).toFixed(1)}%</span> take-home → <span className="text-slate-300">{currency(inc.baseMonthly)}/mo</span> base net.
+                </p>
+              )}
+            </Card>
+
             {/* V9.14 — Arizona take-home estimate: effective rates, 4 reference levels */}
             {(() => {
               const bd = estimateTaxBreakdown(grossSalary)
@@ -6118,11 +6207,12 @@ txnMerchantRef.current?.focus()
       {/* Hidden file input for CSV selection */}
       <input ref={csvFileInputRef} type="file" accept=".csv,.pdf,text/csv,text/plain,application/pdf" className="hidden" onChange={handleCsvFileSelect} />
 
-      {/* V9.0.4 Back-to-Top button — top-left, visible after scroll */}
+      {/* V9.0.4 Back-to-Top button — appears inside the content area, not over sidebar */}
       {showScrollTop && (
         <button
           onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          className="fixed top-20 left-3 z-40 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-600 shadow-lg px-3 py-2 text-xs text-slate-300 transition-all duration-200 hover:translate-y-0.5"
+          className="fixed top-20 z-40 rounded-full bg-slate-700 hover:bg-slate-600 border border-slate-600 shadow-lg px-3 py-2 text-xs text-slate-300 transition-all duration-200 hover:translate-y-0.5"
+          style={{ left: effectiveSidebarW + 8 }}
           title="Back to top"
           aria-label="Scroll to top"
         >
@@ -6130,11 +6220,11 @@ txnMerchantRef.current?.focus()
         </button>
       )}
 
-      {/* Toast notification — top-left, amber/warning style, Undo when applicable, click anywhere to dismiss */}
+      {/* Toast notification — offset from sidebar so it doesn't appear under it on mobile */}
       {toast && (
         <div
-          className="fixed top-5 left-5 z-50 flex items-center gap-3 rounded-xl border border-amber-600/60 bg-amber-950/90 px-4 py-3 shadow-2xl text-sm text-amber-100 transition-all duration-300 cursor-pointer max-w-sm"
-          style={{ opacity: toast.visible ? 1 : 0 }}
+          className="fixed top-5 z-50 flex items-center gap-3 rounded-xl border border-amber-600/60 bg-amber-950/90 px-4 py-3 shadow-2xl text-sm text-amber-100 transition-all duration-300 cursor-pointer max-w-sm"
+          style={{ opacity: toast.visible ? 1 : 0, left: effectiveSidebarW + 12 }}
           onClick={dismissToast}
         >
           <span className="flex-1">{toast.message}</span>

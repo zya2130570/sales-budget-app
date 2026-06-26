@@ -19,17 +19,21 @@ export function AIAssistantPanel({ messages, status, error, onSend, onClear }: {
   const send = () => { if (!input.trim() || status === 'loading') return; onSend(input.trim()); setInput('') }
   return (
     <div className="rounded-2xl border border-slate-700 bg-slate-800/60 overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
+      <div
+        className="flex items-center justify-between px-4 py-3 border-b border-slate-700 cursor-pointer select-none hover:bg-slate-700/20 transition-colors"
+        onClick={() => setCollapsed(v => !v)}
+        title={collapsed ? 'Expand Financial Assistant' : 'Collapse Financial Assistant'}
+      >
         <div className="flex items-center gap-2">
           <span className="text-base">✦</span>
           <h2 className="text-sm font-semibold text-slate-100">Financial Assistant</h2>
           <span className="text-[10px] text-slate-500 bg-slate-700 px-1.5 py-0.5 rounded">AI</span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
           {messages.length > 0 && !collapsed && <button onClick={onClear} className="text-[11px] text-slate-500 hover:text-slate-300 transition-colors">Clear</button>}
-          <button onClick={() => setCollapsed(v => !v)} title={collapsed ? 'Expand' : 'Collapse'} className="text-slate-500 hover:text-slate-300 transition-colors text-xs px-1.5 py-0.5 rounded hover:bg-slate-700">
-            {collapsed ? '▼ Show' : '▲ Hide'}
-          </button>
+          <span className="text-slate-500 text-xs px-1.5 py-0.5">
+            {collapsed ? '▼' : '▲'}
+          </span>
         </div>
       </div>
       {!collapsed && <div>
