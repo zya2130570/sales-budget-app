@@ -153,8 +153,8 @@ export type MonthlyReview = {
 }
 
 export type TakeHomeMode = 'simple' | 'manual' | 'paystub'
-export type TakeHomeSettings = { mode: TakeHomeMode; simpleRate: number; manualMonthlyNet: number; baseSalary?: number; updatedAt?: string }
-export const DEFAULT_TAKE_HOME_SETTINGS: TakeHomeSettings = { mode: "simple", simpleRate: 0.8243, manualMonthlyNet: 0 }
+export type TakeHomeSettings = { mode: TakeHomeMode; simpleRate: number; manualMonthlyNet: number; manualCheckAmount?: number; manualCheckFrequency?: PayFrequency; baseSalary?: number; updatedAt?: string }
+export const DEFAULT_TAKE_HOME_SETTINGS: TakeHomeSettings = { mode: "simple", simpleRate: 0.8243, manualMonthlyNet: 0, manualCheckFrequency: 'bi-weekly' }
 
 export type PayFrequency = 'weekly' | 'bi-weekly' | 'semi-monthly' | 'monthly'
 export type PayStub = {

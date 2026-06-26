@@ -29,11 +29,14 @@ export function AIAssistantPanel({ messages, status, error, onSend, onClear }: {
           <h2 className="text-sm font-semibold text-slate-100">Financial Assistant</h2>
           <span className="text-[10px] text-slate-500 bg-slate-700 px-1.5 py-0.5 rounded">AI</span>
         </div>
-        <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-          {messages.length > 0 && !collapsed && <button onClick={onClear} className="text-[11px] text-slate-500 hover:text-slate-300 transition-colors">Clear</button>}
-          <span className="text-slate-500 text-xs px-1.5 py-0.5">
-            {collapsed ? '▼' : '▲'}
-          </span>
+        <div className="flex items-center gap-2">
+          {messages.length > 0 && !collapsed && (
+            <button
+              onClick={e => { e.stopPropagation(); onClear() }}
+              className="text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
+            >Clear</button>
+          )}
+          <span className="text-slate-500 text-xs">{collapsed ? '▼' : '▲'}</span>
         </div>
       </div>
       {!collapsed && <div>
