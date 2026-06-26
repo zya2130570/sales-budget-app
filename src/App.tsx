@@ -136,7 +136,9 @@ import { CloudStatusButton } from './components/CloudStatusButton'
 import { AIChatDrawer } from './components/AIChatDrawer'
 import { ReconcileFAQ } from './components/ReconcileFAQ'
 import { BreakdownEditor } from './components/BreakdownEditor'
-import type { BreakdownItem } from './types'
+import type { BreakdownItem, SandboxDraft } from './types'
+import { BudgetSandbox } from './components/BudgetSandbox'
+import { loadSandboxDrafts, saveSandboxDrafts } from './utils/storage'
 import { KeyboardShortcutsPanel } from './components/KeyboardShortcutsPanel'
 import { ConflictResolutionModal } from './components/ConflictResolutionModal'
 import { useCloudPersistence } from './hooks/useCloudPersistence'
@@ -458,6 +460,14 @@ export default function App() {
   // V45 — extra income sources (side income, rental, partner, etc.)
   const [extraIncomes, setExtraIncomes] = useState<ExtraIncome[]>(() => loadExtraIncomes())
   const extraIncomesMonthly = extraIncomes.reduce((s, e) => s + e.monthlyAmount, 0)
+
+  // Budget Sandbox
+  const [sandboxDrafts, setSandboxDraftsState] = useState<SandboxDraft[]>(() => loadSandboxDrafts())
+  const [sandboxOpen, setSandboxOpen] = useState(false)
+  function saveSandboxDraftsAndState(drafts: SandboxDraft[]) {
+    setSandboxDraftsState(drafts)
+    saveSandboxDrafts(drafts)
+  }
   const [budgetTitle, setBudgetTitle] = useState('')
   const [changeSummary, setChangeSummary] = useState<string[]>([])
   const [editId, setEditId] = useState<string | null>(null)
@@ -2965,6 +2975,40 @@ txnMerchantRef.current?.focus()
       <AIChatDrawer open={aiChatOpen} onClose={() => setAiChatOpen(false)} />
       {reconcileFAQOpen && <ReconcileFAQ onClose={() => setReconcileFAQOpen(false)} />}
 
+      {/* Budget Sandbox overlay */}
+      {sandboxOpen && (
+        <BudgetSandbox
+          drafts={sandboxDrafts}
+          savedBudgets={savedBudgets}
+          currentCategories={categories}
+          incomeMonthly={inc.totalMonthly}
+          period={period}
+          onSaveDrafts={saveSandboxDraftsAndState}
+          onApplyToCurrentBudget={cats => {
+            setCategories(cats)
+            setSandboxOpen(false)
+            showToast('Sandbox applied to current budget')
+          }}
+          onSaveAsNewBudget={(name, cats) => {
+            setSavedBudgets(prev => {
+              const next = [{ name, categories: cats, savedAt: new Date().toISOString() }, ...prev.filter(b => b.name !== name)]
+              saveSavedBudgets(next)
+              return next
+            })
+            showToast(`Saved as "${name}"`)
+          }}
+          onOverwriteSavedBudget={(budgetName, cats) => {
+            setSavedBudgets(prev => {
+              const next = prev.map(b => b.name === budgetName ? { ...b, categories: cats, savedAt: new Date().toISOString() } : b)
+              saveSavedBudgets(next)
+              return next
+            })
+            showToast(`Overwrote "${budgetName}"`)
+          }}
+          onClose={() => setSandboxOpen(false)}
+        />
+      )}
+
       {/* V43 — Local→cloud migration wizard */}
       {migrationOpen && (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4" onClick={() => setMigrationOpen(false)}>
@@ -3772,6 +3816,22 @@ txnMerchantRef.current?.focus()
         {/* ── BUDGET ── */}
         {tab === 'Budget' && (
           <section className="space-y-4 transition-all duration-300">
+            {/* Budget Sandbox entry */}
+            <button
+              onClick={() => setSandboxOpen(true)}
+              className="w-full flex items-center justify-between rounded-2xl border border-blue-600/40 bg-blue-600/10 hover:bg-blue-600/20 px-4 py-3 transition-colors"
+            >
+              <div className="text-left">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-blue-300">Budget Sandbox</span>
+                  <span className="text-[10px] bg-blue-600/30 text-blue-300 border border-blue-600/40 rounded px-1.5 py-0.5">Beta</span>
+                  {sandboxDrafts.length > 0 && <span className="text-[10px] text-blue-400">{sandboxDrafts.length} draft{sandboxDrafts.length > 1 ? 's' : ''}</span>}
+                </div>
+                <p className="text-[10px] text-blue-400/70 mt-0.5">Experiment with budgets without changing your live plan</p>
+              </div>
+              <span className="text-blue-400 text-sm">›</span>
+            </button>
+
             <Card title="Budget Summary">
               <div className="flex gap-2 flex-wrap mb-4">{periods.map(p => <Pill key={p} active={period === p} onClick={() => setPeriod(p)}>{labelPeriod(p)}</Pill>)}</div>
               <div className="grid md:grid-cols-4 gap-3">

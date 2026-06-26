@@ -1,4 +1,4 @@
-import type { Tab, Period, Category, SavedBudget, SavedScenarioSet, Target, SavedTargetSet, Account, Transaction, TransactionRule, TakeHomeSettings, ImportBatch, ExtraIncome, ExportRecord, PayStub } from '../types'
+import type { Tab, Period, Category, SavedBudget, SavedScenarioSet, Target, SavedTargetSet, Account, Transaction, TransactionRule, TakeHomeSettings, ImportBatch, ExtraIncome, ExportRecord, PayStub, SandboxDraft } from '../types'
 import { CURRENT_SCHEMA_VERSION } from '../types'
 import { STORAGE_KEYS } from './storageKeys'
 import { wsKey } from './workspace'
@@ -469,6 +469,13 @@ export function loadExportHistory(): ExportRecord[] {
 }
 export function saveExportHistory(history: ExportRecord[]): void {
   saveToStorage(STORAGE_KEYS.exportHistory, history.slice(0, 50)) // keep last 50
+}
+
+export function loadSandboxDrafts(): SandboxDraft[] {
+  return storageGet<SandboxDraft[]>(STORAGE_KEYS.sandboxDrafts) ?? []
+}
+export function saveSandboxDrafts(drafts: SandboxDraft[]): void {
+  saveToStorage(STORAGE_KEYS.sandboxDrafts, drafts)
 }
 
 export function recordExportAndDownload(): void {
