@@ -322,7 +322,7 @@ function CategoryCard({
   period: Period
   onChange: (updated: SandboxCategory) => void
   onRemove: () => void
-  dragHandleProps: React.HTMLAttributes<HTMLDivElement>
+  dragHandleProps: React.HTMLAttributes<HTMLDivElement> & { style?: React.CSSProperties }
 }) {
   const [expanded, setExpanded] = useState(false)
   const displayAmt = convertFromMonthly(cat.amount, period)
@@ -785,8 +785,49 @@ function DraftEditor({
   const [editingName, setEditingName] = useState(false)
   const [nameValue, setNameValue] = useState(draft.name)
 
-  // drag state
-  const dragIdx = useRef<number | null>(null)
+  // pointer-based drag state (works on touch + mouse)
+  const dragFromRef = useRef<number | null>(null)
+  const [dragOver, setDragOver] = useState<number | null>(null)
+  const cardEls = useRef<(HTMLDivElement | null)[]>([])
+
+  function findTargetIdx(clientY: number): number {
+    let target = sortedCats.length - 1
+    for (let i = 0; i < cardEls.current.length; i++) {
+      const el = cardEls.current[i]
+      if (!el) continue
+      const rect = el.getBoundingClientRect()
+      if (clientY < rect.top + rect.height / 2) { target = i; break }
+    }
+    return target
+  }
+
+  function makeDragHandleProps(i: number): React.HTMLAttributes<HTMLDivElement> & { style: React.CSSProperties } {
+    return {
+      style: { touchAction: 'none' },
+      onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
+        e.preventDefault()
+        e.currentTarget.setPointerCapture(e.pointerId)
+        dragFromRef.current = i
+        setDragOver(i)
+      },
+      onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => {
+        if (dragFromRef.current === null) return
+        setDragOver(findTargetIdx(e.clientY))
+      },
+      onPointerUp: () => {
+        const from = dragFromRef.current
+        if (from !== null && dragOver !== null && from !== dragOver) {
+          const newOrder = [...sortedCats.map(c => c.id)]
+          const [moved] = newOrder.splice(from, 1)
+          newOrder.splice(dragOver, 0, moved)
+          patch({ sortMode: 'custom', categoryOrder: newOrder })
+        }
+        dragFromRef.current = null
+        setDragOver(null)
+      },
+      onPointerCancel: () => { dragFromRef.current = null; setDragOver(null) },
+    }
+  }
 
   const activeScenario = draft.scenarios.find(s => s.id === draft.activeScenarioId) ?? draft.scenarios[0]
   const scenarioIncome = activeScenario?.monthlyIncome ?? incomeMonthly
@@ -849,21 +890,6 @@ function DraftEditor({
     setShowActionSheet(false)
   }
 
-  // handle drag-and-drop reorder
-  function handleDragStart(e: React.DragEvent, i: number) {
-    dragIdx.current = i
-    e.dataTransfer.effectAllowed = 'move'
-  }
-  function handleDragOver(e: React.DragEvent, i: number) {
-    e.preventDefault()
-    if (dragIdx.current === null || dragIdx.current === i) return
-    const newOrder = [...sortedCats.map(c => c.id)]
-    const [moved] = newOrder.splice(dragIdx.current, 1)
-    newOrder.splice(i, 0, moved)
-    dragIdx.current = i
-    patch({ sortMode: 'custom', categoryOrder: newOrder })
-  }
-  function handleDragEnd() { dragIdx.current = null }
 
   // running balance — track cumulative before each cat
   const runningBefore = useMemo(() => {
@@ -997,10 +1023,9 @@ function DraftEditor({
           {sortedCats.map((cat, i) => (
             <div
               key={cat.id}
-              draggable
-              onDragStart={e => handleDragStart(e, i)}
-              onDragOver={e => handleDragOver(e, i)}
-              onDragEnd={handleDragEnd}
+              ref={el => { cardEls.current[i] = el }}
+              className={`transition-opacity duration-100 ${dragFromRef.current === i ? 'opacity-40' : ''}`}
+              style={dragOver === i && dragFromRef.current !== null && dragFromRef.current !== i ? { borderTop: '2px solid #5E6AD2' } : {}}
             >
               <CategoryCard
                 cat={cat}
@@ -1009,9 +1034,7 @@ function DraftEditor({
                 period={draft.period}
                 onChange={updated => updateCat(cat.id, updated)}
                 onRemove={() => removeCat(cat.id)}
-                dragHandleProps={{
-                  onMouseDown: () => {},
-                }}
+                dragHandleProps={makeDragHandleProps(i)}
               />
             </div>
           ))}
