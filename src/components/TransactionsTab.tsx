@@ -393,7 +393,7 @@ export function TransactionsTab({
                             <th className="pb-1.5 pr-3 font-medium">Category</th>
                             <th className="pb-1.5 pr-3 text-right">{sortBtn('amount', 'Amount', 'justify-end w-full')}</th>
                             <th className="pb-1.5 pr-3 font-medium hidden sm:table-cell">Notes</th>
-                            <th className="pb-1.5 sticky right-0 bg-slate-800" />
+                            <th className="pb-1.5" />
                           </>
                         )
                       })()}

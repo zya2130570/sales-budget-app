@@ -2652,13 +2652,27 @@ txnMerchantRef.current?.focus()
   }, [filteredTxns])
 
   const txnMonthsWithCounts = useMemo(() => {
+    // Filter by all active non-month filters so per-month counts reflect current account/type/search context
+    const base = transactions.filter(tx => {
+      if (txnFilter === 'uncategorized') { if (!(tx.type === 'expense' && !tx.categoryId)) return false }
+      else if (txnFilter === 'needs-review') { if (!txNeedsReview(tx, transactions, dismissedDupIds)) return false }
+      else if (txnFilter !== 'all') { if (tx.type !== txnFilter) return false }
+      if (txnAccountFilter && tx.accountId !== txnAccountFilter) return false
+      if (txnCategoryFilter === '__none__' && tx.categoryId) return false
+      if (txnCategoryFilter && txnCategoryFilter !== '__none__' && tx.categoryId !== txnCategoryFilter) return false
+      if (txnSearch) {
+        const q = txnSearch.toLowerCase()
+        if (!tx.merchant.toLowerCase().includes(q) && !(tx.notes ?? '').toLowerCase().includes(q)) return false
+      }
+      return true
+    })
     const countMap: Record<string, number> = {}
-    for (const tx of transactions) {
+    for (const tx of base) {
       const ym = tx.date.slice(0, 7)
       countMap[ym] = (countMap[ym] ?? 0) + 1
     }
     return Object.entries(countMap).sort((a, b) => b[0].localeCompare(a[0])).map(([ym, count]) => ({ ym, count }))
-  }, [transactions])
+  }, [transactions, txnFilter, txnAccountFilter, txnCategoryFilter, txnSearch, dismissedDupIds])
 
   const txnPillCounts = useMemo(() => {
     // Filter by all active non-pill filters so pill counts reflect the current account/month/search/category context
@@ -3566,8 +3580,8 @@ txnMerchantRef.current?.focus()
                           onChange={e => {
                             const checkAmt = Math.max(0, Number(e.target.value) || 0)
                             const freq = takeHomeSettings.manualCheckFrequency ?? 'bi-weekly'
-                            const monthly = annualizeFromPaycheck(checkAmt, freq) / 12
-                            setTakeHomeSettings(prev => ({ ...prev, manualCheckAmount: checkAmt, manualMonthlyNet: monthly, updatedAt: new Date().toISOString() }))
+                            const perMonth = freq === 'weekly' ? 4 : freq === 'semi-monthly' ? 2 : freq === 'monthly' ? 1 : 2
+                            setTakeHomeSettings(prev => ({ ...prev, manualCheckAmount: checkAmt, manualMonthlyNet: checkAmt * perMonth, updatedAt: new Date().toISOString() }))
                           }}
                           className="w-32 pl-6 pr-2 py-1.5 text-xs rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200"
                         />
@@ -3580,22 +3594,22 @@ txnMerchantRef.current?.focus()
                         onChange={e => {
                           const freq = e.target.value as import('./types').PayFrequency
                           const checkAmt = takeHomeSettings.manualCheckAmount ?? 0
-                          const monthly = annualizeFromPaycheck(checkAmt, freq) / 12
-                          setTakeHomeSettings(prev => ({ ...prev, manualCheckFrequency: freq, manualMonthlyNet: monthly, updatedAt: new Date().toISOString() }))
+                          const perMonth = freq === 'weekly' ? 4 : freq === 'semi-monthly' ? 2 : freq === 'monthly' ? 1 : 2
+                          setTakeHomeSettings(prev => ({ ...prev, manualCheckFrequency: freq, manualMonthlyNet: checkAmt * perMonth, updatedAt: new Date().toISOString() }))
                         }}
                         className="text-xs px-2 py-1.5 rounded bg-slate-800 border border-slate-600 focus:border-blue-500 focus:outline-none text-slate-200"
                       >
-                        <option value="weekly">Weekly (52×/yr)</option>
-                        <option value="bi-weekly">Bi-weekly (26×/yr)</option>
-                        <option value="semi-monthly">Semi-monthly (24×/yr)</option>
-                        <option value="monthly">Monthly (12×/yr)</option>
+                        <option value="weekly">Weekly (×4/mo)</option>
+                        <option value="bi-weekly">Bi-weekly (×2/mo)</option>
+                        <option value="semi-monthly">Semi-monthly (×2/mo)</option>
+                        <option value="monthly">Monthly (×1/mo)</option>
                       </select>
                     </div>
                   </div>
                   {(takeHomeSettings.manualCheckAmount ?? 0) > 0 && (
                     <div className="rounded-lg bg-slate-800/60 border border-slate-700/40 px-3 py-2 space-y-0.5">
-                      <Row l="Monthly equivalent" v={currency(inc.baseMonthly)} />
-                      <Row l="Annual take-home (base only)" v={currency(inc.baseMonthly * 12)} />
+                      <Row l="Monthly base take-home" v={currency(inc.baseMonthly)} />
+                      <Row l="Dashboard shows (bi-weekly)" v={currency(inc.baseMonthly / 2)} />
                       {adjustedSalary > 0 && <Row l="Implied take-home rate" v={`${(effectiveTakeHomeRate * 100).toFixed(1)}%`} />}
                       <Row l="Total monthly (base + commission)" v={currency(inc.totalMonthly)} />
                     </div>
