@@ -72,10 +72,32 @@
       /* V27: Hide ALL scrollbars globally — clean interface */
       * { scrollbar-width: none !important; -ms-overflow-style: none !important; }
       *::-webkit-scrollbar { display: none !important; }
+
+      /* Prevent iOS Safari auto-zoom on input focus.
+         iOS zooms when focused input font-size < 16px.
+         This block is in index.html so it wins over any external stylesheet. */
+      input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+      textarea,
+      select {
+        font-size: 16px !important;
+        touch-action: manipulation;
+      }
     </style>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script>
+      // iOS Safari zooms on input focus if font-size < 16px at the moment of touchstart.
+      // Setting it directly on the element at touchstart time is the most reliable fix.
+      document.addEventListener('touchstart', function(e) {
+        var t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) {
+          if (t.type !== 'range' && t.type !== 'checkbox' && t.type !== 'radio') {
+            t.style.fontSize = '16px';
+          }
+        }
+      }, { passive: true, capture: true });
+    </script>
   </body>
 </html>
