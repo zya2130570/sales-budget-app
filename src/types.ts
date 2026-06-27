@@ -178,7 +178,7 @@ export type BudgetActualsEnvelope = { version: 2; lastPeriodKey?: string; actual
 // ─── Budget Sandbox ───────────────────────────────────────────────────────────
 
 export type SandboxCategoryBehavior = 'fixed' | 'flexible' | 'percentage' | 'overflow'
-export type SandboxSortMode = 'custom' | 'fixed-first' | 'flexible-first' | 'savings-first' | 'investing-first' | 'amount-desc' | 'amount-asc'
+export type SandboxSortMode = 'custom' | 'grouped' | 'fixed-first' | 'flexible-first' | 'savings-first' | 'investing-first' | 'amount-desc' | 'amount-asc'
 
 export type SandboxCategory = {
   id: string
