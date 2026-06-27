@@ -345,6 +345,21 @@ export function GoalCard(props: GoalCardProps) {
             </div>
           </div>
 
+          {/* linked budget category indicator */}
+          {(() => {
+            const linkedCat = categories.find(c => c.linkedGoalId === t.id)
+            if (!linkedCat) return null
+            const budgetWeekly = convertFromMonthly(linkedCat.amount, 'weekly')
+            const covered = req ? budgetWeekly >= req.weekly : false
+            return (
+              <div className={`flex items-center gap-1.5 text-xs rounded-lg px-2.5 py-1.5 mb-3 border ${covered ? 'text-emerald-400 bg-emerald-900/20 border-emerald-700/30' : 'text-amber-400 bg-amber-900/20 border-amber-700/30'}`}>
+                <span>{covered ? '✓' : '!'}</span>
+                <span>Budget allocates <strong>{currency(budgetWeekly)}/wk</strong> via <em>{linkedCat.name}</em></span>
+                {!covered && req && <span className="ml-auto text-[10px] opacity-70">{currency(req.weekly - budgetWeekly)}/wk short</span>}
+              </div>
+            )
+          })()}
+
           <div className="mb-3">
             <button
               className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
@@ -536,11 +551,11 @@ export function GoalCard(props: GoalCardProps) {
                     if (existingIdx >= 0) {
                       setCategories(prev => {
                         const cp = [...prev]
-                        cp[existingIdx] = { ...cp[existingIdx], amount: monthlyAmt }
+                        cp[existingIdx] = { ...cp[existingIdx], amount: monthlyAmt, linkedGoalId: t.id }
                         return cp
                       })
                     } else {
-                      setCategories(prev => [...prev, { id: affectedId, name: t.name, amount: monthlyAmt, type: 'savings' }])
+                      setCategories(prev => [...prev, { id: affectedId, name: t.name, amount: monthlyAmt, type: 'savings', linkedGoalId: t.id }])
                     }
                     setTab('Budget')
                     setTimeout(() => {

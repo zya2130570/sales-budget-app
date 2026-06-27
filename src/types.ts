@@ -16,6 +16,7 @@ export type Category = {
   name: string
   amount: number
   type: CategoryType
+  linkedGoalId?: string   // links a savings/investing category to a savings goal
   updatedAt?: string  // Added v3 — set on every create/edit
   breakdown?: BreakdownItem[]  // V33 — optional sub-item breakdown (local only)
 }
