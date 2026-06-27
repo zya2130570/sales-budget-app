@@ -785,15 +785,20 @@ function DraftEditor({
   const [editingName, setEditingName] = useState(false)
   const [nameValue, setNameValue] = useState(draft.name)
 
-  // pointer-based drag state (works on touch + mouse)
+  // pointer drag — native document listeners so touch + mouse both work
   const dragFromRef = useRef<number | null>(null)
+  const dragOverRef = useRef<number | null>(null)
+  const [dragFrom, setDragFrom] = useState<number | null>(null)
   const [dragOver, setDragOver] = useState<number | null>(null)
   const cardEls = useRef<(HTMLDivElement | null)[]>([])
+  // ref so the pointerup closure always sees the latest sorted order
+  const sortedCatsRef = useRef<SandboxCategory[]>([])
 
   function findTargetIdx(clientY: number): number {
-    let target = sortedCats.length - 1
-    for (let i = 0; i < cardEls.current.length; i++) {
-      const el = cardEls.current[i]
+    const els = cardEls.current
+    let target = Math.max(0, els.length - 1)
+    for (let i = 0; i < els.length; i++) {
+      const el = els[i]
       if (!el) continue
       const rect = el.getBoundingClientRect()
       if (clientY < rect.top + rect.height / 2) { target = i; break }
@@ -801,31 +806,45 @@ function DraftEditor({
     return target
   }
 
-  function makeDragHandleProps(i: number): React.HTMLAttributes<HTMLDivElement> & { style: React.CSSProperties } {
+  function makeDragHandleProps(idx: number): React.HTMLAttributes<HTMLDivElement> & { style: React.CSSProperties } {
     return {
       style: { touchAction: 'none' },
-      onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
+      onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
         e.preventDefault()
-        e.currentTarget.setPointerCapture(e.pointerId)
-        dragFromRef.current = i
-        setDragOver(i)
-      },
-      onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => {
-        if (dragFromRef.current === null) return
-        setDragOver(findTargetIdx(e.clientY))
-      },
-      onPointerUp: () => {
-        const from = dragFromRef.current
-        if (from !== null && dragOver !== null && from !== dragOver) {
-          const newOrder = [...sortedCats.map(c => c.id)]
-          const [moved] = newOrder.splice(from, 1)
-          newOrder.splice(dragOver, 0, moved)
-          patch({ sortMode: 'custom', categoryOrder: newOrder })
+        dragFromRef.current = idx
+        dragOverRef.current = idx
+        setDragFrom(idx)
+        setDragOver(idx)
+        const pid = e.pointerId
+
+        function onMove(ev: PointerEvent) {
+          if (ev.pointerId !== pid) return
+          const t = findTargetIdx(ev.clientY)
+          dragOverRef.current = t
+          setDragOver(t)
         }
-        dragFromRef.current = null
-        setDragOver(null)
+        function onUp() {
+          document.removeEventListener('pointermove', onMove)
+          document.removeEventListener('pointerup', onUp)
+          document.removeEventListener('pointercancel', onUp)
+          const from = dragFromRef.current
+          const over = dragOverRef.current
+          dragFromRef.current = null
+          dragOverRef.current = null
+          setDragFrom(null)
+          setDragOver(null)
+          if (from !== null && over !== null && from !== over) {
+            const cats = sortedCatsRef.current
+            const newOrder = cats.map(c => c.id)
+            const [moved] = newOrder.splice(from, 1)
+            newOrder.splice(over, 0, moved)
+            patch({ sortMode: 'custom', categoryOrder: newOrder })
+          }
+        }
+        document.addEventListener('pointermove', onMove)
+        document.addEventListener('pointerup', onUp)
+        document.addEventListener('pointercancel', onUp)
       },
-      onPointerCancel: () => { dragFromRef.current = null; setDragOver(null) },
     }
   }
 
@@ -836,6 +855,7 @@ function DraftEditor({
     () => applySort(draft.categories, draft.sortMode, draft.categoryOrder),
     [draft.categories, draft.sortMode, draft.categoryOrder]
   )
+  sortedCatsRef.current = sortedCats
 
   const allocated = draft.categories.reduce((s, c) => s + c.amount, 0)
   const remaining = scenarioIncome - allocated
@@ -1024,8 +1044,8 @@ function DraftEditor({
             <div
               key={cat.id}
               ref={el => { cardEls.current[i] = el }}
-              className={`transition-opacity duration-100 ${dragFromRef.current === i ? 'opacity-40' : ''}`}
-              style={dragOver === i && dragFromRef.current !== null && dragFromRef.current !== i ? { borderTop: '2px solid #5E6AD2' } : {}}
+              className={`transition-opacity duration-100 ${dragFrom === i ? 'opacity-40' : ''}`}
+              style={dragOver === i && dragFrom !== null && dragFrom !== i ? { borderTop: '2px solid #5E6AD2' } : {}}
             >
               <CategoryCard
                 cat={cat}
