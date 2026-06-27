@@ -325,6 +325,10 @@ function CategoryCard({
   dragHandleProps: React.HTMLAttributes<HTMLDivElement> & { style?: React.CSSProperties }
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [sliderVal, setSliderVal] = useState(cat.amount)
+  const slidingRef = useRef(false)
+  // keep slider in sync when amount changes from outside (stepper buttons, etc.)
+  if (!slidingRef.current && sliderVal !== cat.amount) setSliderVal(cat.amount)
   const displayAmt = convertFromMonthly(cat.amount, period)
   const pct = income > 0 ? cat.amount / income : 0
   const remaining = runningBefore - cat.amount
@@ -432,8 +436,10 @@ function CategoryCard({
               min={sliderMin}
               max={sliderMax}
               step={step}
-              value={cat.amount}
-              onChange={e => setAmt(Number(e.target.value))}
+              value={sliderVal}
+              onChange={e => { slidingRef.current = true; setSliderVal(Number(e.target.value)) }}
+              onPointerUp={e => { slidingRef.current = false; setAmt(Number((e.target as HTMLInputElement).value)) }}
+              onMouseUp={e => { slidingRef.current = false; setAmt(Number((e.target as HTMLInputElement).value)) }}
               className="w-full h-2 rounded-full appearance-none bg-slate-700 accent-blue-500 cursor-pointer"
             />
             {(cat.minAmount !== undefined || cat.targetAmount !== undefined || cat.maxAmount !== undefined) && (
@@ -1278,7 +1284,7 @@ export function BudgetSandbox({
       activeScenarioId: firstId,
       period,
       startingFrom,
-      sortMode: 'custom',
+      sortMode: 'amount-desc',
       categoryOrder: baseCats.map(c => c.id),
       increaseRules: DEFAULT_INCREASE_RULES,
       decreaseRules: DEFAULT_DECREASE_RULES,
