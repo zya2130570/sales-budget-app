@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import type { SandboxDraft, SandboxCategory, SandboxIncomeScenario, SandboxSortMode, SandboxCategoryBehavior, SandboxChangeRule, Category, SavedBudget, Period, CategoryType } from '../types'
 import { convertFromMonthly } from '../utils/calculations'
 
@@ -315,6 +315,7 @@ function CategoryCard({
   cat, income, runningBefore, period,
   onChange, onRemove,
   dragHandleProps,
+  onLongPress,
 }: {
   cat: SandboxCategory
   income: number
@@ -323,9 +324,12 @@ function CategoryCard({
   onChange: (updated: SandboxCategory) => void
   onRemove: () => void
   dragHandleProps: React.HTMLAttributes<HTMLDivElement> & { style?: React.CSSProperties }
+  onLongPress?: (pid: number) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const [sliderVal, setSliderVal] = useState(cat.amount)
+  const [amtFocused, setAmtFocused] = useState(false)
+  const [amtStr, setAmtStr] = useState('')
   const slidingRef = useRef(false)
   // keep slider in sync when amount changes from outside (stepper buttons, etc.)
   if (!slidingRef.current && sliderVal !== cat.amount) setSliderVal(cat.amount)
@@ -347,16 +351,40 @@ function CategoryCard({
     onChange({ ...cat, amount: Math.max(0, Math.round(monthly)) })
   }
 
-  const step = 1 // $1/mo steps on slider
+  const step = convertToMonthly(1, period) // $1/period steps → whole numbers in display
   const sliderMin = 0
   const sliderMax = income > 0 ? income * 1.5 : 5000
 
   return (
     <div className={`rounded-2xl border transition-all ${expanded ? 'border-blue-600/60 bg-slate-800' : 'border-slate-700/60 bg-slate-800/60'}`}>
-      {/* collapsed header */}
+      {/* collapsed header — touch-none so iOS doesn't claim the touch for scroll,
+          allowing long-press drag to work without pointercancel */}
       <div
-        className="flex items-center gap-3 px-3.5 py-3 cursor-pointer select-none"
+        className="flex items-center gap-3 px-3.5 py-3 cursor-pointer select-none touch-none"
         onClick={() => setExpanded(v => !v)}
+        onPointerDown={onLongPress ? (e: React.PointerEvent) => {
+          const pid = e.pointerId, startX = e.clientX, startY = e.clientY
+          let cancelled = false
+          const timer = setTimeout(() => {
+            if (cancelled) return
+            cleanup(); onLongPress(pid)
+          }, 300)
+          function onMove(ev: PointerEvent) {
+            if (ev.pointerId !== pid) return
+            if (Math.abs(ev.clientY - startY) > 15 || Math.abs(ev.clientX - startX) > 15) {
+              cancelled = true; clearTimeout(timer); cleanup()
+            }
+          }
+          function onUp() { cancelled = true; clearTimeout(timer); cleanup() }
+          function cleanup() {
+            document.removeEventListener('pointermove', onMove)
+            document.removeEventListener('pointerup', onUp)
+            document.removeEventListener('pointercancel', onUp)
+          }
+          document.addEventListener('pointermove', onMove)
+          document.addEventListener('pointerup', onUp)
+          document.addEventListener('pointercancel', onUp)
+        } : undefined}
       >
         {/* drag handle */}
         <div
@@ -415,9 +443,17 @@ function CategoryCard({
               <div className="flex-1 text-center">
                 <input
                   type="text"
-                  value={fmt(displayAmt)}
-                  readOnly
-                  className="w-full text-center text-lg font-bold text-slate-100 bg-transparent border-none outline-none cursor-default"
+                  inputMode="decimal"
+                  value={amtFocused ? amtStr : fmt(displayAmt)}
+                  onFocus={() => { setAmtFocused(true); setAmtStr(String(Math.round(displayAmt))) }}
+                  onChange={e => setAmtStr(e.target.value.replace(/[^0-9.]/g, ''))}
+                  onBlur={() => {
+                    setAmtFocused(false)
+                    const n = parseFloat(amtStr)
+                    if (!isNaN(n) && n >= 0) setAmt(convertToMonthly(n, period))
+                  }}
+                  onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+                  className="w-full text-center text-lg font-bold text-slate-100 bg-transparent border-none outline-none"
                 />
               </div>
               <button
@@ -799,9 +835,6 @@ function DraftEditor({
   const [dragOver, setDragOver] = useState<number | null>(null)
   const cardEls = useRef<(HTMLDivElement | null)[]>([])
   const sortedCatsRef = useRef<SandboxCategory[]>([])
-  const cardsContainerRef = useRef<HTMLDivElement | null>(null)
-  // Always-current ref so the useEffect closure below never goes stale
-  const startDragRef = useRef<(fromIdx: number, pid: number) => void>(() => {})
 
   function findTargetIdx(clientY: number): number {
     const els = cardEls.current
@@ -882,74 +915,6 @@ function DraftEditor({
     [draft.categories, draft.sortMode, draft.categoryOrder]
   )
   sortedCatsRef.current = sortedCats
-  // Keep ref current so the container's native listener always calls the latest startDrag
-  startDragRef.current = startDrag
-
-  // ONE native pointerdown listener on the cards container, { passive: false } so
-  // e.preventDefault() is called at element-level (not document-root React delegation).
-  // This is what iOS requires to properly honour preventDefault and not fire pointercancel.
-  useEffect(() => {
-    const container = cardsContainerRef.current
-    if (!container) return
-
-    function onContainerPD(e: PointerEvent) {
-      if (dragFromRef.current !== null) return
-      // Drag handle dots manage their own instant drag; skip long-press for them
-      if ((e.target as Element).closest('[data-drag-handle]')) return
-
-      // Find which card index was touched
-      let touchedIdx = -1
-      for (let i = 0; i < cardEls.current.length; i++) {
-        const el = cardEls.current[i]
-        if (el && (el === e.target || el.contains(e.target as Node))) { touchedIdx = i; break }
-      }
-      if (touchedIdx === -1) return
-
-      // Called at element level BEFORE bubbling to React root — iOS honours this
-      e.preventDefault()
-
-      const pid = e.pointerId, startX = e.clientX, startY = e.clientY
-      const startTime = Date.now(), capturedIdx = touchedIdx
-      let cancelled = false
-
-      const timer = setTimeout(() => {
-        if (cancelled) return
-        earlyCleanup()
-        startDragRef.current(capturedIdx, pid)
-      }, 300)
-
-      function onEarlyMove(ev: PointerEvent) {
-        if (ev.pointerId !== pid) return
-        if (Math.abs(ev.clientY - startY) > 15 || Math.abs(ev.clientX - startX) > 15) {
-          cancelled = true; clearTimeout(timer); earlyCleanup()
-        }
-      }
-      function onEarlyUp(ev: PointerEvent) {
-        if (ev.pointerId !== pid) return
-        const isTap = ev.type === 'pointerup'
-          && Date.now() - startTime < 300
-          && Math.abs(ev.clientY - startY) < 10
-          && Math.abs(ev.clientX - startX) < 10
-        cancelled = true; clearTimeout(timer); earlyCleanup()
-        if (isTap) {
-          // Native click won't fire after preventDefault() — synthesize it
-          const target = document.elementFromPoint(ev.clientX, ev.clientY)
-          target?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
-        }
-      }
-      function earlyCleanup() {
-        document.removeEventListener('pointermove', onEarlyMove)
-        document.removeEventListener('pointerup', onEarlyUp)
-        document.removeEventListener('pointercancel', onEarlyUp)
-      }
-      document.addEventListener('pointermove', onEarlyMove)
-      document.addEventListener('pointerup', onEarlyUp)
-      document.addEventListener('pointercancel', onEarlyUp)
-    }
-
-    container.addEventListener('pointerdown', onContainerPD, { passive: false })
-    return () => container.removeEventListener('pointerdown', onContainerPD)
-  }, []) // refs handle stale closures — no deps needed
 
   const allocated = draft.categories.reduce((s, c) => s + c.amount, 0)
   const remaining = scenarioIncome - allocated
@@ -1133,7 +1098,7 @@ function DraftEditor({
         </div>
 
         {/* category cards */}
-        <div className="space-y-2" ref={cardsContainerRef}>
+        <div className="space-y-2">
           {sortedCats.map((cat, i) => (
             <div
               key={cat.id}
@@ -1150,6 +1115,7 @@ function DraftEditor({
                 onChange={updated => updateCat(cat.id, updated)}
                 onRemove={() => removeCat(cat.id)}
                 dragHandleProps={makeDragHandleProps(i)}
+                onLongPress={pid => startDrag(i, pid)}
               />
             </div>
           ))}
