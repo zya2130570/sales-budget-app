@@ -481,23 +481,31 @@ function CategoryCard({
 
       {/* expanded section */}
       {expanded && (
-        <div className="border-t border-slate-700/50 px-3.5 py-4 space-y-4">
+        <div className={`border-t border-slate-700/50 px-3.5 py-4 space-y-4 ${locked ? 'pointer-events-none opacity-50' : ''}`}>
+          {/* locked notice */}
+          {locked && (
+            <p className="text-[11px] text-amber-400/80 text-center">Locked — tap the lock icon to edit</p>
+          )}
+
           {/* amount stepper */}
           <div>
             <label className="text-[11px] text-slate-400 uppercase tracking-wide mb-2 block">Planned Amount ({labelPeriod(period)})</label>
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setAmt(cat.amount - convertToMonthly(1, period))}
-                className="w-9 h-9 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-lg font-bold transition-colors flex items-center justify-center flex-shrink-0"
+                disabled={locked}
+                className="w-9 h-9 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-lg font-bold transition-colors flex items-center justify-center flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
               >−</button>
               <div className="flex-1 text-center">
                 <input
                   type="text"
                   inputMode="decimal"
+                  readOnly={locked}
                   value={amtFocused ? amtStr : fmt(displayAmt)}
-                  onFocus={e => { setAmtFocused(true); setAmtStr(String(Math.round(displayAmt))); setTimeout(() => e.target.select(), 0) }}
-                  onChange={e => setAmtStr(e.target.value.replace(/[^0-9.]/g, ''))}
+                  onFocus={e => { if (locked) return; setAmtFocused(true); setAmtStr(String(Math.round(displayAmt))); setTimeout(() => e.target.select(), 0) }}
+                  onChange={e => { if (locked) return; setAmtStr(e.target.value.replace(/[^0-9.]/g, '')) }}
                   onBlur={() => {
+                    if (locked) return
                     setAmtFocused(false)
                     const n = parseFloat(amtStr)
                     if (!isNaN(n) && n >= 0) setAmt(convertToMonthly(n, period))
@@ -508,7 +516,8 @@ function CategoryCard({
               </div>
               <button
                 onClick={() => setAmt(cat.amount + convertToMonthly(1, period))}
-                className="w-9 h-9 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-lg font-bold transition-colors flex items-center justify-center flex-shrink-0"
+                disabled={locked}
+                className="w-9 h-9 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 text-lg font-bold transition-colors flex items-center justify-center flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
               >+</button>
             </div>
             <div className="mt-1 text-[10px] text-slate-500 text-center">
@@ -523,11 +532,12 @@ function CategoryCard({
               min={sliderMin}
               max={sliderMax}
               step={step}
+              disabled={locked}
               value={sliderVal}
-              onChange={e => { slidingRef.current = true; setSliderVal(Number(e.target.value)) }}
-              onPointerUp={e => { slidingRef.current = false; setAmt(Number((e.target as HTMLInputElement).value)) }}
-              onMouseUp={e => { slidingRef.current = false; setAmt(Number((e.target as HTMLInputElement).value)) }}
-              className="w-full h-2 rounded-full appearance-none bg-slate-700 accent-blue-500 cursor-pointer"
+              onChange={e => { if (locked) return; slidingRef.current = true; setSliderVal(Number(e.target.value)) }}
+              onPointerUp={e => { if (locked) return; slidingRef.current = false; setAmt(Number((e.target as HTMLInputElement).value)) }}
+              onMouseUp={e => { if (locked) return; slidingRef.current = false; setAmt(Number((e.target as HTMLInputElement).value)) }}
+              className="w-full h-2 rounded-full appearance-none bg-slate-700 accent-blue-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
             />
             {(cat.minAmount !== undefined || cat.targetAmount !== undefined || cat.maxAmount !== undefined) && (
               <div className="flex justify-between text-[10px] text-slate-500 mt-1">
@@ -554,8 +564,9 @@ function CategoryCard({
                 return (
                   <button
                     key={t}
+                    disabled={locked}
                     onClick={() => onChange({ ...cat, type: t })}
-                    className={`text-[11px] px-2.5 py-2 rounded-xl border transition-colors text-left ${active ? 'text-white' : 'border-slate-600/60 bg-slate-700/40 text-slate-400 hover:bg-slate-700'}`}
+                    className={`text-[11px] px-2.5 py-2 rounded-xl border transition-colors text-left disabled:cursor-not-allowed ${active ? 'text-white' : 'border-slate-600/60 bg-slate-700/40 text-slate-400 hover:bg-slate-700'}`}
                     style={active ? { borderColor: color, backgroundColor: color + '33', color } : {}}
                   >
                     {TYPE_LABEL[t]}
@@ -572,8 +583,9 @@ function CategoryCard({
               {(['fixed', 'flexible', 'percentage', 'overflow'] as SandboxCategoryBehavior[]).map(b => (
                 <button
                   key={b}
+                  disabled={locked}
                   onClick={() => onChange({ ...cat, behavior: b })}
-                  className={`text-[11px] px-2.5 py-2 rounded-xl border transition-colors text-left ${cat.behavior === b ? 'border-blue-500 bg-blue-600/20 text-blue-300' : 'border-slate-600/60 bg-slate-700/40 text-slate-400 hover:bg-slate-700'}`}
+                  className={`text-[11px] px-2.5 py-2 rounded-xl border transition-colors text-left disabled:cursor-not-allowed ${cat.behavior === b ? 'border-blue-500 bg-blue-600/20 text-blue-300' : 'border-slate-600/60 bg-slate-700/40 text-slate-400 hover:bg-slate-700'}`}
                 >
                   {BEHAVIOR_LABEL[b]}
                 </button>
