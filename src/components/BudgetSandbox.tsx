@@ -524,6 +524,27 @@ function CategoryCard({
             <span className="text-[11px] text-slate-400"> remaining after this category</span>
           </div>
 
+          {/* type */}
+          <div>
+            <label className="text-[11px] text-slate-400 uppercase tracking-wide mb-2 block">Category Type</label>
+            <div className="grid grid-cols-2 gap-1.5">
+              {(['fixed bill', 'variable spending', 'savings', 'investing'] as CategoryType[]).map(t => {
+                const active = cat.type === t
+                const color = TYPE_COLOR[t]
+                return (
+                  <button
+                    key={t}
+                    onClick={() => onChange({ ...cat, type: t })}
+                    className={`text-[11px] px-2.5 py-2 rounded-xl border transition-colors text-left ${active ? 'text-white' : 'border-slate-600/60 bg-slate-700/40 text-slate-400 hover:bg-slate-700'}`}
+                    style={active ? { borderColor: color, backgroundColor: color + '33', color } : {}}
+                  >
+                    {TYPE_LABEL[t]}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
           {/* behavior */}
           <div>
             <label className="text-[11px] text-slate-400 uppercase tracking-wide mb-2 block">Income Response</label>
