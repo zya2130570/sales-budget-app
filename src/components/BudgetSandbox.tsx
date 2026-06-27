@@ -823,6 +823,7 @@ function DraftEditor({
 
     function onMove(ev: PointerEvent) {
       if (ev.pointerId !== pid) return
+      ev.preventDefault()
       const t = findTargetIdx(ev.clientY)
       dragOverRef.current = t
       setDragOver(t)
@@ -845,7 +846,7 @@ function DraftEditor({
         patch({ sortMode: 'custom', categoryOrder: newOrder })
       }
     }
-    document.addEventListener('pointermove', onMove)
+    document.addEventListener('pointermove', onMove, { passive: false })
     document.addEventListener('pointerup', onUp)
     document.addEventListener('pointercancel', onUp)
   }
@@ -1095,8 +1096,13 @@ function DraftEditor({
               key={cat.id}
               ref={el => { cardEls.current[i] = el }}
               {...makeCardLongPressProps(i)}
+              onContextMenu={e => e.preventDefault()}
               className={`transition-opacity duration-100 ${dragFrom === i ? 'opacity-40' : ''}`}
-              style={dragOver === i && dragFrom !== null && dragFrom !== i ? { borderTop: '2px solid #5E6AD2' } : {}}
+              style={{
+                userSelect: 'none',
+                touchAction: dragFrom !== null ? 'none' : undefined,
+                ...(dragOver === i && dragFrom !== null && dragFrom !== i ? { borderTop: '2px solid #5E6AD2' } : {}),
+              }}
             >
               <CategoryCard
                 cat={cat}
