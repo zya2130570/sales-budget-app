@@ -330,6 +330,8 @@ function CategoryCard({
   const [sliderVal, setSliderVal] = useState(cat.amount)
   const [amtFocused, setAmtFocused] = useState(false)
   const [amtStr, setAmtStr] = useState('')
+  const [nameEditing, setNameEditing] = useState(false)
+  const [nameStr, setNameStr] = useState('')
   const slidingRef = useRef(false)
   // keep slider in sync when amount changes from outside (stepper buttons, etc.)
   if (!slidingRef.current && sliderVal !== cat.amount) setSliderVal(cat.amount)
@@ -406,8 +408,31 @@ function CategoryCard({
           </span>
         </div>
         {/* name + type */}
-        <div className="flex-1 min-w-0">
-          <div className="text-xs font-semibold text-slate-200 truncate">{cat.name}</div>
+        <div className="flex-1 min-w-0" onClick={e => e.stopPropagation()}>
+          {nameEditing ? (
+            <input
+              type="text"
+              value={nameStr}
+              autoFocus
+              className="w-full text-xs font-semibold text-slate-200 bg-transparent border-b border-blue-500 outline-none truncate"
+              onChange={e => setNameStr(e.target.value)}
+              onFocus={e => e.target.select()}
+              onBlur={() => {
+                setNameEditing(false)
+                const trimmed = nameStr.trim()
+                if (trimmed) onChange({ ...cat, name: trimmed })
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                if (e.key === 'Escape') { setNameEditing(false) }
+              }}
+            />
+          ) : (
+            <div
+              className="text-xs font-semibold text-slate-200 truncate"
+              onClick={() => { setNameStr(cat.name); setNameEditing(true) }}
+            >{cat.name}</div>
+          )}
           <div className="text-[10px] text-slate-500">{TYPE_LABEL[cat.type]} · {BEHAVIOR_LABEL[cat.behavior]}</div>
         </div>
         {/* amount + pct */}
