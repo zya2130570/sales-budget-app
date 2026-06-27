@@ -874,7 +874,12 @@ function DraftEditor({
     return {
       onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
         if (dragFromRef.current !== null) return
+        // preventDefault stops iOS from claiming the touch for scrolling or text
+        // selection, which would fire pointercancel before our 300ms timer fires.
+        // We synthesize a click manually on short taps so expand/collapse still works.
+        e.preventDefault()
         const startY = e.clientY, startX = e.clientX, pid = e.pointerId
+        const startTime = Date.now()
         let cancelled = false
 
         const timer = setTimeout(() => {
@@ -891,7 +896,16 @@ function DraftEditor({
         }
         function onEarlyUp(ev: PointerEvent) {
           if (ev.pointerId !== pid) return
+          const isTap = ev.type === 'pointerup'
+            && Date.now() - startTime < 300
+            && Math.abs(ev.clientY - startY) < 10
+            && Math.abs(ev.clientX - startX) < 10
           cancelled = true; clearTimeout(timer); earlyCleanup()
+          if (isTap) {
+            // Fire a synthetic click so the card header's onClick (expand/collapse) triggers
+            const target = document.elementFromPoint(ev.clientX, ev.clientY)
+            target?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+          }
         }
         function earlyCleanup() {
           document.removeEventListener('pointermove', onEarlyMove)
@@ -1103,7 +1117,7 @@ function DraftEditor({
               ref={el => { cardEls.current[i] = el }}
               {...makeCardLongPressProps(i)}
               onContextMenu={e => e.preventDefault()}
-              className={`transition-opacity duration-100 select-none ${dragFrom === i ? 'opacity-40' : ''}`}
+              className={`transition-opacity duration-100 ${dragFrom !== null ? 'select-none' : ''} ${dragFrom === i ? 'opacity-40' : ''}`}
               style={{
                 touchAction: dragFrom !== null ? 'none' : undefined,
                 ...(dragOver === i && dragFrom !== null && dragFrom !== i ? { borderTop: '2px solid #5E6AD2' } : {}),
