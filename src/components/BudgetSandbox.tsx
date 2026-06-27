@@ -41,6 +41,7 @@ const TYPE_COLOR: Record<CategoryType, string> = {
 
 const SORT_LABELS: Record<SandboxSortMode, string> = {
   custom: 'Custom',
+  grouped: 'Grouped',
   'fixed-first': 'Fixed first',
   'flexible-first': 'Flexible first',
   'savings-first': 'Savings first',
@@ -75,12 +76,16 @@ function applySort(cats: SandboxCategory[], mode: SandboxSortMode, order: string
   const copy = [...cats]
   if (mode === 'amount-desc') return copy.sort((a, b) => b.amount - a.amount)
   if (mode === 'amount-asc') return copy.sort((a, b) => a.amount - b.amount)
+  if (mode === 'grouped') {
+    const groupOrder: CategoryType[] = ['fixed bill', 'variable spending', 'savings', 'investing']
+    return copy.sort((a, b) => groupOrder.indexOf(a.type) - groupOrder.indexOf(b.type))
+  }
   const typeOrder: Record<SandboxSortMode, CategoryType[]> = {
     'fixed-first':    ['fixed bill', 'variable spending', 'savings', 'investing'],
     'flexible-first': ['variable spending', 'fixed bill', 'savings', 'investing'],
     'savings-first':  ['savings', 'fixed bill', 'variable spending', 'investing'],
     'investing-first':['investing', 'savings', 'fixed bill', 'variable spending'],
-    custom: [], 'amount-desc': [], 'amount-asc': [],
+    custom: [], grouped: [], 'amount-desc': [], 'amount-asc': [],
   }
   const order2 = typeOrder[mode] ?? []
   return copy.sort((a, b) => (order2.indexOf(a.type) ?? 99) - (order2.indexOf(b.type) ?? 99))
