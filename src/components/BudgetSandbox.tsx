@@ -108,12 +108,20 @@ const DEFAULT_DECREASE_RULES: SandboxChangeRule[] = [
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function IncomeSummaryBar({
-  income, allocated, period,
-}: { income: number; allocated: number; period: Period }) {
+  income, allocated, period, categories,
+}: { income: number; allocated: number; period: Period; categories: SandboxCategory[] }) {
+  const [showLockDetail, setShowLockDetail] = useState(false)
   const remaining = income - allocated
   const allocPct = income > 0 ? Math.min(allocated / income, 1) : 0
   const remainPct = income > 0 ? remaining / income : 0
   const isOver = remaining < 0
+
+  const lockedAmt = categories.filter(c => c.locked).reduce((s, c) => s + c.amount, 0)
+  const flexibleAmt = categories.filter(c => !c.locked).reduce((s, c) => s + c.amount, 0)
+  const lockedPct = income > 0 ? lockedAmt / income : 0
+  const flexiblePct = income > 0 ? flexibleAmt / income : 0
+  const lockedCats = categories.filter(c => c.locked)
+  const flexibleCats = categories.filter(c => !c.locked)
 
   return (
     <div className="rounded-2xl border border-slate-700 bg-slate-800/80 p-4 space-y-3">
@@ -135,7 +143,8 @@ function IncomeSummaryBar({
           <div className={`text-sm font-bold ${isOver ? 'text-red-400' : 'text-slate-300'}`}>{(allocPct * 100).toFixed(1)}%</div>
         </div>
       </div>
-      {/* allocation bar */}
+
+      {/* total allocation bar */}
       <div className="h-2 rounded-full bg-slate-700 overflow-hidden">
         <div
           className={`h-full rounded-full transition-all ${isOver ? 'bg-red-500' : allocPct > 0.9 ? 'bg-amber-400' : 'bg-blue-500'}`}
@@ -151,6 +160,80 @@ function IncomeSummaryBar({
         <p className="text-[11px] text-slate-500 text-center">
           {fmtPct(remainPct)} unallocated ({fmt(convertFromMonthly(remaining, period))})
         </p>
+      )}
+
+      {/* locked / flexible split */}
+      {lockedAmt + flexibleAmt > 0 && (
+        <div className="space-y-2 pt-1 border-t border-slate-700/50">
+          {/* split bar */}
+          <div className="h-2.5 rounded-full bg-slate-700 overflow-hidden flex">
+            <div
+              className="h-full bg-amber-400/80 transition-all"
+              style={{ width: `${Math.min(lockedPct * 100, 100)}%` }}
+            />
+            <div
+              className="h-full bg-blue-500/70 transition-all"
+              style={{ width: `${Math.min(flexiblePct * 100, 100 - lockedPct * 100)}%` }}
+            />
+          </div>
+
+          {/* legend + detail toggle */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3 text-[11px]">
+              <span className="flex items-center gap-1 text-amber-400">
+                <span className="inline-block w-2 h-2 rounded-sm bg-amber-400/80" />
+                Locked {fmt(convertFromMonthly(lockedAmt, period))}
+              </span>
+              <span className="flex items-center gap-1 text-blue-400">
+                <span className="inline-block w-2 h-2 rounded-sm bg-blue-500/70" />
+                Flexible {fmt(convertFromMonthly(flexibleAmt, period))}
+              </span>
+            </div>
+            <button
+              onClick={() => setShowLockDetail(v => !v)}
+              className="text-[11px] text-slate-500 hover:text-slate-300 transition-colors"
+            >
+              {showLockDetail ? 'Hide' : 'Details'}
+            </button>
+          </div>
+
+          {/* detail breakdown */}
+          {showLockDetail && (
+            <div className="rounded-xl bg-slate-700/40 p-3 space-y-3">
+              {lockedCats.length > 0 && (
+                <div>
+                  <div className="text-[10px] text-amber-400 uppercase tracking-wide mb-1.5 flex items-center gap-1">
+                    <svg width="10" height="11" viewBox="0 0 13 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="2" y="6" width="9" height="7" rx="1.5"/><path d="M4 6V4a2.5 2.5 0 0 1 5 0v2"/>
+                    </svg>
+                    Locked
+                  </div>
+                  <div className="space-y-1">
+                    {lockedCats.map(c => (
+                      <div key={c.id} className="flex justify-between text-[11px]">
+                        <span className="text-slate-400 truncate">{c.name}</span>
+                        <span className="text-slate-300 ml-2 shrink-0">{fmt(convertFromMonthly(c.amount, period))}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {flexibleCats.length > 0 && (
+                <div>
+                  <div className="text-[10px] text-blue-400 uppercase tracking-wide mb-1.5">Flexible</div>
+                  <div className="space-y-1">
+                    {flexibleCats.map(c => (
+                      <div key={c.id} className="flex justify-between text-[11px]">
+                        <span className="text-slate-400 truncate">{c.name}</span>
+                        <span className="text-slate-300 ml-2 shrink-0">{fmt(convertFromMonthly(c.amount, period))}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
@@ -1142,7 +1225,7 @@ function DraftEditor({
       {/* body */}
       <div className="flex-1 px-4 py-4 space-y-4 max-w-2xl mx-auto w-full">
         {/* income summary */}
-        <IncomeSummaryBar income={scenarioIncome} allocated={allocated} period={draft.period} />
+        <IncomeSummaryBar income={scenarioIncome} allocated={allocated} period={draft.period} categories={draft.categories} />
 
         {/* view switcher */}
         <div className="flex rounded-xl bg-slate-800 border border-slate-700 p-1 gap-1">
