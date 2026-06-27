@@ -186,6 +186,7 @@ export type SandboxCategory = {
   amount: number        // monthly, same convention as Category
   type: CategoryType
   behavior: SandboxCategoryBehavior
+  locked?: boolean
   minAmount?: number
   targetAmount?: number
   maxAmount?: number

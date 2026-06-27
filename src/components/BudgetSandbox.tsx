@@ -362,8 +362,10 @@ function CategoryCard({
   const sliderMin = 0
   const sliderMax = income > 0 ? income * 1.5 : 5000
 
+  const locked = cat.locked ?? false
+
   return (
-    <div className={`rounded-2xl border transition-all ${expanded ? 'border-blue-600/60 bg-slate-800' : 'border-slate-700/60 bg-slate-800/60'}`}>
+    <div className={`rounded-2xl border transition-all ${expanded ? 'border-blue-600/60 bg-slate-800' : locked ? 'border-slate-600/80 bg-slate-800/80' : 'border-slate-700/60 bg-slate-800/60'}`}>
       {/* collapsed header — touch-none so iOS doesn't claim the touch for scroll,
           allowing long-press drag to work without pointercancel */}
       <div
@@ -398,7 +400,7 @@ function CategoryCard({
           {...dragHandleProps}
           data-drag-handle="true"
           onClick={e => e.stopPropagation()}
-          className="text-slate-600 hover:text-slate-400 cursor-grab active:cursor-grabbing touch-none flex-shrink-0 px-0.5"
+          className={`touch-none flex-shrink-0 px-0.5 ${locked ? 'text-slate-700 cursor-default pointer-events-none' : 'text-slate-600 hover:text-slate-400 cursor-grab active:cursor-grabbing'}`}
         >
           <svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor">
             <circle cx="3" cy="4" r="1.5"/><circle cx="9" cy="4" r="1.5"/>
@@ -445,7 +447,25 @@ function CategoryCard({
           <div className="text-sm font-bold text-slate-100">{fmt(displayAmt)}</div>
           <div className="text-[10px] text-slate-500">{(pct * 100).toFixed(1)}%</div>
         </div>
-        <span className="text-slate-500 text-xs ml-1">{expanded ? '▲' : '▼'}</span>
+        {/* lock toggle */}
+        <button
+          onClick={e => { e.stopPropagation(); onChange({ ...cat, locked: !locked }) }}
+          className={`ml-1 p-1 rounded-lg transition-colors shrink-0 ${locked ? 'text-amber-400 hover:text-amber-300' : 'text-slate-600 hover:text-slate-400'}`}
+          title={locked ? 'Locked — tap to unlock' : 'Unlocked — tap to lock'}
+        >
+          {locked ? (
+            <svg width="13" height="14" viewBox="0 0 13 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="6" width="9" height="7" rx="1.5"/>
+              <path d="M4 6V4a2.5 2.5 0 0 1 5 0v2"/>
+            </svg>
+          ) : (
+            <svg width="13" height="14" viewBox="0 0 13 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="2" y="6" width="9" height="7" rx="1.5"/>
+              <path d="M4 6V4a2.5 2.5 0 0 1 5 0"/>
+            </svg>
+          )}
+        </button>
+        <span className="text-slate-500 text-xs ml-0.5">{expanded ? '▲' : '▼'}</span>
       </div>
 
       {/* allocation bar */}
