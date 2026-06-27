@@ -413,7 +413,7 @@ function CategoryCard({
           </span>
         </div>
         {/* name + type */}
-        <div className="flex-1 min-w-0" onClick={e => e.stopPropagation()}>
+        <div className="flex-1 min-w-0" onClick={e => { if (expanded || nameEditing) e.stopPropagation() }}>
           {nameEditing ? (
             <input
               type="text"
@@ -435,7 +435,7 @@ function CategoryCard({
           ) : (
             <div
               className="text-xs font-semibold text-slate-200 truncate"
-              onClick={() => { setNameStr(cat.name); setNameEditing(true) }}
+              onClick={() => { if (!expanded) return; setNameStr(cat.name); setNameEditing(true) }}
             >{cat.name}</div>
           )}
           <div className="text-[10px] text-slate-500">{TYPE_LABEL[cat.type]} · {BEHAVIOR_LABEL[cat.behavior]}</div>
