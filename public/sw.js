@@ -2,7 +2,7 @@
 // Provides offline support by caching the app shell on install.
 // Uses a "network-first" strategy for navigation, falling back to cache.
 
-const CACHE_NAME = 'flow-v44'
+const CACHE_NAME = 'flow-v45'
 const SHELL_ASSETS = [
   '/',
   '/index.html',
