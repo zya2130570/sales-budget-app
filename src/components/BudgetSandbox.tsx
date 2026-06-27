@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import type { SandboxDraft, SandboxCategory, SandboxIncomeScenario, SandboxSortMode, SandboxCategoryBehavior, SandboxChangeRule, Category, SavedBudget, Period, CategoryType } from '../types'
 import { convertFromMonthly } from '../utils/calculations'
 
@@ -361,6 +361,7 @@ function CategoryCard({
         {/* drag handle */}
         <div
           {...dragHandleProps}
+          data-drag-handle="true"
           onClick={e => e.stopPropagation()}
           className="text-slate-600 hover:text-slate-400 cursor-grab active:cursor-grabbing touch-none flex-shrink-0 px-0.5"
         >
@@ -798,6 +799,9 @@ function DraftEditor({
   const [dragOver, setDragOver] = useState<number | null>(null)
   const cardEls = useRef<(HTMLDivElement | null)[]>([])
   const sortedCatsRef = useRef<SandboxCategory[]>([])
+  const cardsContainerRef = useRef<HTMLDivElement | null>(null)
+  // Always-current ref so the useEffect closure below never goes stale
+  const startDragRef = useRef<(fromIdx: number, pid: number) => void>(() => {})
 
   function findTargetIdx(clientY: number): number {
     const els = cardEls.current
@@ -869,55 +873,6 @@ function DraftEditor({
     }
   }
 
-  // Card wrapper: hold anywhere for 300ms to start drag
-  function makeCardLongPressProps(idx: number): React.HTMLAttributes<HTMLDivElement> {
-    return {
-      onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-        if (dragFromRef.current !== null) return
-        // preventDefault stops iOS from claiming the touch for scrolling or text
-        // selection, which would fire pointercancel before our 300ms timer fires.
-        // We synthesize a click manually on short taps so expand/collapse still works.
-        e.preventDefault()
-        const startY = e.clientY, startX = e.clientX, pid = e.pointerId
-        const startTime = Date.now()
-        let cancelled = false
-
-        const timer = setTimeout(() => {
-          if (cancelled) return
-          earlyCleanup()
-          startDrag(idx, pid)
-        }, 300)
-
-        function onEarlyMove(ev: PointerEvent) {
-          if (ev.pointerId !== pid) return
-          if (Math.abs(ev.clientY - startY) > 15 || Math.abs(ev.clientX - startX) > 15) {
-            cancelled = true; clearTimeout(timer); earlyCleanup()
-          }
-        }
-        function onEarlyUp(ev: PointerEvent) {
-          if (ev.pointerId !== pid) return
-          const isTap = ev.type === 'pointerup'
-            && Date.now() - startTime < 300
-            && Math.abs(ev.clientY - startY) < 10
-            && Math.abs(ev.clientX - startX) < 10
-          cancelled = true; clearTimeout(timer); earlyCleanup()
-          if (isTap) {
-            // Fire a synthetic click so the card header's onClick (expand/collapse) triggers
-            const target = document.elementFromPoint(ev.clientX, ev.clientY)
-            target?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
-          }
-        }
-        function earlyCleanup() {
-          document.removeEventListener('pointermove', onEarlyMove)
-          document.removeEventListener('pointerup', onEarlyUp)
-          document.removeEventListener('pointercancel', onEarlyUp)
-        }
-        document.addEventListener('pointermove', onEarlyMove)
-        document.addEventListener('pointerup', onEarlyUp)
-        document.addEventListener('pointercancel', onEarlyUp)
-      },
-    }
-  }
 
   const activeScenario = draft.scenarios.find(s => s.id === draft.activeScenarioId) ?? draft.scenarios[0]
   const scenarioIncome = activeScenario?.monthlyIncome ?? incomeMonthly
@@ -927,6 +882,74 @@ function DraftEditor({
     [draft.categories, draft.sortMode, draft.categoryOrder]
   )
   sortedCatsRef.current = sortedCats
+  // Keep ref current so the container's native listener always calls the latest startDrag
+  startDragRef.current = startDrag
+
+  // ONE native pointerdown listener on the cards container, { passive: false } so
+  // e.preventDefault() is called at element-level (not document-root React delegation).
+  // This is what iOS requires to properly honour preventDefault and not fire pointercancel.
+  useEffect(() => {
+    const container = cardsContainerRef.current
+    if (!container) return
+
+    function onContainerPD(e: PointerEvent) {
+      if (dragFromRef.current !== null) return
+      // Drag handle dots manage their own instant drag; skip long-press for them
+      if ((e.target as Element).closest('[data-drag-handle]')) return
+
+      // Find which card index was touched
+      let touchedIdx = -1
+      for (let i = 0; i < cardEls.current.length; i++) {
+        const el = cardEls.current[i]
+        if (el && (el === e.target || el.contains(e.target as Node))) { touchedIdx = i; break }
+      }
+      if (touchedIdx === -1) return
+
+      // Called at element level BEFORE bubbling to React root — iOS honours this
+      e.preventDefault()
+
+      const pid = e.pointerId, startX = e.clientX, startY = e.clientY
+      const startTime = Date.now(), capturedIdx = touchedIdx
+      let cancelled = false
+
+      const timer = setTimeout(() => {
+        if (cancelled) return
+        earlyCleanup()
+        startDragRef.current(capturedIdx, pid)
+      }, 300)
+
+      function onEarlyMove(ev: PointerEvent) {
+        if (ev.pointerId !== pid) return
+        if (Math.abs(ev.clientY - startY) > 15 || Math.abs(ev.clientX - startX) > 15) {
+          cancelled = true; clearTimeout(timer); earlyCleanup()
+        }
+      }
+      function onEarlyUp(ev: PointerEvent) {
+        if (ev.pointerId !== pid) return
+        const isTap = ev.type === 'pointerup'
+          && Date.now() - startTime < 300
+          && Math.abs(ev.clientY - startY) < 10
+          && Math.abs(ev.clientX - startX) < 10
+        cancelled = true; clearTimeout(timer); earlyCleanup()
+        if (isTap) {
+          // Native click won't fire after preventDefault() — synthesize it
+          const target = document.elementFromPoint(ev.clientX, ev.clientY)
+          target?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+        }
+      }
+      function earlyCleanup() {
+        document.removeEventListener('pointermove', onEarlyMove)
+        document.removeEventListener('pointerup', onEarlyUp)
+        document.removeEventListener('pointercancel', onEarlyUp)
+      }
+      document.addEventListener('pointermove', onEarlyMove)
+      document.addEventListener('pointerup', onEarlyUp)
+      document.addEventListener('pointercancel', onEarlyUp)
+    }
+
+    container.addEventListener('pointerdown', onContainerPD, { passive: false })
+    return () => container.removeEventListener('pointerdown', onContainerPD)
+  }, []) // refs handle stale closures — no deps needed
 
   const allocated = draft.categories.reduce((s, c) => s + c.amount, 0)
   const remaining = scenarioIncome - allocated
@@ -1110,18 +1133,14 @@ function DraftEditor({
         </div>
 
         {/* category cards */}
-        <div className="space-y-2">
+        <div className="space-y-2" ref={cardsContainerRef}>
           {sortedCats.map((cat, i) => (
             <div
               key={cat.id}
               ref={el => { cardEls.current[i] = el }}
-              {...makeCardLongPressProps(i)}
               onContextMenu={e => e.preventDefault()}
-              className={`transition-opacity duration-100 ${dragFrom !== null ? 'select-none' : ''} ${dragFrom === i ? 'opacity-40' : ''}`}
-              style={{
-                touchAction: dragFrom !== null ? 'none' : undefined,
-                ...(dragOver === i && dragFrom !== null && dragFrom !== i ? { borderTop: '2px solid #5E6AD2' } : {}),
-              }}
+              className={`transition-opacity duration-100 select-none ${dragFrom === i ? 'opacity-40' : ''}`}
+              style={dragOver === i && dragFrom !== null && dragFrom !== i ? { borderTop: '2px solid #5E6AD2' } : {}}
             >
               <CategoryCard
                 cat={cat}
