@@ -109,6 +109,16 @@ body {
 /* AI panel specific — these are hardcoded dark */
 [data-theme="light"] .bg-slate-800\/80 { background-color: rgba(241,245,249,0.95) !important; }
 
+/* Prevent iOS Safari from zooming on input focus.
+   iOS auto-zooms any input whose font-size < 16px at focus time.
+   Exclude range/checkbox/radio since they have no text. */
+input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
+textarea,
+select {
+  font-size: 16px !important;
+  touch-action: manipulation;
+}
+
 /* Inputs and textareas */
 [data-theme="light"] input,
 [data-theme="light"] textarea,
