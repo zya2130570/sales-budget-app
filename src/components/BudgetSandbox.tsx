@@ -1097,9 +1097,8 @@ function DraftEditor({
               ref={el => { cardEls.current[i] = el }}
               {...makeCardLongPressProps(i)}
               onContextMenu={e => e.preventDefault()}
-              className={`transition-opacity duration-100 ${dragFrom === i ? 'opacity-40' : ''}`}
+              className={`transition-opacity duration-100 select-none ${dragFrom === i ? 'opacity-40' : ''}`}
               style={{
-                userSelect: 'none',
                 touchAction: dragFrom !== null ? 'none' : undefined,
                 ...(dragOver === i && dragFrom !== null && dragFrom !== i ? { borderTop: '2px solid #5E6AD2' } : {}),
               }}
