@@ -445,7 +445,7 @@ function CategoryCard({
                   type="text"
                   inputMode="decimal"
                   value={amtFocused ? amtStr : fmt(displayAmt)}
-                  onFocus={() => { setAmtFocused(true); setAmtStr(String(Math.round(displayAmt))) }}
+                  onFocus={e => { setAmtFocused(true); setAmtStr(String(Math.round(displayAmt))); setTimeout(() => e.target.select(), 0) }}
                   onChange={e => setAmtStr(e.target.value.replace(/[^0-9.]/g, ''))}
                   onBlur={() => {
                     setAmtFocused(false)
