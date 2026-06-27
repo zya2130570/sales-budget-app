@@ -1888,6 +1888,23 @@ if (txnForm.type === 'savings-goal' && txnForm.linkedGoalId) {
     }],
   } : t))
   showToast(`$${amount.toFixed(2)} also logged as a contribution to your savings goal`)
+} else if (txnForm.categoryId) {
+  // Auto-contribute to linked goal when transaction hits a savings/investing category with linkedGoalId
+  const linkedCat = categories.find(c => c.id === txnForm.categoryId)
+  if (linkedCat?.linkedGoalId && (linkedCat.type === 'savings' || linkedCat.type === 'investing')) {
+    setTargetsWithHistory(prev => prev.map(t => t.id === linkedCat.linkedGoalId ? {
+      ...t,
+      currentSaved: t.currentSaved + amount,
+      contributions: [...(t.contributions ?? []), {
+        id: crypto.randomUUID(),
+        amount,
+        date: txnForm.date,
+        note: merchant || `Via ${linkedCat.name}`,
+        createdAt: new Date().toISOString(),
+      }],
+    } : t))
+    showToast(`$${amount.toFixed(2)} auto-logged to linked goal`)
+  }
 }
 
 // Set blur guard BEFORE moving focus so Amount's onBlur skips format-back
@@ -4477,6 +4494,20 @@ txnMerchantRef.current?.focus()
                             <span className="text-[10px] text-teal-400 ml-1" title={`+${currency(rolloverByCatId[c.id])}/mo underspend rolled over from last month`}>
                               +{currency(convertFromMonthly(rolloverByCatId[c.id], period))} rolled
                             </span>
+                          )}
+                          {/* Goal link — savings/investing categories can be linked to a savings goal */}
+                          {(c.type === 'savings' || c.type === 'investing') && (
+                            <select
+                              value={c.linkedGoalId ?? ''}
+                              onChange={e => { pushBudgetHistory(); setCategories(prev => prev.map(x => x.id === c.id ? { ...x, linkedGoalId: e.target.value || undefined } : x)) }}
+                              className={`text-[10px] px-1.5 py-0.5 rounded border bg-slate-800 transition-colors ${c.linkedGoalId ? 'text-emerald-400 border-emerald-700/40' : 'text-slate-500 border-slate-700/30 hover:text-slate-400'}`}
+                              title="Link to a savings goal — transactions logged to this category will auto-contribute"
+                            >
+                              <option value="">{c.linkedGoalId ? '× Unlink' : '⚡ Link Goal'}</option>
+                              {targets.filter(t => !t.completed).map(t => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                              ))}
+                            </select>
                           )}
                         </td>
                       </tr>
