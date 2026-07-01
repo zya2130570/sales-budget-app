@@ -73,15 +73,6 @@
       * { scrollbar-width: none !important; -ms-overflow-style: none !important; }
       *::-webkit-scrollbar { display: none !important; }
 
-      /* Prevent iOS Safari auto-zoom on input focus.
-         iOS zooms when focused input font-size < 16px.
-         This block is in index.html so it wins over any external stylesheet. */
-      input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),
-      textarea,
-      select {
-        font-size: 16px !important;
-        touch-action: manipulation;
-      }
     </style>
   </head>
   <body>

@@ -837,6 +837,16 @@ export default function App() {
   const [migrationOpen, setMigrationOpen] = useState(false)         // V43 — local→cloud migration
   const [cloudOpenSignal, setCloudOpenSignal] = useState(0)    // V39 — Ctrl+S toggles cloud panel (signal counter)
   const [versionOpen, setVersionOpen] = useState(false) // V34 — V opens version badge
+  const [textScaleOpen, setTextScaleOpen] = useState(false)
+  const [textScale, setTextScaleRaw] = useState<number>(() => Number(localStorage.getItem('flow_text_scale') || '1'))
+  const setTextScale = (v: number) => {
+    const clamped = Math.round(Math.min(1.5, Math.max(0.75, v)) * 20) / 20
+    setTextScaleRaw(clamped)
+    localStorage.setItem('flow_text_scale', String(clamped))
+    document.documentElement.style.fontSize = (clamped * 100) + '%'
+  }
+  // apply on mount
+  useState(() => { document.documentElement.style.fontSize = (textScale * 100) + '%' })
   // V33 — category breakdowns (V45: now uses STORAGE_KEYS for cloud-ready persistence)
   const [breakdowns, setBreakdowns] = useState<Record<string, BreakdownItem[]>>(() => {
     try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.breakdowns) ?? localStorage.getItem('flow_breakdowns') ?? '{}') } catch { return {} }
@@ -2950,6 +2960,40 @@ txnMerchantRef.current?.focus()
         <header style={{ position: 'sticky', top: 0, zIndex: 30, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 20px', height: 48, borderBottom: theme === 'dark' ? '1px solid rgba(255,255,255,0.05)' : '1px solid rgba(0,0,0,0.09)', background: theme === 'dark' ? 'rgba(11,11,15,0.95)' : 'rgba(248,249,250,0.95)', backdropFilter: 'blur(12px)' }}>
           <div className="flex items-center gap-2">
             <VersionBadge version={CURRENT_VERSION} open={versionOpen} onOpenChange={setVersionOpen} />
+            {/* Text scale control */}
+            <div className="relative">
+              <button
+                onClick={() => setTextScaleOpen(v => !v)}
+                title="Text size"
+                style={{ fontSize: '13px', fontWeight: 600, letterSpacing: '-0.02em' }}
+                className={`px-2 py-0.5 rounded-full border text-xs transition-colors select-none ${textScaleOpen ? 'border-blue-500 text-blue-300 bg-blue-900/20' : 'border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'}`}
+              >Aa</button>
+              {textScaleOpen && (
+                <div className="absolute left-0 top-8 z-50 w-64 rounded-2xl border border-slate-700 bg-slate-900 shadow-2xl p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-200">Text Size</span>
+                    <button onClick={() => setTextScaleOpen(false)} className="text-slate-500 hover:text-slate-300 text-xs">✕</button>
+                  </div>
+                  {/* Presets */}
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {[['Compact', 0.85], ['Normal', 1.0], ['Large', 1.15], ['XL', 1.3]] .map(([label, val]) => (
+                      <button
+                        key={label as string}
+                        onClick={() => setTextScale(val as number)}
+                        className={`text-[11px] py-1.5 rounded-lg border transition-colors ${Math.abs(textScale - (val as number)) < 0.03 ? 'border-blue-500 bg-blue-600/20 text-blue-300' : 'border-slate-700 text-slate-400 hover:bg-slate-800'}`}
+                      >{label}</button>
+                    ))}
+                  </div>
+                  {/* Fine-tune */}
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => setTextScale(textScale - 0.05)} className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-lg font-bold flex items-center justify-center flex-shrink-0">−</button>
+                    <div className="flex-1 text-center text-xs text-slate-300 font-semibold">{Math.round(textScale * 100)}%</div>
+                    <button onClick={() => setTextScale(textScale + 0.05)} className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-lg font-bold flex items-center justify-center flex-shrink-0">+</button>
+                  </div>
+                  <button onClick={() => setTextScale(1.0)} className="w-full text-[11px] text-slate-500 hover:text-slate-300 transition-colors">Reset to default</button>
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-1.5">
             {appAuth.user
