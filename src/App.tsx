@@ -838,9 +838,9 @@ export default function App() {
   const [cloudOpenSignal, setCloudOpenSignal] = useState(0)    // V39 — Ctrl+S toggles cloud panel (signal counter)
   const [versionOpen, setVersionOpen] = useState(false) // V34 — V opens version badge
   const [textScaleOpen, setTextScaleOpen] = useState(false)
-  const [textScale, setTextScaleRaw] = useState<number>(() => Number(localStorage.getItem('flow_text_scale') || '1'))
+  const [textScale, setTextScaleRaw] = useState<number>(() => Number(localStorage.getItem('flow_text_scale') || '0.75'))
   const setTextScale = (v: number) => {
-    const clamped = Math.round(Math.min(1.5, Math.max(0.75, v)) * 20) / 20
+    const clamped = Math.round(Math.min(0.85, Math.max(0.45, v)) * 20) / 20
     setTextScaleRaw(clamped)
     localStorage.setItem('flow_text_scale', String(clamped))
     document.documentElement.style.fontSize = (clamped * 100) + '%'
@@ -2976,7 +2976,7 @@ txnMerchantRef.current?.focus()
                   </div>
                   {/* Presets */}
                   <div className="grid grid-cols-4 gap-1.5">
-                    {[['Compact', 0.85], ['Normal', 1.0], ['Large', 1.15], ['XL', 1.3]] .map(([label, val]) => (
+                    {[['Tiny', 0.55], ['Small', 0.65], ['Default', 0.75], ['Normal', 0.85]].map(([label, val]) => (
                       <button
                         key={label as string}
                         onClick={() => setTextScale(val as number)}
@@ -2990,7 +2990,7 @@ txnMerchantRef.current?.focus()
                     <div className="flex-1 text-center text-xs text-slate-300 font-semibold">{Math.round(textScale * 100)}%</div>
                     <button onClick={() => setTextScale(textScale + 0.05)} className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-lg font-bold flex items-center justify-center flex-shrink-0">+</button>
                   </div>
-                  <button onClick={() => setTextScale(1.0)} className="w-full text-[11px] text-slate-500 hover:text-slate-300 transition-colors">Reset to default</button>
+                  <button onClick={() => setTextScale(0.75)} className="w-full text-[11px] text-slate-500 hover:text-slate-300 transition-colors">Reset to default (75%)</button>
                 </div>
               )}
             </div>
