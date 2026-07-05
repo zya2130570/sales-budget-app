@@ -1,11 +1,11 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import type { Transaction, Category, Account, TransactionRule } from '../types'
 import { currency } from '../utils/formatting'
 import { normalizeMerchant } from '../utils/merchantNormalization'
 import { txConfidence } from '../utils/transactionHelpers'
 import { TXN_TYPE_LABELS } from '../utils/transactionHelpers'
 import { assignTransactionCategory, createMerchantRuleSuggestionForTransaction, createRulesFromSuggestionAction } from '../utils/actions'
-import { hasDuplicateTransaction } from '../utils/duplicateDetection'
+import { buildDuplicateIndex, hasDuplicateInIndex, hasDuplicateTransaction } from '../utils/duplicateDetection'
 import { Button, SectionToggle } from './ui'
 
 type RuleSuggestion = { merchants: string[]; categoryId: string; txIds: string[] }
@@ -67,10 +67,22 @@ export function NeedsReviewSection({
   uncatOpen, setUncatOpen, uncategorizedExpenseCount,
   setInlineTxnEditId, setInlineTxnEditForm, setTxnDupWarning, inlineTxnAmountRef,
 }: NeedsReviewSectionProps) {
+  // O(n) once per change instead of an O(n) scan per reviewable transaction.
+  // Two indexes because the count ignores resolution state while the
+  // delete-duplicates flow excludes confirmed ("kept both") transactions.
+  const dupIndexPlain = useMemo(
+    () => buildDuplicateIndex(transactions, { includeAccount: false }),
+    [transactions]
+  )
+  const dupIndexConfirmed = useMemo(
+    () => buildDuplicateIndex(transactions, { confirmedDupIds, includeAccount: false }),
+    [transactions, confirmedDupIds]
+  )
+
   if (reviewableTxns.length === 0 && uncategorizedExpenseCount === 0) return null
 
   const dupCount = reviewableTxns.filter(tx =>
-    hasDuplicateTransaction(tx, transactions, { includeAccount: false })
+    hasDuplicateInIndex(tx, dupIndexPlain, { includeAccount: false })
   ).length
 
   return (
@@ -95,7 +107,7 @@ export function NeedsReviewSection({
                   >Clear selection ({selectedTxnIds.size})</Button>
                 )}
                 {reviewableTxns.some(tx =>
-                  hasDuplicateTransaction(tx, transactions, { confirmedDupIds, includeAccount: false })
+                  hasDuplicateInIndex(tx, dupIndexConfirmed, { confirmedDupIds, includeAccount: false })
                 ) && (
                   <Button
                     tone="danger"
@@ -112,7 +124,7 @@ export function NeedsReviewSection({
               {/* Delete duplicates confirmation */}
               {deleteDupsConfirm && (() => {
                 const dupTxns = reviewableTxns.filter(tx =>
-                  hasDuplicateTransaction(tx, transactions, { confirmedDupIds, includeAccount: false })
+                  hasDuplicateInIndex(tx, dupIndexConfirmed, { confirmedDupIds, includeAccount: false })
                 )
                 return (
                   <div className="mb-2 rounded-lg bg-red-900/20 border border-red-700/40 px-3 py-2.5 text-xs text-red-300 flex items-center justify-between gap-3">
@@ -185,7 +197,7 @@ export function NeedsReviewSection({
                 const cat        = categories.find(c => c.id === tx.categoryId)
                 const isSelected = selectedTxnIds.has(tx.id)
                 const confidence = txConfidence(tx, transactions)
-                const isDup      = hasDuplicateTransaction(tx, transactions, { includeAccount: false })
+                const isDup      = hasDuplicateInIndex(tx, dupIndexPlain, { includeAccount: false })
                 const isConfirmedDup = confirmedDupIds.has(tx.id)
                 return (
                   <div

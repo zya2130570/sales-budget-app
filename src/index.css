@@ -109,6 +109,151 @@ body {
 /* AI panel specific — these are hardcoded dark */
 [data-theme="light"] .bg-slate-800\/80 { background-color: rgba(241,245,249,0.95) !important; }
 
+/* ── Light-mode visual-audit fixes (2026-07) ─────────────────────────────────
+   Dark-theme foreground/surface colors that survived into light mode.
+   Each group is tagged with the audit finding it addresses. */
+
+/* Finding 1 — amber/yellow warning text unreadable on white
+   (variance "warn" tones, savings-goal hints, reconcile warnings, sync-conflict banners) */
+[data-theme="light"] .text-amber-300,
+[data-theme="light"] .text-amber-400,
+[data-theme="light"] .text-yellow-300,
+[data-theme="light"] .text-yellow-400,
+[data-theme="light"] .text-amber-300\/70,
+[data-theme="light"] .text-amber-300\/80,
+[data-theme="light"] .text-amber-400\/70,
+[data-theme="light"] .text-amber-400\/80,
+[data-theme="light"] .text-amber-200,
+[data-theme="light"] .text-amber-200\/80,
+[data-theme="light"] .text-amber-200\/90 { color: #b45309 !important; } /* amber-700 */
+[data-theme="light"] .hover\:text-amber-200:hover,
+[data-theme="light"] .hover\:text-amber-300:hover,
+[data-theme="light"] .hover\:text-amber-400:hover { color: #92400e !important; } /* amber-800 */
+
+/* Finding 2 — pale success/mint text unreadable
+   (income/positive amounts, confidence chips, dashboard deltas) */
+[data-theme="light"] .text-emerald-300,
+[data-theme="light"] .text-green-300 { color: #047857 !important; } /* emerald-700 */
+[data-theme="light"] .text-emerald-400,
+[data-theme="light"] .text-green-400 { color: #059669 !important; } /* emerald-600 */
+[data-theme="light"] .hover\:text-green-200:hover,
+[data-theme="light"] .hover\:text-green-300:hover { color: #065f46 !important; } /* emerald-800 */
+
+/* Finding 3 — pale lavender/violet text (scenario chips, sandbox accents) */
+[data-theme="light"] .text-violet-300,
+[data-theme="light"] .text-purple-300,
+[data-theme="light"] .text-violet-200,
+[data-theme="light"] .text-violet-400 { color: #6d28d9 !important; } /* violet-700 */
+[data-theme="light"] .hover\:text-violet-300:hover { color: #5b21b6 !important; } /* violet-800 */
+
+/* Finding 4 — pale blue text on white
+   (Budget Sandbox banner title/description, "Beta" chip, link-style buttons) */
+[data-theme="light"] .text-blue-300,
+[data-theme="light"] .text-blue-200,
+[data-theme="light"] .text-blue-400,
+[data-theme="light"] .text-blue-400\/60,
+[data-theme="light"] .text-blue-400\/70 { color: #1d4ed8 !important; } /* blue-700 */
+[data-theme="light"] .hover\:text-blue-200:hover,
+[data-theme="light"] .hover\:text-blue-300:hover { color: #1e40af !important; } /* blue-800 */
+
+/* Finding 5 — chips with same-hue dark bg + pale text: lighten the tinted bgs
+   (status/confidence chips on Transactions, Recurring, Forecast) */
+[data-theme="light"] .bg-blue-900\/15,
+[data-theme="light"] .bg-blue-900\/20,
+[data-theme="light"] .bg-blue-900\/30 { background-color: rgba(219,234,254,0.7) !important; } /* blue-100 */
+[data-theme="light"] .bg-emerald-900\/20 { background-color: rgba(209,250,229,0.7) !important; } /* emerald-100 */
+[data-theme="light"] .bg-green-900\/20,
+[data-theme="light"] .bg-green-900\/30 { background-color: rgba(220,252,231,0.7) !important; } /* green-100 */
+[data-theme="light"] .bg-amber-900\/10,
+[data-theme="light"] .bg-amber-900\/15,
+[data-theme="light"] .bg-amber-900\/20,
+[data-theme="light"] .bg-amber-900\/30 { background-color: rgba(254,243,199,0.7) !important; } /* amber-100 */
+[data-theme="light"] .bg-violet-900\/15,
+[data-theme="light"] .bg-violet-900\/20,
+[data-theme="light"] .bg-violet-900\/25,
+[data-theme="light"] .bg-violet-800\/20,
+[data-theme="light"] .bg-violet-800\/30,
+[data-theme="light"] .bg-violet-700\/30,
+[data-theme="light"] .bg-violet-950\/10 { background-color: rgba(237,233,254,0.8) !important; } /* violet-100 */
+[data-theme="light"] .bg-red-900\/10,
+[data-theme="light"] .bg-red-900\/20,
+[data-theme="light"] .bg-red-900\/30 { background-color: rgba(254,226,226,0.7) !important; } /* red-100 */
+
+/* Finding 6 — dark tinted surfaces leaking into light mode
+   (alert/info panels, -900/-950 tints across Accounts, Sync, Preload, Forecast) */
+[data-theme="light"] .bg-blue-900\/40,
+[data-theme="light"] .bg-blue-900\/50,
+[data-theme="light"] .bg-blue-900\/60,
+[data-theme="light"] .bg-blue-900\/70 { background-color: #dbeafe !important; } /* blue-100 */
+[data-theme="light"] .bg-blue-950\/10,
+[data-theme="light"] .bg-blue-950\/15,
+[data-theme="light"] .bg-blue-950\/20,
+[data-theme="light"] .bg-blue-950\/30 { background-color: rgba(219,234,254,0.5) !important; }
+[data-theme="light"] .bg-emerald-900\/40,
+[data-theme="light"] .bg-emerald-900\/60,
+[data-theme="light"] .bg-emerald-800\/50,
+[data-theme="light"] .bg-emerald-950\/40 { background-color: #d1fae5 !important; } /* emerald-100 */
+[data-theme="light"] .bg-emerald-950\/10,
+[data-theme="light"] .bg-emerald-950\/15,
+[data-theme="light"] .bg-emerald-950\/20 { background-color: rgba(209,250,229,0.5) !important; }
+[data-theme="light"] .bg-green-900\/50,
+[data-theme="light"] .bg-green-900\/60,
+[data-theme="light"] .bg-green-950\/40 { background-color: #dcfce7 !important; } /* green-100 */
+[data-theme="light"] .bg-green-950\/10,
+[data-theme="light"] .bg-green-950\/20 { background-color: rgba(220,252,231,0.5) !important; }
+[data-theme="light"] .bg-amber-900\/40,
+[data-theme="light"] .bg-amber-900\/50,
+[data-theme="light"] .bg-amber-900\/60,
+[data-theme="light"] .bg-amber-900\/70,
+[data-theme="light"] .bg-amber-800\/50,
+[data-theme="light"] .bg-amber-950\/90 { background-color: #fef3c7 !important; } /* amber-100 */
+[data-theme="light"] .bg-amber-950\/10,
+[data-theme="light"] .bg-amber-950\/15,
+[data-theme="light"] .bg-amber-950\/20,
+[data-theme="light"] .bg-amber-950\/30 { background-color: rgba(254,243,199,0.5) !important; }
+[data-theme="light"] .bg-yellow-900\/50,
+[data-theme="light"] .bg-yellow-900\/60 { background-color: #fef9c3 !important; } /* yellow-100 */
+[data-theme="light"] .bg-red-950\/10,
+[data-theme="light"] .bg-red-950\/20,
+[data-theme="light"] .bg-red-950\/30,
+[data-theme="light"] .bg-red-950\/40 { background-color: rgba(254,226,226,0.5) !important; }
+[data-theme="light"] .bg-slate-900\/40 { background-color: rgba(226,232,240,0.6) !important; }
+[data-theme="light"] .bg-slate-900\/60 { background-color: rgba(226,232,240,0.8) !important; }
+[data-theme="light"] .bg-slate-900\/95 { background-color: rgba(248,250,252,0.97) !important; }
+[data-theme="light"] .bg-slate-800\/50 { background-color: rgba(241,245,249,0.7) !important; }
+[data-theme="light"] .bg-slate-800\/20,
+[data-theme="light"] .bg-slate-800\/30 { background-color: rgba(241,245,249,0.5) !important; }
+
+/* Finding 7 — dark maroon destructive controls ("Clear Savings Goals", "Clear All")
+   and pale red text on white */
+[data-theme="light"] .bg-red-900,
+[data-theme="light"] .bg-red-800,
+[data-theme="light"] .bg-red-900\/40,
+[data-theme="light"] .bg-red-900\/50,
+[data-theme="light"] .bg-red-900\/60 { background-color: #fee2e2 !important; } /* red-100 */
+[data-theme="light"] .hover\:bg-red-800:hover,
+[data-theme="light"] .hover\:bg-red-900\/10:hover,
+[data-theme="light"] .hover\:bg-red-900\/40:hover,
+[data-theme="light"] .hover\:bg-red-900\/50:hover,
+[data-theme="light"] .hover\:bg-red-950\/30:hover { background-color: #fecaca !important; } /* red-200 */
+[data-theme="light"] .text-red-200,
+[data-theme="light"] .text-red-300,
+[data-theme="light"] .text-red-400,
+[data-theme="light"] .text-red-200\/80,
+[data-theme="light"] .text-red-300\/80,
+[data-theme="light"] .text-red-400\/70,
+[data-theme="light"] .text-red-400\/80 { color: #b91c1c !important; } /* red-700 */
+[data-theme="light"] .hover\:text-red-200:hover,
+[data-theme="light"] .hover\:text-red-300:hover,
+[data-theme="light"] .hover\:text-red-400:hover { color: #991b1b !important; } /* red-800 */
+
+/* Finding 8 — primary buttons: the light-mode .rounded-xl → white repaint (index.html)
+   also hit blue rounded-xl buttons, leaving white-on-white. Restore blue fill + white
+   text, scoped to <button> so non-button blue chips are untouched. */
+[data-theme="light"] button.bg-blue-600,
+[data-theme="light"] button.bg-blue-500 { background-color: #2563eb !important; color: #ffffff !important; }
+[data-theme="light"] button.hover\:bg-blue-500:hover { background-color: #3b82f6 !important; }
+
 /* touch-action:manipulation prevents double-tap zoom on interactive elements */
 input, textarea, select, button { touch-action: manipulation; }
 

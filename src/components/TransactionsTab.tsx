@@ -1,10 +1,11 @@
-import React from 'react'
+import React, { useMemo, useState } from 'react'
 import type { Transaction, Account, Category, TransactionRule, TransactionType, Period } from '../types'
 import type { RecurringCandidate } from '../utils/recurring'
 import type { ForecastLineItem as _FI } from '../utils/forecastMath'
 import { currency } from '../utils/formatting'
 import { normalizeMerchant } from '../utils/merchantNormalization'
-import { txNeedsReview } from '../utils/transactionHelpers'
+import { txNeedsReviewIndexed } from '../utils/transactionHelpers'
+import { buildDuplicateIndex } from '../utils/duplicateDetection'
 import { TXN_TYPE_LABELS, TXN_FILTER_OPTIONS } from '../utils/transactionHelpers'
 import { getPeriodDateRange } from '../utils/calculations'
 import { NeedsReviewSection } from './NeedsReviewSection'
@@ -130,6 +131,35 @@ export function TransactionsTab({
   needsReviewProps, recurringSectionProps, importHistoryProps,
   logTransactionSlot, transactionRulesSlot,
 }: TransactionsTabProps) {
+
+  // O(n)-once lookups — previously each row did O(n) scans (accounts.find,
+  // categories.find, transactions.some, txNeedsReview), making the table O(n²).
+  const accountById = useMemo(() => new Map(accounts.map(a => [a.id, a])), [accounts])
+  const categoryById = useMemo(() => new Map(categories.map(c => [c.id, c])), [categories])
+  // Raw-match dup counts for the "Duplicate?" badge (exact merchant/amount/date, no dismissal filtering — same semantics as the old per-row scan)
+  const rawDupCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const t of transactions) {
+      const k = `${t.date}|${t.merchant.toLowerCase()}|${t.amount}`
+      m.set(k, (m.get(k) ?? 0) + 1)
+    }
+    return m
+  }, [transactions])
+  const reviewDupIndex = useMemo(
+    () => buildDuplicateIndex(transactions, { dismissedDupIds, includeAccount: false }),
+    [transactions, dismissedDupIds]
+  )
+  const recurringByTxnId = useMemo(() => {
+    const m = new Map<string, RecurringCandidate>()
+    for (const c of recurringCandidates) for (const id of c.txnIds) m.set(id, c)
+    return m
+  }, [recurringCandidates])
+
+  // Pagination — rendering every row at once creates 100k+ DOM nodes at 10k txns.
+  const PAGE_SIZE = 100
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+  const visibleTxns = filteredTxns.slice(0, visibleCount)
+  const hiddenCount = filteredTxns.length - visibleTxns.length
 
   const scheduleBlurSave = () => {
     if (inlineEditBlurTimerRef.current) clearTimeout(inlineEditBlurTimerRef.current)
@@ -400,9 +430,9 @@ export function TransactionsTab({
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredTxns.map(tx => {
-                      const acct        = accounts.find(a => a.id === tx.accountId)
-                      const cat         = categories.find(c => c.id === tx.categoryId)
+                    {visibleTxns.map(tx => {
+                      const acct        = accountById.get(tx.accountId)
+                      const cat         = tx.categoryId ? categoryById.get(tx.categoryId) : undefined
                       const isInlineEdit = inlineTxnEditId === tx.id
 
                       if (isInlineEdit) {
@@ -536,11 +566,11 @@ export function TransactionsTab({
 
                       // Normal display row
                       const txTypeColor  = tx.type === 'income' ? 'bg-green-900/50 text-green-300' : tx.type === 'transfer' ? 'bg-blue-900/50 text-blue-300' : tx.type === 'credit card payment' ? 'bg-purple-900/50 text-purple-300' : 'bg-slate-700 text-slate-300'
-                      const txIsDup      = transactions.some(o => o.id !== tx.id && o.merchant.toLowerCase() === tx.merchant.toLowerCase() && o.amount === tx.amount && o.date === tx.date)
+                      const txIsDup      = (rawDupCounts.get(`${tx.date}|${tx.merchant.toLowerCase()}|${tx.amount}`) ?? 0) >= 2
                       const txIsKeptDup  = confirmedDupIds.has(tx.id)
                       const txIsImported = !!tx.batchId
-                      const txReview     = txNeedsReview(tx, transactions, dismissedDupIds)
-                      const txRecurring  = recurringCandidates.find(c => c.txnIds.includes(tx.id))
+                      const txReview     = txNeedsReviewIndexed(tx, reviewDupIndex, dismissedDupIds)
+                      const txRecurring  = recurringByTxnId.get(tx.id)
                       return (
                         <tr key={tx.id} className={`border-b border-slate-800 transition-colors duration-300 ${highlightedTxnId === tx.id ? 'bg-blue-600/20' : txReview ? 'bg-amber-950/10' : 'hover:bg-slate-800/40'}`}>
                           <td className="py-2 pr-3 text-slate-300 text-xs whitespace-nowrap">{tx.date}</td>
@@ -581,6 +611,14 @@ export function TransactionsTab({
                     })}
                   </tbody>
                 </table>
+                {/* Pagination — keep the DOM small with large histories */}
+                {hiddenCount > 0 && (
+                  <div className="flex items-center justify-center gap-3 py-3 border-t border-slate-800">
+                    <span className="text-xs text-slate-500">Showing {visibleTxns.length} of {filteredTxns.length}</span>
+                    <Button tone="secondary" size="xs" onClick={() => setVisibleCount(v => v + PAGE_SIZE)}>Load {Math.min(PAGE_SIZE, hiddenCount)} more</Button>
+                    <Button tone="ghost" size="xs" onClick={() => setVisibleCount(filteredTxns.length)}>Show all</Button>
+                  </div>
+                )}
                 {/* V51 — Empty state when filters yield zero results (but data exists) */}
                 {filteredTxns.length === 0 && hasActiveFilters && (
                   <div className="px-4 py-8 text-center">

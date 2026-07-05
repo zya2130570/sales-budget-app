@@ -79,3 +79,36 @@ export const unresolvedDuplicateTransactions = (
   options: DuplicateMatchOptions = {},
 ): Transaction[] =>
   transactions.filter(tx => hasDuplicateTransaction(tx, transactions, options))
+
+// ── O(n) duplicate index ──────────────────────────────────────────────────────
+// hasDuplicateTransaction is O(n) per call, which turns any per-transaction loop
+// into O(n²) — unusable past a few thousand transactions. Build this Map once per
+// transactions change (O(n)) and answer each membership query in O(1).
+
+export type DuplicateIndex = Map<string, number>
+
+/** Counts eligible (non-dismissed/-confirmed/-resolved) transactions per duplicate key. */
+export const buildDuplicateIndex = (
+  transactions: Array<Pick<Transaction, 'id' | 'date' | 'merchant' | 'amount' | 'accountId'>>,
+  options: DuplicateMatchOptions = {},
+): DuplicateIndex => {
+  const index: DuplicateIndex = new Map()
+  for (const tx of transactions) {
+    if (options.dismissedDupIds?.has(tx.id) || options.confirmedDupIds?.has(tx.id)) continue
+    if (isTransactionResolvedDuplicate(tx.id, options.resolutions)) continue
+    const key = duplicateTransactionKey(tx, { includeAccount: options.includeAccount })
+    index.set(key, (index.get(key) ?? 0) + 1)
+  }
+  return index
+}
+
+/** O(1) equivalent of hasDuplicateTransaction against a prebuilt index (same options). */
+export const hasDuplicateInIndex = (
+  tx: Pick<Transaction, 'id' | 'date' | 'merchant' | 'amount' | 'accountId'>,
+  index: DuplicateIndex,
+  options: DuplicateMatchOptions = {},
+): boolean => {
+  if (options.dismissedDupIds?.has(tx.id) || options.confirmedDupIds?.has(tx.id)) return false
+  if (isTransactionResolvedDuplicate(tx.id, options.resolutions)) return false
+  return (index.get(duplicateTransactionKey(tx, { includeAccount: options.includeAccount })) ?? 0) >= 2
+}

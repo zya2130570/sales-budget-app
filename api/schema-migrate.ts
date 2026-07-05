@@ -90,9 +90,9 @@ do $$ begin
   end if;
 end $$;
 
-grant all on public.scenario_notes     to authenticated;
-grant all on public.category_memory    to authenticated;
-grant all on public.take_home_settings to authenticated;
+grant select, insert, update, delete on public.scenario_notes     to authenticated;
+grant select, insert, update, delete on public.category_memory    to authenticated;
+grant select, insert, update, delete on public.take_home_settings to authenticated;
 
 do $$ begin
   if not exists (select 1 from pg_constraint where conname='scenario_notes_user_id_local_id_key')    then alter table public.scenario_notes    add constraint scenario_notes_user_id_local_id_key    unique (user_id, local_id); end if;

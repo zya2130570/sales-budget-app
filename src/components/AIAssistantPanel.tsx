@@ -74,7 +74,7 @@ export function AIAssistantPanel({ messages, status, error, onSend, onClear }: {
           <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()} }} disabled={status==='loading'} rows={1} placeholder="Ask about your finances… (Enter to send)" className="flex-1 resize-none rounded-xl bg-slate-700 border border-slate-600 px-3 py-2 text-xs text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 disabled:opacity-50" />
           <button onClick={send} disabled={!input.trim()||status==='loading'} className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0">Send</button>
         </div>
-        <p className="text-[10px] text-slate-600 mt-1">Your financial data is sent to the AI with each message. Free with GEMINI_API_KEY (aistudio.google.com). Set for Production + Preview in Vercel.</p>
+        <p className="text-[10px] text-slate-600 mt-1">Your financial data is sent to the AI with each message.</p>
       </div>
     </div>}
     </div>

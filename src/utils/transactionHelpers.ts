@@ -1,6 +1,6 @@
 // ── Transaction Review Helpers ─────────────────────────────────────────────────
 import type { Transaction, TransactionType } from '../types'
-import { hasDuplicateTransaction } from './duplicateDetection'
+import { hasDuplicateTransaction, hasDuplicateInIndex, type DuplicateIndex } from './duplicateDetection'
 
 export type TxConfidence = 'high' | 'medium' | 'low'
 
@@ -12,6 +12,17 @@ export function txNeedsReview(
 ): boolean {
   if (tx.type === 'expense' && !tx.categoryId) return true
   return hasDuplicateTransaction(tx, allTxns, { dismissedDupIds, includeAccount: false })
+}
+
+/** O(1) variant of txNeedsReview against a prebuilt duplicate index
+    (index must be built with the same dismissedDupIds + includeAccount: false). */
+export function txNeedsReviewIndexed(
+  tx: Transaction,
+  dupIndex: DuplicateIndex,
+  dismissedDupIds?: Set<string>,
+): boolean {
+  if (tx.type === 'expense' && !tx.categoryId) return true
+  return hasDuplicateInIndex(tx, dupIndex, { dismissedDupIds, includeAccount: false })
 }
 
 /** Estimates how confident we are that a transaction is properly categorized. */

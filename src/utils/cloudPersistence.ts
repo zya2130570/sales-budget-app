@@ -108,9 +108,37 @@ const fmtCurrency = (v: unknown): string => {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
 }
 
+/** PostgREST silently caps SELECTs at 1000 rows — page through everything. */
+const CLOUD_PAGE_SIZE = 1000
+
+/**
+ * Fetches every row of a query by paging with .range().
+ * PostgREST silently truncates unranged SELECTs at 1000 rows, so any read that
+ * can exceed that must go through here.
+ *
+ * `makeQuery` is called once per page with the inclusive (from, to) range and
+ * must build a fresh query builder (filters and a stable .order() re-applied)
+ * because Supabase builders are single-use.
+ */
+export async function fetchAllRows<T>(
+  makeQuery: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ rows: T[]; error: string | null }> {
+  const rows: T[] = []
+  let from = 0
+  for (;;) {
+    const { data, error } = await makeQuery(from, from + CLOUD_PAGE_SIZE - 1)
+    if (error) return { rows, error: error.message }
+    const page = Array.isArray(data) ? data : []
+    rows.push(...page)
+    if (page.length < CLOUD_PAGE_SIZE) break
+    from += CLOUD_PAGE_SIZE
+  }
+  return { rows, error: null }
+}
+
 /**
  * Fetch (local_id → updated_at) map from cloud for conflict detection.
- * Single SELECT — one request regardless of dataset size.
+ * Paged SELECT — fetches all rows even beyond the 1000-row PostgREST cap.
  */
 async function fetchCloudTimestamps(
   supabase: Client,
@@ -118,15 +146,19 @@ async function fetchCloudTimestamps(
   userId: string,
 ): Promise<Record<string, string | null>> {
   try {
-    const { data, error } = await supabase
-      .from(table)
-      .select('local_id, updated_at')
-      .eq('user_id', userId)
-      .is('deleted_at', null)
+    const { rows, error } = await fetchAllRows<Row>((from, to) =>
+      supabase
+        .from(table)
+        .select('local_id, updated_at')
+        .eq('user_id', userId)
+        .is('deleted_at', null)
+        .order('local_id', { ascending: true })
+        .range(from, to),
+    )
 
-    if (error || !Array.isArray(data)) return {}
+    if (error) return {}
 
-    return data.reduce<Record<string, string | null>>((map, row) => {
+    return rows.reduce<Record<string, string | null>>((map, row) => {
       if (typeof row.local_id === 'string') {
         map[row.local_id] = typeof row.updated_at === 'string' ? row.updated_at : null
       }
@@ -203,7 +235,7 @@ async function batchUpsert(
 
 /**
  * Resolves (local_id → cloud UUID) for FK lookups after a batch upsert.
- * Single SELECT — replaces the old resolveCloudIdMap helper.
+ * Paged SELECT — replaces the old resolveCloudIdMap helper.
  */
 async function resolveCloudIds(
   supabase: Client,
@@ -214,14 +246,18 @@ async function resolveCloudIds(
   const unique = Array.from(new Set(localIds.filter(Boolean)))
   if (!unique.length) return {}
   try {
-    const { data, error } = await supabase
-      .from(table)
-      .select('id, local_id')
-      .eq('user_id', userId)
-      .in('local_id', unique)
+    const { rows, error } = await fetchAllRows<Row>((from, to) =>
+      supabase
+        .from(table)
+        .select('id, local_id')
+        .eq('user_id', userId)
+        .in('local_id', unique)
+        .order('local_id', { ascending: true })
+        .range(from, to),
+    )
 
-    if (error || !Array.isArray(data)) return {}
-    return data.reduce<Record<string, string>>((map, row) => {
+    if (error) return {}
+    return rows.reduce<Record<string, string>>((map, row) => {
       if (typeof row.local_id === 'string' && typeof row.id === 'string') {
         map[row.local_id] = row.id
       }
