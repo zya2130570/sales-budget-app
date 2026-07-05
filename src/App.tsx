@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Tab, Period, CategoryType, Category, ScenarioName, SavedBudget, BudgetSnapshot, Contribution, Target, SavedTargetSet, AccountType, Account, TransactionType, Transaction, TransactionRule, ImportBatch, ImportPreset, ExtraIncome, PayStub, TakeHomeSettings } from './types'
 
 import { currency, labelPeriod } from './utils/formatting'
@@ -84,7 +84,7 @@ import type { BalanceCheckEntry, ReconciliationEntry } from './utils/accountMath
 import type { RecurringCadence, ManualRecurringItem } from './utils/forecastMath'
 // V10.3 — extracted UI components and helpers
 import { Card, Pill, Metric, Info, ActionCard, Row } from './components/ui'
-import { txNeedsReview } from './utils/transactionHelpers'
+import { txNeedsReviewIndexed } from './utils/transactionHelpers'
 import { TXN_TYPE_LABELS, TXN_FILTER_OPTIONS } from './utils/transactionHelpers'
 import { TransactionsTab } from './components/TransactionsTab'
 import { detectRuleConflict } from './utils/rulesEngine'
@@ -113,7 +113,7 @@ import {
   renameGoalSet,
   deleteGoalSet,
 } from './utils/actions'
-import { hasDuplicateTransaction } from './utils/duplicateDetection'
+import { hasDuplicateTransaction, buildDuplicateIndex, hasDuplicateInIndex } from './utils/duplicateDetection'
 import { GoalPlanningSummary } from './components/GoalPlanningSummary'
 import { GoalCard } from './components/GoalCard'
 import { YearOverYearPanel } from './components/YearOverYearPanel'
@@ -1132,6 +1132,19 @@ export default function App() {
   useEffect(() => saveReviewedMonths(reviewedMonths), [reviewedMonths])
   useEffect(() => saveManualRecurringItems(manualRecurringItems), [manualRecurringItems])
 
+  // Storage failure surfacing — saveToStorage dispatches 'flow-storage-error' on
+  // QuotaExceededError etc. Without this, saves silently stop and the user loses
+  // everything since the last successful write on next reload.
+  const [storageError, setStorageError] = useState<'quota' | 'unknown' | null>(null)
+  useEffect(() => {
+    const onStorageError = (e: Event) => {
+      const reason = (e as CustomEvent).detail?.reason === 'quota' ? 'quota' : 'unknown'
+      setStorageError(prev => prev === 'quota' ? prev : reason)
+    }
+    window.addEventListener('flow-storage-error', onStorageError)
+    return () => window.removeEventListener('flow-storage-error', onStorageError)
+  }, [])
+
   // V8.7 — auto-select the only account in the transaction form
   useEffect(() => {
     if (accounts.length === 1) {
@@ -1265,7 +1278,10 @@ export default function App() {
   // Effective actual for one category = transaction total + manual adjustment.
   // If no transactions and no manual entry: null (nothing to show).
   // When no transactions exist, manual entry is the full actual (backward-compat).
-  const effectiveCatActual = (catId: string): {
+  // useCallback so memos that depend on this (budgetHealth → spendingInsights →
+  // aiContext) only recompute when actuals actually change — previously this was
+  // a fresh closure every render, invalidating that whole chain per keystroke.
+  const effectiveCatActual = useCallback((catId: string): {
     total: number; txnAmt: number; manualAmt: number; hasTxn: boolean; hasManual: boolean
   } | null => {
     const txnAmt    = txnActuals[catId] ?? 0
@@ -1275,7 +1291,7 @@ export default function App() {
     const hasTxn    = txnAmt > 0
     if (!hasTxn && !hasManual) return null
     return { total: txnAmt + manualAmt, txnAmt, manualAmt, hasTxn, hasManual }
-  }
+  }, [txnActuals, actuals])
 
   // Actual total for the selected period (transactions + manual adjustments)
   const actualPeriodTotal = categories.reduce((sum, c) => {
@@ -1335,8 +1351,7 @@ export default function App() {
     const totalPlanned = categories.reduce((s, c) => s + convertFromMonthly(c.amount, period), 0)
     const totalActual  = categories.reduce((s, c) => { const e = effectiveCatActual(c.id); return s + (e?.total ?? 0) }, 0)
     return { overBudget, noActivity, totalPlanned, totalActual, remaining: totalPlanned - totalActual }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categories, period, effectiveCatActual])
+  }, [categories, period, budgetSearch, effectiveCatActual])
 
   // Variance total (actual - planned); positive = overspend
   const variancePeriodTotal = hasAnyActual ? actualPeriodTotal - plannedPeriodTotal : 0
@@ -1435,12 +1450,20 @@ export default function App() {
     tx => tx.type === 'expense' && !tx.categoryId
   ).length
 
+  // Duplicate index — O(n) once per transactions change. Every "is this a dup /
+  // needs review" check goes through this instead of scanning all transactions
+  // (which made those checks O(n²) and froze the app at a few thousand rows).
+  const dupIndex = useMemo(
+    () => buildDuplicateIndex(transactions, { dismissedDupIds, includeAccount: false }),
+    [transactions, dismissedDupIds]
+  )
+
   // V9.5 — Review Center data
   const reviewableTxns = useMemo(() =>
     [...transactions]
-      .filter(tx => txNeedsReview(tx, transactions, dismissedDupIds))
+      .filter(tx => txNeedsReviewIndexed(tx, dupIndex, dismissedDupIds))
       .sort((a, b) => b.date.localeCompare(a.date)),
-    [transactions, dismissedDupIds]
+    [transactions, dupIndex, dismissedDupIds]
   )
   const needsReviewTxnCount = reviewableTxns.length
 
@@ -1506,14 +1529,13 @@ export default function App() {
     // Checklist
     const uncatExpenses = txns.filter(t => t.type === 'expense' && !t.categoryId).length
     const unresolvedDups = txns.filter(t =>
-      txNeedsReview(t, transactions, dismissedDupIds) &&
-      hasDuplicateTransaction(t, transactions, { dismissedDupIds, includeAccount: false })
+      hasDuplicateInIndex(t, dupIndex, { dismissedDupIds, includeAccount: false })
     ).length
     const recurringReviewed = recurringCandidates.length === 0 ||
       recurringCandidates.every(c => confirmedRecurring.has(c.merchantKey) || dismissedRecurring.has(c.merchantKey))
 
     return { txns, income, expenses, transfers, ccPayments, netCash, catBreakdown, bigTxns, uncatExpenses, unresolvedDups, recurringReviewed }
-  }, [transactions, reviewMonth, categories, dismissedDupIds, recurringCandidates, confirmedRecurring, dismissedRecurring])
+  }, [transactions, reviewMonth, categories, dupIndex, dismissedDupIds, recurringCandidates, confirmedRecurring, dismissedRecurring])
 
   // V13 — Spending insights (needs cashFlowForecast + monthlyReview, both defined above)
   const spendingInsights = useMemo(() => generateSpendingInsights({
@@ -2291,13 +2313,21 @@ txnMerchantRef.current?.focus()
         const base64 = dataUrl.split(',')[1]
         if (!base64) { setCsvImportError('Could not encode PDF.'); setCsvImportLoading(false); return }
 
+        // Endpoint requires a signed-in session (prevents anonymous abuse of the AI parser)
+        const session = supabase ? (await supabase.auth.getSession()).data.session : null
+        if (!session?.access_token) {
+          setCsvImportError('Sign in to use AI PDF parsing — it runs on the app\'s server and needs your session.')
+          setCsvImportLoading(false)
+          return
+        }
+
         const response = await fetch('/api/parse-pdf', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
           body: JSON.stringify({ pdfBase64: base64 }),
         })
 
-        const result = await response.json() as { transactions?: any[]; error?: string; count?: number }
+        const result = await response.json() as { transactions?: any[]; error?: string; count?: number; dropped?: number; warning?: string }
 
         if (result.error) {
           setCsvImportError(result.error)
@@ -2314,10 +2344,15 @@ txnMerchantRef.current?.focus()
           const amount = Math.abs(r.amount as number)
           const merchant = (r.merchant ?? '') as string
           const aiType = (r.type ?? '') as string
+          // Gemini's explicit type takes precedence over the amount's sign.
+          // Sign and merchant keywords are fallbacks for rows with no usable type.
           const inferredType: 'income' | 'expense' | 'transfer' | 'credit card payment' =
-            PAYMENT_PATTERNS.test(merchant) ? 'credit card payment'
-            : aiType === 'income' || rawSign < 0 || /salary|payroll|direct deposit|deposit|income|interest earned|dividend/i.test(merchant) ? 'income'
+            aiType === 'income' ? 'income'
             : aiType === 'transfer' ? 'transfer'
+            : aiType === 'credit-card-payment' || aiType === 'credit card payment' ? 'credit card payment'
+            : aiType === 'expense' ? (PAYMENT_PATTERNS.test(merchant) ? 'credit card payment' : 'expense')
+            : PAYMENT_PATTERNS.test(merchant) ? 'credit card payment'
+            : rawSign < 0 || /salary|payroll|direct deposit|deposit|income|interest earned|dividend/i.test(merchant) ? 'income'
             : 'expense'
           return {
             date: r.date,
@@ -2328,7 +2363,7 @@ txnMerchantRef.current?.focus()
             confidence: (r.confidence ?? 'medium') as 'high' | 'medium' | 'low',
             isDup: existingForAccount.some(tx =>
               tx.date === r.date &&
-              tx.merchant.toLowerCase() === merchant.toLowerCase() &&
+              normalizeMerchant(tx.merchant) === normalizeMerchant(merchant) &&
               Math.abs(tx.amount - amount) < 0.01
             ),
           }
@@ -2336,7 +2371,9 @@ txnMerchantRef.current?.focus()
 
         setPdfPreviewRows(marked)
         setPdfParseWarning(
-          `AI extracted ${marked.length} transaction${marked.length !== 1 ? 's' : ''} from your PDF. Review carefully before importing.`
+          `AI extracted ${marked.length} transaction${marked.length !== 1 ? 's' : ''} from your PDF.` +
+          (result.dropped ? ` ${result.dropped} row${result.dropped !== 1 ? 's' : ''} could not be parsed and ${result.dropped !== 1 ? 'were' : 'was'} skipped.` : '') +
+          ' Review carefully before importing.'
         )
         setCsvImportLoading(false)
       } catch (err: any) {
@@ -2654,7 +2691,7 @@ txnMerchantRef.current?.focus()
     [...transactions]
       .filter(tx => {
         if (txnFilter === 'uncategorized') { if (!(tx.type === 'expense' && !tx.categoryId)) return false }
-        else if (txnFilter === 'needs-review') { if (!txNeedsReview(tx, transactions, dismissedDupIds)) return false }
+        else if (txnFilter === 'needs-review') { if (!txNeedsReviewIndexed(tx, dupIndex, dismissedDupIds)) return false }
         else if (txnFilter !== 'all') { if (tx.type !== txnFilter) return false }
         if (txnSearch) {
           const q = txnSearch.toLowerCase()
@@ -2673,7 +2710,7 @@ txnMerchantRef.current?.focus()
         else if (txnSortKey === 'merchant') cmp = a.merchant.localeCompare(b.merchant)
         return txnSortDir === 'asc' ? cmp : -cmp
       }),
-    [transactions, txnFilter, txnSearch, txnAccountFilter, txnCategoryFilter, txnMonthFilter, txnSortKey, txnSortDir, dismissedDupIds]
+    [transactions, txnFilter, txnSearch, txnAccountFilter, txnCategoryFilter, txnMonthFilter, txnSortKey, txnSortDir, dupIndex, dismissedDupIds]
   )
   const hasActiveFilters = txnFilter !== 'all' || !!txnSearch || !!txnAccountFilter || !!txnCategoryFilter || !!txnMonthFilter
 
@@ -2698,7 +2735,7 @@ txnMerchantRef.current?.focus()
     // Filter by all active non-month filters so per-month counts reflect current account/type/search context
     const base = transactions.filter(tx => {
       if (txnFilter === 'uncategorized') { if (!(tx.type === 'expense' && !tx.categoryId)) return false }
-      else if (txnFilter === 'needs-review') { if (!txNeedsReview(tx, transactions, dismissedDupIds)) return false }
+      else if (txnFilter === 'needs-review') { if (!txNeedsReviewIndexed(tx, dupIndex, dismissedDupIds)) return false }
       else if (txnFilter !== 'all') { if (tx.type !== txnFilter) return false }
       if (txnAccountFilter && tx.accountId !== txnAccountFilter) return false
       if (txnCategoryFilter === '__none__' && tx.categoryId) return false
@@ -2715,7 +2752,7 @@ txnMerchantRef.current?.focus()
       countMap[ym] = (countMap[ym] ?? 0) + 1
     }
     return Object.entries(countMap).sort((a, b) => b[0].localeCompare(a[0])).map(([ym, count]) => ({ ym, count }))
-  }, [transactions, txnFilter, txnAccountFilter, txnCategoryFilter, txnSearch, dismissedDupIds])
+  }, [transactions, txnFilter, txnAccountFilter, txnCategoryFilter, txnSearch, dupIndex, dismissedDupIds])
 
   const txnPillCounts = useMemo(() => {
     // Filter by all active non-pill filters so pill counts reflect the current account/month/search/category context
@@ -2733,11 +2770,11 @@ txnMerchantRef.current?.focus()
     const counts: Record<string, number> = {
       all: base.length,
       uncategorized: base.filter(tx => tx.type === 'expense' && !tx.categoryId).length,
-      'needs-review': base.filter(tx => txNeedsReview(tx, transactions, dismissedDupIds)).length,
+      'needs-review': base.filter(tx => txNeedsReviewIndexed(tx, dupIndex, dismissedDupIds)).length,
     }
     for (const tx of base) counts[tx.type] = (counts[tx.type] ?? 0) + 1
     return counts
-  }, [transactions, txnAccountFilter, txnCategoryFilter, txnMonthFilter, txnSearch, dismissedDupIds])
+  }, [transactions, txnAccountFilter, txnCategoryFilter, txnMonthFilter, txnSearch, dupIndex, dismissedDupIds])
 
   const filteredTxnNet = useMemo(() =>
     filteredTxns.reduce((sum, tx) => {
@@ -2897,7 +2934,12 @@ txnMerchantRef.current?.focus()
     }
   }, [inc, period, adjustedSalary, gp, effectiveTakeHomeRate, takeHomeSettings, baseBumpsAchieved, extraIncomesMonthly, monthlyBudget, monthlyLeft, cashFlowForecast, accounts, extraIncomes, categories, targets, transactions, monthlyReview, reviewMonth, spendingInsights])
 
-  const cloudPersistence = useCloudPersistence({
+  // Memoized: this object feeds useCloudPersistence's fingerprint (which
+  // JSON.stringifies every transaction). As a per-render literal it forced that
+  // stringify on every keystroke; getPendingDeletes()/loadTakeHomeSettings()
+  // were also synchronous localStorage reads per render. Pending deletes are
+  // re-read fresh inside the hook at sync time, so the snapshot here is safe.
+  const cloudData = useMemo(() => ({
     accounts,
     categories,
     transactions,
@@ -2912,10 +2954,11 @@ txnMerchantRef.current?.focus()
     reviewedMonths,
     pendingDeletes: getPendingDeletes(),
     // V18 — previously unsynced entities
-    takeHomeSettings: loadTakeHomeSettings() ?? ZYAN_PERSONAL_PRELOAD.takeHomeSettings,
+    takeHomeSettings,
     scenarioNotes,
     categoryMemory,
-  })
+  }), [accounts, categories, transactions, rules, targets, savedTargetSets, savedScenarios, savedBudgets, actuals, importBatches, monthlyNotes, reviewedMonths, takeHomeSettings, scenarioNotes, categoryMemory]) // eslint-disable-line react-hooks/exhaustive-deps
+  const cloudPersistence = useCloudPersistence(cloudData)
 
   // V8.8 — Merchant suggestion: check rules then past transactions (no-op when category already chosen)
 
@@ -3028,6 +3071,18 @@ txnMerchantRef.current?.focus()
             />
           </div>
         </header>
+
+        {/* Storage failure banner — data is NOT saving; user must act */}
+        {storageError && (
+          <div className="sticky top-12 z-30 bg-red-900/95 border-b border-red-700 px-4 py-2.5 flex items-center justify-between gap-3">
+            <p className="text-xs text-red-100">
+              {storageError === 'quota'
+                ? '⚠ Device storage is full — changes are NOT being saved. Export a backup now (Settings → Backup), then delete old data or enable cloud sync.'
+                : '⚠ Saving to this device failed — changes may not persist. Export a backup from Settings to be safe.'}
+            </p>
+            <button onClick={() => setSettingsOpen(true)} className="text-xs font-semibold text-white bg-red-700 hover:bg-red-600 rounded-lg px-3 py-1.5 flex-shrink-0 transition-colors">Open Settings</button>
+          </div>
+        )}
 
         {/* Main content — max-width constraint + padding */}
         <div className="max-w-7xl mx-auto px-5 py-5 space-y-4">
@@ -3482,8 +3537,8 @@ txnMerchantRef.current?.focus()
               {/* Summary */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                 {[
-                  { label: 'Total Income', val: `+${currency(monthlyReview.income)}`, color: 'text-green-400' },
-                  { label: 'Total Spending', val: `−${currency(monthlyReview.expenses)}`, color: 'text-red-400' },
+                  { label: 'Total Income', val: monthlyReview.income > 0 ? `+${currency(monthlyReview.income)}` : currency(0), color: monthlyReview.income > 0 ? 'text-green-400' : 'text-slate-500' },
+                  { label: 'Total Spending', val: monthlyReview.expenses > 0 ? `−${currency(monthlyReview.expenses)}` : currency(0), color: monthlyReview.expenses > 0 ? 'text-red-400' : 'text-slate-500' },
                   { label: 'Net Cash Flow', val: `${monthlyReview.netCash >= 0 ? '+' : '−'}${currency(Math.abs(monthlyReview.netCash))}`, color: monthlyReview.netCash >= 0 ? 'text-emerald-400' : 'text-red-400' },
                   { label: 'CC Payments', val: currency(monthlyReview.ccPayments), color: 'text-purple-300' },
                 ].map(({ label, val, color }) => (
@@ -4203,7 +4258,7 @@ txnMerchantRef.current?.focus()
                   </div>
                 ))}
               </div>
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto h-scroll-visible">
               <table className="w-full text-sm mt-3 min-w-[480px]">
                 <thead>
                   <tr className="text-left text-slate-400 border-b border-slate-700">
@@ -4243,6 +4298,13 @@ txnMerchantRef.current?.focus()
                   </tr>
                 </thead>
                 <tbody>
+                  {top.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="py-6 text-center text-xs text-slate-500">
+                        No budget categories yet — add one with the form above, or Generate Sample to see how it works.
+                      </td>
+                    </tr>
+                  )}
                   {top.filter(c => {
                     if (budgetFilter === 'over-budget') {
                       const e = effectiveCatActual(c.id)
@@ -5356,7 +5418,7 @@ txnMerchantRef.current?.focus()
             }
             transactionRulesSlot={
             <Card title="Transaction Rules" noHover>
-              <div className="flex items-start justify-between gap-4 mb-3">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 sm:gap-4 mb-3">
                 <p className="text-xs text-slate-400">Rules auto-categorize transactions based on merchant names or notes. Applied on import and when you manually categorize.</p>
                 <button
                   onClick={() => {

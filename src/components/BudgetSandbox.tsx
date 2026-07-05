@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import type { SandboxDraft, SandboxCategory, SandboxIncomeScenario, SandboxSortMode, SandboxCategoryBehavior, SandboxChangeRule, Category, SavedBudget, Period, CategoryType } from '../types'
 import { convertFromMonthly } from '../utils/calculations'
 
@@ -1428,6 +1428,14 @@ export function BudgetSandbox({
   onClose,
 }: BudgetSandboxProps) {
   const [activeDraftId, setActiveDraftId] = useState<string | null>(null)
+
+  // Lock body scroll while the overlay is open — otherwise touch scroll chains
+  // to the page underneath and the Budget tab "bleeds through" past our content.
+  useEffect(() => {
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [])
 
   const activeDraft = activeDraftId ? drafts.find(d => d.id === activeDraftId) ?? null : null
 

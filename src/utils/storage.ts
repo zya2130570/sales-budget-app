@@ -54,7 +54,85 @@ export function safeJsonStringify(value: unknown): string | null {
   }
 }
 
+// ── Debounced, quota-safe writes ──────────────────────────────────────────────
+// saveToStorage coalesces rapid successive writes per key (400ms debounce) so we
+// don't hammer localStorage with large JSON.stringify calls on every keystroke.
+// Pending values are flushed synchronously on beforeunload / tab-hidden so no
+// data is lost, and loadFromStorage serves pending values for read-after-write.
+
+const WRITE_DEBOUNCE_MS = 400
+
+type PendingWrite = { timer: ReturnType<typeof setTimeout>; value: unknown }
+const pendingWrites = new Map<string, PendingWrite>()
+
+function isQuotaError(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null) return false
+  const e = err as { name?: unknown; code?: unknown }
+  return e.name === 'QuotaExceededError'
+    || e.code === 22
+    || e.name === 'NS_ERROR_DOM_QUOTA_REACHED'
+}
+
+function dispatchStorageError(key: string, reason: 'quota' | 'unknown'): void {
+  try {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('flow-storage-error', { detail: { key, reason } }))
+    }
+  } catch {
+    // Never throw from a storage write path.
+  }
+}
+
+/** Performs the actual localStorage write; never throws. */
+function writeToStorageNow(key: string, value: unknown): void {
+  try {
+    const raw = safeJsonStringify(value)
+    if (raw !== null) localStorage.setItem(wsKey(key), raw)
+  } catch (err) {
+    dispatchStorageError(key, isQuotaError(err) ? 'quota' : 'unknown')
+  }
+}
+
+/** Cancels a pending debounced write for a key (used by remove/raw writes). */
+function cancelPendingWrite(key: string): void {
+  const pending = pendingWrites.get(key)
+  if (pending) {
+    clearTimeout(pending.timer)
+    pendingWrites.delete(key)
+  }
+}
+
+/**
+ * Synchronously writes all pending debounced values to localStorage.
+ * Wired to beforeunload and visibilitychange(hidden) so nothing is lost on
+ * tab close or app switch. Safe to call at any time.
+ */
+export function flushPendingWrites(): void {
+  for (const [key, { timer, value }] of pendingWrites) {
+    clearTimeout(timer)
+    writeToStorageNow(key, value)
+  }
+  pendingWrites.clear()
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', flushPendingWrites)
+}
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushPendingWrites()
+  })
+}
+
 export function loadFromStorage<T>(key: string, fallback: T): T {
+  // Serve pending (not yet flushed) writes so read-after-write stays coherent.
+  const pending = pendingWrites.get(key)
+  if (pending) {
+    const raw = safeJsonStringify(pending.value)
+    // Round-trip through JSON so callers get the same shape (and a fresh copy)
+    // they would get from localStorage once the write lands.
+    if (raw !== null) return safeJsonParse<T>(raw, fallback)
+  }
   try {
     return safeJsonParse<T>(localStorage.getItem(wsKey(key)), fallback)
   } catch {
@@ -63,6 +141,12 @@ export function loadFromStorage<T>(key: string, fallback: T): T {
 }
 
 export function loadRawFromStorage(key: string, fallback = ''): string {
+  // Serve pending (not yet flushed) writes so read-after-write stays coherent.
+  const pending = pendingWrites.get(key)
+  if (pending) {
+    const raw = safeJsonStringify(pending.value)
+    if (raw !== null) return raw
+  }
   try {
     const raw = localStorage.getItem(wsKey(key))
     return raw === null ? fallback : raw
@@ -72,23 +156,28 @@ export function loadRawFromStorage(key: string, fallback = ''): string {
 }
 
 export function saveToStorage(key: string, value: unknown): void {
-  try {
-    const raw = safeJsonStringify(value)
-    if (raw !== null) localStorage.setItem(wsKey(key), raw)
-  } catch {
-    // Ignore quota/private browsing failures.
-  }
+  const existing = pendingWrites.get(key)
+  if (existing) clearTimeout(existing.timer)
+  const timer = setTimeout(() => {
+    pendingWrites.delete(key)
+    writeToStorageNow(key, value)
+  }, WRITE_DEBOUNCE_MS)
+  pendingWrites.set(key, { timer, value })
 }
 
 export function saveRawToStorage(key: string, value: string): void {
+  // A direct raw write supersedes any pending debounced write for this key.
+  cancelPendingWrite(key)
   try {
     localStorage.setItem(wsKey(key), value)
-  } catch {
-    // Ignore quota/private browsing failures.
+  } catch (err) {
+    dispatchStorageError(key, isQuotaError(err) ? 'quota' : 'unknown')
   }
 }
 
 export function removeFromStorage(key: string): void {
+  // Cancel any pending write so a debounced flush can't resurrect the value.
+  cancelPendingWrite(key)
   try {
     localStorage.removeItem(wsKey(key))
   } catch {
@@ -341,6 +430,8 @@ export function clearSyncedDeletes(synced: PendingDeleteRecord[]): void {
  * The result is self-contained and can be re-imported via importFromBackup().
  */
 export function exportLocalBackup(): string {
+  // Flush debounced writes first so the backup reflects the latest state.
+  flushPendingWrites()
   const data: Record<string, unknown> = {}
   for (const key of Object.values(STORAGE_KEYS)) {
     // Read from workspace-prefixed key (wsKey handles guest vs authenticated)

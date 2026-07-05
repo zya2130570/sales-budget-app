@@ -9,6 +9,7 @@
  * before resolving child FKs (e.g. transactions → account_id).
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
+import { fetchAllRows } from './cloudPersistence'
 import type {
   Account,
   AccountType,
@@ -77,19 +78,20 @@ async function fetchTable(
   userId: string,
 ): Promise<{ rows: Row[]; error: string | null }> {
   try {
-    let q = supabase.from(table).select('*').eq('user_id', userId)
     const tablesWithSoftDelete = [
       'accounts', 'categories', 'transactions', 'transaction_rules',
       'import_batches', 'savings_goals', 'savings_goal_contributions',
       'savings_goal_sets', 'scenarios', 'saved_budgets', 'budget_actuals',
       'monthly_reviews', 'take_home_settings',
     ]
-    if (tablesWithSoftDelete.includes(table)) {
-      q = q.is('deleted_at', null)
-    }
-    const { data, error } = await q
-    if (error) return { rows: [], error: error.message }
-    return { rows: Array.isArray(data) ? (data as Row[]) : [], error: null }
+    const softDelete = tablesWithSoftDelete.includes(table)
+    // Paged read: PostgREST silently truncates unranged SELECTs at 1000 rows.
+    // Filters and a stable order are re-applied per page (builders are single-use).
+    return await fetchAllRows<Row>((from, to) => {
+      let q = supabase.from(table).select('*').eq('user_id', userId)
+      if (softDelete) q = q.is('deleted_at', null)
+      return q.order('id', { ascending: true }).range(from, to)
+    })
   } catch (err) {
     return { rows: [], error: err instanceof Error ? err.message : `Failed to fetch ${table}` }
   }
@@ -267,14 +269,16 @@ export async function fetchCloudDataForRestore(
     fetchTable(supabase, 'saved_budgets', userId),
     (async () => {
       try {
-        const { data } = await supabase.from('budget_actuals').select('period_key, actuals, updated_at').eq('user_id', userId).is('deleted_at', null)
-        return Array.isArray(data) ? data as Array<{ period_key: string | null; actuals: Record<string, string>; updated_at?: string }> : []
+        const { rows } = await fetchAllRows<{ period_key: string | null; actuals: Record<string, string>; updated_at?: string }>((from, to) =>
+          supabase.from('budget_actuals').select('period_key, actuals, updated_at').eq('user_id', userId).is('deleted_at', null).order('period_key', { ascending: true }).range(from, to))
+        return rows
       } catch { return [] }
     })(),
     (async () => {
       try {
-        const { data } = await supabase.from('monthly_reviews').select('month, notes, reviewed_at').eq('user_id', userId).is('deleted_at', null)
-        return Array.isArray(data) ? data as Array<{ month: string; notes: string; reviewed_at: string | null }> : []
+        const { rows } = await fetchAllRows<{ month: string; notes: string; reviewed_at: string | null }>((from, to) =>
+          supabase.from('monthly_reviews').select('month, notes, reviewed_at').eq('user_id', userId).is('deleted_at', null).order('month', { ascending: true }).range(from, to))
+        return rows
       } catch { return [] }
     })(),
     (async () => {
