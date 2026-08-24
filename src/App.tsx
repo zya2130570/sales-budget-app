@@ -43,6 +43,7 @@ import {
   savePayStubs,
   saveImportBatches,
   saveToStorage,
+  loadFromStorage,
   applyCloudRestoreToLocalStorage,
   loadExtraIncomes,
   saveExtraIncomes,
@@ -358,6 +359,17 @@ const SAMPLE_BUDGET_CATS: Array<{ name: string; type: CategoryType; monthly: num
 
 const periods: Period[] = ['weekly', 'bi-weekly', 'monthly', 'yearly']
 
+type BudgetCategoryCollection = {
+  id: string
+  name: string
+  categoryIds: string[]
+  linkedGoalId?: string
+  createdAt: string
+  updatedAt: string
+}
+
+const BUDGET_CATEGORY_COLLECTIONS_KEY = 'flow-budget-category-collections'
+
 export default function App() {
   const appAuth = useAuth()
   const autoCloudRestoreAttemptedRef = useRef(false)
@@ -408,6 +420,29 @@ export default function App() {
   const [gpInput, setGpInput] = useState('0')
   const [categories, setCategories] = useState<Category[]>([])
   const [savedBudgets, setSavedBudgets] = useState<SavedBudget[]>([])
+
+  // Budget category multi-select + Collections. A Collection is a saved set of
+  // independent categories used for aggregate planning; it is intentionally
+  // separate from the existing category breakdown "+ Group" feature.
+  const [selectedBudgetCategoryIds, setSelectedBudgetCategoryIds] = useState<Set<string>>(() => new Set())
+  const [budgetCollectionName, setBudgetCollectionName] = useState('')
+  const [budgetCollectionGoalId, setBudgetCollectionGoalId] = useState('')
+  const [budgetCategoryCollections, setBudgetCategoryCollections] = useState<BudgetCategoryCollection[]>(() =>
+    loadFromStorage<BudgetCategoryCollection[]>(BUDGET_CATEGORY_COLLECTIONS_KEY, [])
+  )
+  useEffect(() => {
+    saveToStorage(BUDGET_CATEGORY_COLLECTIONS_KEY, budgetCategoryCollections)
+  }, [budgetCategoryCollections])
+  // Current selection is ephemeral. If a live budget/template swap removes a
+  // selected category, only clear it from the active selection; saved Collections
+  // retain their IDs so they are not destroyed by temporarily switching budgets.
+  useEffect(() => {
+    const currentIds = new Set(categories.map(c => c.id))
+    setSelectedBudgetCategoryIds(prev => {
+      const next = new Set([...prev].filter(id => currentIds.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [categories])
 
   // ══════════════════════════════════════════════════════════════════════════════
   // V11.3 — Scenario state/workflows extracted to useScenarios()
@@ -1353,6 +1388,64 @@ export default function App() {
     return { overBudget, noActivity, totalPlanned, totalActual, remaining: totalPlanned - totalActual }
   }, [categories, period, budgetSearch, effectiveCatActual])
 
+  // Budget table rows respect both the health filter and category search. This is
+  // also the exact set targeted by the header "select all visible" checkbox.
+  const visibleBudgetCategories = useMemo(() => {
+    const q = budgetSearch.trim().toLowerCase()
+    return [...categories]
+      .sort((a, b) => b.amount - a.amount)
+      .filter(c => {
+        if (q && !c.name.toLowerCase().includes(q)) return false
+        if (budgetFilter === 'over-budget') {
+          const e = effectiveCatActual(c.id)
+          return e !== null && e.total > convertFromMonthly(c.amount, period)
+        }
+        if (budgetFilter === 'no-activity') return effectiveCatActual(c.id) === null
+        return true
+      })
+  }, [categories, budgetSearch, budgetFilter, period, effectiveCatActual])
+
+  const selectedBudgetStats = useMemo(() => {
+    const selected = categories.filter(c => selectedBudgetCategoryIds.has(c.id))
+    const planned = selected.reduce((sum, c) => sum + convertFromMonthly(c.amount, period), 0)
+    let actual = 0
+    let actualCount = 0
+    const typeCounts: Record<CategoryType, number> = {
+      'fixed bill': 0,
+      'variable spending': 0,
+      savings: 0,
+      investing: 0,
+    }
+    for (const c of selected) {
+      typeCounts[c.type] += 1
+      const eff = effectiveCatActual(c.id)
+      if (eff !== null) { actual += eff.total; actualCount += 1 }
+    }
+    return {
+      selected,
+      count: selected.length,
+      planned,
+      pctIncome: selectedPeriodTotalNet > 0 ? (planned / selectedPeriodTotalNet) * 100 : 0,
+      remaining: selectedPeriodTotalNet - planned,
+      actual,
+      actualCount,
+      variance: actual - planned,
+      typeCounts,
+    }
+  }, [categories, selectedBudgetCategoryIds, period, selectedPeriodTotalNet, effectiveCatActual])
+
+  const getBudgetCollectionStats = (categoryIds: string[]) => {
+    const idSet = new Set(categoryIds)
+    const available = categories.filter(c => idSet.has(c.id))
+    const planned = available.reduce((sum, c) => sum + convertFromMonthly(c.amount, period), 0)
+    return {
+      availableCount: available.length,
+      planned,
+      pctIncome: selectedPeriodTotalNet > 0 ? (planned / selectedPeriodTotalNet) * 100 : 0,
+      remaining: selectedPeriodTotalNet - planned,
+    }
+  }
+
   // Variance total (actual - planned); positive = overspend
   const variancePeriodTotal = hasAnyActual ? actualPeriodTotal - plannedPeriodTotal : 0
 
@@ -1626,6 +1719,58 @@ export default function App() {
       setActualsHistory((aPrev) => [...aPrev.slice(-19), { ...actuals }])
       return [...prev.slice(-19), snap]
     })
+  }
+
+  const toggleBudgetCategorySelection = (categoryId: string) => {
+    setSelectedBudgetCategoryIds(prev => {
+      const next = new Set(prev)
+      if (next.has(categoryId)) next.delete(categoryId)
+      else next.add(categoryId)
+      return next
+    })
+  }
+
+  const setAllVisibleBudgetCategorySelection = (checked: boolean) => {
+    setSelectedBudgetCategoryIds(prev => {
+      const next = new Set(prev)
+      for (const c of visibleBudgetCategories) {
+        if (checked) next.add(c.id)
+        else next.delete(c.id)
+      }
+      return next
+    })
+  }
+
+  const saveBudgetCategoryCollection = () => {
+    const name = budgetCollectionName.trim()
+    if (!name) { showToast('Name the Collection before saving.'); return }
+    if (selectedBudgetStats.count === 0) { showToast('Select at least one budget category first.'); return }
+    const existing = budgetCategoryCollections.find(c => c.name.trim().toLowerCase() === name.toLowerCase())
+    if (existing && !window.confirm(`Overwrite Collection "${existing.name}" with the currently selected categories?`)) return
+    const now = new Date().toISOString()
+    const nextCollection: BudgetCategoryCollection = {
+      id: existing?.id ?? crypto.randomUUID(),
+      name,
+      categoryIds: selectedBudgetStats.selected.map(c => c.id),
+      linkedGoalId: budgetCollectionGoalId || existing?.linkedGoalId || undefined,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    }
+    setBudgetCategoryCollections(prev => [nextCollection, ...prev.filter(c => c.id !== nextCollection.id)])
+    setBudgetCollectionName('')
+    setBudgetCollectionGoalId('')
+    showToast(`${existing ? 'Updated' : 'Saved'} Collection "${name}"`)
+  }
+
+  const loadBudgetCategoryCollectionSelection = (collection: BudgetCategoryCollection) => {
+    const currentIds = new Set(categories.map(c => c.id))
+    const availableIds = collection.categoryIds.filter(id => currentIds.has(id))
+    setSelectedBudgetCategoryIds(new Set(availableIds))
+    if (availableIds.length < collection.categoryIds.length) {
+      showToast(`Selected ${availableIds.length} of ${collection.categoryIds.length} categories — some are not in the current budget.`)
+    } else {
+      showToast(`Selected Collection "${collection.name}"`)
+    }
   }
 
   // Push only actuals snapshot (for actual edits that don't change categories/form)
@@ -4258,11 +4403,179 @@ txnMerchantRef.current?.focus()
                   </div>
                 ))}
               </div>
+
+              {/* Multi-select aggregate planning — separate from category breakdown Groups */}
+              {selectedBudgetStats.count > 0 && (
+                <div className="mt-3 rounded-xl border border-cyan-700/40 bg-cyan-950/10 p-3 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-semibold text-cyan-300">Selection Summary</span>
+                        <span className="text-[10px] rounded-full border border-cyan-700/40 bg-cyan-900/30 px-2 py-0.5 text-cyan-300">{selectedBudgetStats.count} selected</span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 mt-0.5">Live aggregate stats for the categories you checked.</p>
+                    </div>
+                    <button
+                      onClick={() => setSelectedBudgetCategoryIds(new Set())}
+                      className="text-[10px] text-slate-500 hover:text-slate-300"
+                    >Clear selection</button>
+                  </div>
+
+                  <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
+                    <div className="rounded-lg border border-slate-700/50 bg-slate-800/60 px-2.5 py-2">
+                      <div className="text-[10px] text-slate-500">Selected planned</div>
+                      <div className="text-sm font-bold text-slate-100">{currency(selectedBudgetStats.planned)}</div>
+                    </div>
+                    <div className="rounded-lg border border-slate-700/50 bg-slate-800/60 px-2.5 py-2">
+                      <div className="text-[10px] text-slate-500">% of available income</div>
+                      <div className="text-sm font-bold text-blue-300">{selectedBudgetStats.pctIncome.toFixed(1)}%</div>
+                    </div>
+                    <div className={`rounded-lg border px-2.5 py-2 ${selectedBudgetStats.remaining >= 0 ? 'border-emerald-800/40 bg-emerald-950/10' : 'border-red-800/40 bg-red-950/10'}`}>
+                      <div className="text-[10px] text-slate-500">Income left after selected</div>
+                      <div className={`text-sm font-bold ${selectedBudgetStats.remaining >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{currency(selectedBudgetStats.remaining)}</div>
+                    </div>
+                    <div className="rounded-lg border border-slate-700/50 bg-slate-800/60 px-2.5 py-2">
+                      <div className="text-[10px] text-slate-500">Tracked actual</div>
+                      <div className="text-sm font-bold text-slate-200">{selectedBudgetStats.actualCount > 0 ? currency(selectedBudgetStats.actual) : '—'}</div>
+                      {selectedBudgetStats.actualCount > 0 && selectedBudgetStats.actualCount < selectedBudgetStats.count && (
+                        <div className="text-[9px] text-slate-600">{selectedBudgetStats.actualCount}/{selectedBudgetStats.count} categories tracked</div>
+                      )}
+                    </div>
+                    <div className="rounded-lg border border-slate-700/50 bg-slate-800/60 px-2.5 py-2">
+                      <div className="text-[10px] text-slate-500">Plan vs actual</div>
+                      {selectedBudgetStats.actualCount === selectedBudgetStats.count ? (
+                        <div className={`text-sm font-bold ${selectedBudgetStats.variance > 0 ? 'text-red-400' : selectedBudgetStats.variance < 0 ? 'text-emerald-400' : 'text-slate-200'}`}>
+                          {Math.abs(selectedBudgetStats.variance) < 0.005 ? 'On plan' : selectedBudgetStats.variance > 0 ? `+${currency(selectedBudgetStats.variance)} over` : `${currency(Math.abs(selectedBudgetStats.variance))} under`}
+                        </div>
+                      ) : (
+                        <div className="text-xs font-semibold text-slate-500">Partial actuals</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      ['Fixed', selectedBudgetStats.typeCounts['fixed bill']],
+                      ['Variable', selectedBudgetStats.typeCounts['variable spending']],
+                      ['Savings', selectedBudgetStats.typeCounts.savings],
+                      ['Investing', selectedBudgetStats.typeCounts.investing],
+                    ].filter(([, count]) => Number(count) > 0).map(([label, count]) => (
+                      <span key={String(label)} className="text-[10px] rounded-full border border-slate-700 bg-slate-800 px-2 py-0.5 text-slate-400">{label}: {count}</span>
+                    ))}
+                  </div>
+
+                  <div className="pt-2 border-t border-cyan-800/20">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-semibold text-slate-300">Save as Collection</span>
+                      <span className="text-[9px] text-slate-600">Different from + Group: categories stay independent.</span>
+                    </div>
+                    <div className="grid sm:grid-cols-[1fr_1fr_auto] gap-2">
+                      <input
+                        value={budgetCollectionName}
+                        onChange={e => setBudgetCollectionName(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') saveBudgetCategoryCollection() }}
+                        placeholder="Collection name (e.g. Must-Pays)"
+                        className="w-full rounded-lg border border-slate-600 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-200 focus:border-cyan-500 focus:outline-none"
+                      />
+                      <select
+                        value={budgetCollectionGoalId}
+                        onChange={e => setBudgetCollectionGoalId(e.target.value)}
+                        className="w-full rounded-lg border border-slate-600 bg-slate-800 px-2.5 py-1.5 text-xs text-slate-300 focus:border-cyan-500 focus:outline-none"
+                        title="Optional planning link to a savings goal"
+                      >
+                        <option value="">No savings goal link</option>
+                        {targets.filter(t => !t.completed).map(t => <option key={t.id} value={t.id}>Goal: {t.name}</option>)}
+                      </select>
+                      <button
+                        onClick={saveBudgetCategoryCollection}
+                        className="rounded-lg bg-cyan-700 hover:bg-cyan-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+                      >Save Collection</button>
+                    </div>
+                    <p className="text-[9px] text-slate-600 mt-1.5">A Collection link is for planning/reference. Existing per-category savings/investing auto-contribution behavior is unchanged.</p>
+                  </div>
+                </div>
+              )}
+
+              {budgetCategoryCollections.length > 0 && (
+                <div className="mt-3 rounded-xl border border-slate-700/60 bg-slate-800/30 p-3">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div>
+                      <div className="text-xs font-semibold text-slate-300">Saved Collections</div>
+                      <div className="text-[9px] text-slate-600">Reusable selections with live totals.</div>
+                    </div>
+                    <span className="text-[10px] text-slate-500">{budgetCategoryCollections.length}</span>
+                  </div>
+                  <div className="space-y-2">
+                    {budgetCategoryCollections.map(collection => {
+                      const stats = getBudgetCollectionStats(collection.categoryIds)
+                      const linkedGoal = targets.find(t => t.id === collection.linkedGoalId)
+                      const goalPct = linkedGoal && linkedGoal.goalAmount > 0 ? Math.min(100, (linkedGoal.currentSaved / linkedGoal.goalAmount) * 100) : 0
+                      return (
+                        <div key={collection.id} className="rounded-lg border border-slate-700/50 bg-slate-900/30 p-2.5">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <div className="font-medium text-sm text-slate-200 truncate">{collection.name}</div>
+                              <div className="text-[10px] text-slate-500 mt-0.5">
+                                {stats.availableCount}/{collection.categoryIds.length} categories available · {currency(stats.planned)} planned · {stats.pctIncome.toFixed(1)}% of income
+                              </div>
+                              <div className={`text-[10px] mt-0.5 ${stats.remaining >= 0 ? 'text-emerald-500' : 'text-red-400'}`}>
+                                {currency(stats.remaining)} income left after Collection
+                              </div>
+                            </div>
+                            <div className="flex gap-2 shrink-0">
+                              <button onClick={() => loadBudgetCategoryCollectionSelection(collection)} className="text-[10px] text-cyan-400 hover:text-cyan-300">Select</button>
+                              <button
+                                onClick={() => {
+                                  const nextName = window.prompt('Rename Collection', collection.name)?.trim()
+                                  if (!nextName || nextName === collection.name) return
+                                  setBudgetCategoryCollections(prev => prev.map(c => c.id === collection.id ? { ...c, name: nextName, updatedAt: new Date().toISOString() } : c))
+                                }}
+                                className="text-[10px] text-amber-300 hover:text-amber-200"
+                              >Rename</button>
+                              <button
+                                onClick={() => { if (window.confirm(`Delete Collection "${collection.name}"? Categories themselves will not be deleted.`)) setBudgetCategoryCollections(prev => prev.filter(c => c.id !== collection.id)) }}
+                                className="text-[10px] text-red-400 hover:text-red-300"
+                              >Delete</button>
+                            </div>
+                          </div>
+
+                          <div className="mt-2 grid sm:grid-cols-[1fr_auto] gap-2 items-center">
+                            <select
+                              value={collection.linkedGoalId ?? ''}
+                              onChange={e => setBudgetCategoryCollections(prev => prev.map(c => c.id === collection.id ? { ...c, linkedGoalId: e.target.value || undefined, updatedAt: new Date().toISOString() } : c))}
+                              className={`w-full rounded-lg border bg-slate-800 px-2 py-1 text-[10px] focus:outline-none ${collection.linkedGoalId ? 'border-emerald-700/40 text-emerald-400' : 'border-slate-700 text-slate-500'}`}
+                            >
+                              <option value="">⚡ Link to savings goal (optional)</option>
+                              {targets.filter(t => !t.completed || t.id === collection.linkedGoalId).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                            </select>
+                            {linkedGoal && (
+                              <span className="text-[10px] text-emerald-400 whitespace-nowrap">{goalPct.toFixed(0)}% funded</span>
+                            )}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
               <div className="overflow-x-auto h-scroll-visible">
               <table className="w-full text-sm mt-3 min-w-[480px]">
                 <thead>
                   <tr className="text-left text-slate-400 border-b border-slate-700">
-                    <th className="pb-1.5 pr-2">Name</th>
+                    <th className="pb-1.5 pr-2">
+                      <span className="inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 rounded border-slate-600 bg-slate-800 accent-blue-500"
+                          checked={visibleBudgetCategories.length > 0 && visibleBudgetCategories.every(c => selectedBudgetCategoryIds.has(c.id))}
+                          onChange={e => setAllVisibleBudgetCategorySelection(e.target.checked)}
+                          aria-label="Select all visible budget categories"
+                          title="Select all visible categories"
+                        />
+                        <span>Name</span>
+                      </span>
+                    </th>
                     <th className="pb-1.5 pr-2">Type</th>
                     {period === 'weekly'    && <th className="pb-1.5 pr-2">Weekly Planned</th>}
                     {period === 'bi-weekly' && <th className="pb-1.5 pr-2">Bi-weekly Planned</th>}
@@ -4298,21 +4611,16 @@ txnMerchantRef.current?.focus()
                   </tr>
                 </thead>
                 <tbody>
-                  {top.length === 0 && (
+                  {visibleBudgetCategories.length === 0 && (
                     <tr>
                       <td colSpan={8} className="py-6 text-center text-xs text-slate-500">
-                        No budget categories yet — add one with the form above, or Generate Sample to see how it works.
+                        {categories.length === 0
+                          ? 'No budget categories yet — add one with the form above, or Generate Sample to see how it works.'
+                          : 'No budget categories match the current search/filter.'}
                       </td>
                     </tr>
                   )}
-                  {top.filter(c => {
-                    if (budgetFilter === 'over-budget') {
-                      const e = effectiveCatActual(c.id)
-                      return e !== null && e.total > convertFromMonthly(c.amount, period)
-                    }
-                    if (budgetFilter === 'no-activity') return effectiveCatActual(c.id) === null
-                    return true
-                  }).map(c => {
+                  {visibleBudgetCategories.map(c => {
                     const planned     = convertFromMonthly(c.amount, period)
                     const eff         = effectiveCatActual(c.id)
                     const rawActual   = actuals[c.id]
@@ -4350,6 +4658,14 @@ txnMerchantRef.current?.focus()
                         >
                           {/* Name */}
                           <td className="py-1 pr-1.5">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                className="h-3.5 w-3.5 shrink-0 rounded border-slate-600 bg-slate-800 accent-blue-500"
+                                checked={selectedBudgetCategoryIds.has(c.id)}
+                                onChange={() => toggleBudgetCategorySelection(c.id)}
+                                aria-label={`Select ${c.name}`}
+                              />
                             <input
                               ref={inlineCatNameRef}
                               className="w-full px-1.5 py-1 text-xs rounded bg-slate-700 border border-blue-500 focus:outline-none"
@@ -4361,6 +4677,7 @@ txnMerchantRef.current?.focus()
                                 if (e.key === 'Escape') { e.preventDefault(); cancelInlineCatEdit() }
                               }}
                             />
+                            </div>
                           </td>
                           {/* Type */}
                           <td className="py-1 pr-1.5">
@@ -4454,11 +4771,22 @@ txnMerchantRef.current?.focus()
                               : ''
                         }`}
                       >
-                        <td className="py-1.5 pr-2">{isBillsToMom ? (
-                          <button type="button" onClick={() => setBillsToMomBudgetOpen(v => !v)} className="inline-flex items-center gap-1 text-left hover:text-blue-300" title="Show Bills to Mom breakdown">
-                            <span>{billsToMomBudgetOpen ? '▾' : '▸'}</span><span>{c.name}</span>
-                          </button>
-                        ) : c.name}</td>
+                        <td className="py-1.5 pr-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <input
+                              type="checkbox"
+                              className="h-3.5 w-3.5 shrink-0 rounded border-slate-600 bg-slate-800 accent-blue-500"
+                              checked={selectedBudgetCategoryIds.has(c.id)}
+                              onChange={() => toggleBudgetCategorySelection(c.id)}
+                              aria-label={`Select ${c.name}`}
+                            />
+                            <div className="min-w-0">{isBillsToMom ? (
+                              <button type="button" onClick={() => setBillsToMomBudgetOpen(v => !v)} className="inline-flex items-center gap-1 text-left hover:text-blue-300" title="Show Bills to Mom breakdown">
+                                <span>{billsToMomBudgetOpen ? '▾' : '▸'}</span><span>{c.name}</span>
+                              </button>
+                            ) : c.name}</div>
+                          </div>
+                        </td>
                         <td className="py-1.5 pr-2 text-slate-400 text-xs">
                           {c.type === 'fixed bill' ? 'Fixed' : c.type === 'variable spending' ? 'Variable' : c.type === 'savings' ? 'Savings' : 'Investing'}
                         </td>
