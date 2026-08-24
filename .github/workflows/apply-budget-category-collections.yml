@@ -1,0 +1,41 @@
+name: Apply Budget Category Collections Patch
+
+on:
+  push:
+    branches:
+      - feature/budget-category-collections
+
+permissions:
+  contents: write
+
+jobs:
+  apply-patch:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/budget-category-collections
+          fetch-depth: 0
+
+      - name: Apply deterministic source patch
+        run: python3 scripts/apply_budget_category_collections.py
+
+      - name: Verify patch changed App.tsx
+        run: |
+          git diff --check
+          git diff --exit-code -- src/App.tsx && { echo 'Expected App.tsx to change'; exit 1; } || true
+
+      - name: Remove one-time patch machinery
+        run: |
+          rm scripts/apply_budget_category_collections.py
+          rm .github/workflows/apply-budget-category-collections.yml
+
+      - name: Commit feature
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: add budget category Collections [skip ci]"
+          git push origin HEAD:feature/budget-category-collections
