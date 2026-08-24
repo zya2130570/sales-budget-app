@@ -1,0 +1,64 @@
+name: Verify Budget Category Collections
+
+on:
+  push:
+    branches:
+      - feature/budget-category-collections
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/budget-category-collections
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Install and build
+        id: build
+        shell: bash
+        run: |
+          set +e
+          npm ci > /tmp/npm-ci.log 2>&1
+          INSTALL_STATUS=$?
+          if [ $INSTALL_STATUS -eq 0 ]; then
+            npm run build > /tmp/npm-build.log 2>&1
+            BUILD_STATUS=$?
+          else
+            BUILD_STATUS=$INSTALL_STATUS
+            echo "Build not started because npm ci failed." > /tmp/npm-build.log
+          fi
+          mkdir -p .verification
+          {
+            echo "status=$([ $BUILD_STATUS -eq 0 ] && echo PASS || echo FAIL)"
+            echo "install_exit=$INSTALL_STATUS"
+            echo "build_exit=$BUILD_STATUS"
+            echo "verified_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo
+            echo "--- npm ci tail ---"
+            tail -n 40 /tmp/npm-ci.log
+            echo
+            echo "--- npm run build tail ---"
+            tail -n 80 /tmp/npm-build.log
+          } > .verification/budget-category-collections.txt
+          echo "status=$BUILD_STATUS" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Remove one-time workflow and commit verification record
+        shell: bash
+        run: |
+          rm .github/workflows/verify-budget-category-collections.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: record budget Collections verification [skip ci]"
+          git push origin HEAD:feature/budget-category-collections
+      - name: Fail if build failed
+        if: ${{ steps.build.outputs.status != '0' }}
+        run: exit 1
